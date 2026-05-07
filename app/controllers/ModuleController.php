@@ -2,6 +2,12 @@
 
 class ModuleController
 {
+    private ModuleService $moduleService;
+
+    public function __construct()
+    {
+        $this->moduleService = new ModuleService();
+    }
 
     public function index()
     {
@@ -14,24 +20,13 @@ class ModuleController
         $parts = explode('/',$url);
         $ruta = $parts[0] ?? '';
 
-        $database = new Database();
-        $pdo = $database->connect();
-
         /*
         =========================
         BUSCAR ITEM
         =========================
         */
 
-        $stmt = $pdo->prepare("
-            SELECT *
-            FROM item
-            WHERE ruta = ?
-            LIMIT 1
-        ");
-
-        $stmt->execute([$ruta]);
-        $currentItem = $stmt->fetch(PDO::FETCH_ASSOC);
+        $currentItem = $this->moduleService->findCurrentItem($ruta);
 
         /*
         =========================
@@ -42,26 +37,13 @@ class ModuleController
         if(isset($_GET['delete']) && $currentItem){
 
             $id = $_GET['delete'];
-
-            $crudService = new CrudService();
-            $acciones = $crudService->getAcciones($currentItem['id']);
-
-            $permitido = false;
-
-            foreach($acciones as $acc){
-                if($acc['codigo'] == 'eliminar'){
-                    if(PermisoService::canByItemAccion($acc['item_accion_id'])){
-                        $permitido = true;
-                    }
-                }
-            }
+            $permitido = $this->moduleService->canExecuteAction($currentItem['id'], 'eliminar');
 
             if(!$permitido){
                 die("No tienes permiso para eliminar");
             }
 
-            $stmt = $pdo->prepare("DELETE FROM {$currentItem['ruta']} WHERE id=?");
-            $stmt->execute([$id]);
+            $this->moduleService->deleteRecord($currentItem['ruta'], $id);
 
             header("Location: ?url=".$ruta);
             exit;
@@ -73,53 +55,7 @@ class ModuleController
         =========================
         */
 
-        $breadcrumb = '<a href="?url=dashboard">INICIO</a>';
-
-        if($currentItem){
-
-            // módulo
-            $stmt = $pdo->prepare("
-                SELECT nombre
-                FROM modulo
-                WHERE id = ?
-            ");
-
-            $stmt->execute([$currentItem['modulo_id']]);
-            $modulo = $stmt->fetch(PDO::FETCH_ASSOC);
-
-            if($modulo){
-                $breadcrumb .= ' <span class="separator"> / </span> ';
-                $breadcrumb .= '<a href="?url=dashboard/modulo/'.$currentItem['modulo_id'].'">'.strtoupper($modulo['nombre']).'</a>';
-            }
-
-            // jerarquía items (FIX IMPORTANTE)
-            $currentId = $currentItem['id'];
-            $path = [];
-
-            while ($currentId) {
-
-                $stmt = $pdo->prepare("
-                    SELECT id,nombre,item_padre_id
-                    FROM item
-                    WHERE id = ?
-                ");
-
-                $stmt->execute([$currentId]);
-                $item = $stmt->fetch(PDO::FETCH_ASSOC);
-
-                if(!$item) break;
-
-                $path[] = $item;
-                $currentId = $item['item_padre_id'];
-            }
-
-            $path = array_reverse($path);
-
-            foreach ($path as $p) {
-                $breadcrumb .= ' <span class="separator"> / </span> ';
-                $breadcrumb .= '<span>'.strtoupper($p['nombre']).'</span>';
-            }
-        }
+        $breadcrumb = $this->moduleService->buildBreadcrumb($currentItem);
 
         /*
         =========================
@@ -143,25 +79,13 @@ class ModuleController
         if($_SERVER['REQUEST_METHOD'] === 'POST'){
 
             try{
-
-                $crudService = new CrudService();
-                $acciones = $crudService->getAcciones($currentItem['id']);
-
-                $permitido = false;
-
-                foreach($acciones as $acc){
-                    if($acc['codigo'] == 'guardar'){
-                        if(PermisoService::canByItemAccion($acc['item_accion_id'])){
-                            $permitido = true;
-                        }
-                    }
-                }
+                $permitido = $this->moduleService->canExecuteAction($currentItem['id'], 'guardar');
 
                 if(!$permitido){
                     throw new Exception("No tienes permiso para guardar");
                 }
 
-                $crudService->save($currentItem['ruta'],$_POST);
+                $this->moduleService->save($currentItem['ruta'],$_POST);
 
                 header("Location: ?url=".$ruta."&success=1");
                 exit;
@@ -185,34 +109,11 @@ class ModuleController
         */
 
         if($currentItem){
-
-            $crudService = new CrudService();
-
-            $data = $crudService->getTableData($currentItem['ruta']);
-            $columns = $crudService->getColumns($currentItem['ruta']);
-            $acciones = $crudService->getAcciones($currentItem['id']);
-
-            $relations = $crudService->getRelations($currentItem['ruta']);
-
-            $relationData = [];
-
-            foreach ($relations as $campo => $tablaRelacion) {
-
-                // buscar comentario del campo
-                $comment = null;
-
-                foreach($columns as $col){
-                    if($col['Field'] == $campo){
-                        $comment = $col['COLUMN_COMMENT'] ?? null;
-                    }
-                }
-
-                $relationData[$campo] = $crudService->getRelationData(
-                    $tablaRelacion,
-                    $campo,
-                    $comment
-                );
-            }
+            $crud = $this->moduleService->getCrudData($currentItem);
+            $data = $crud['data'];
+            $columns = $crud['columns'];
+            $acciones = $crud['acciones'];
+            $relationData = $crud['relationData'];
 
             $view = BASE_PATH . "/app/views/crud/table.php";
             require BASE_PATH . '/app/views/layouts/main.php';
