@@ -1,0 +1,313 @@
+<?php
+
+class PermisoService
+{
+    /*
+    ========================================
+    VALIDAR PERMISO COMPLETO PRO
+    ========================================
+    Prioridad:
+
+    1. Permiso usuario DENEGAR
+    2. Permiso usuario PERMITIR
+    3. Permiso rol DENEGAR
+    4. Permiso rol PERMITIR
+    5. Sin permiso = false
+    ========================================
+    */
+
+    public static function can($ruta, $accion)
+    {
+        if (!isset($_SESSION['user_id'])) {
+            return false;
+        }
+
+        $database = new Database();
+        $pdo = $database->connect();
+
+        $userId    = $_SESSION['user_id'];
+        $empresaId = $_SESSION['empresa_id'] ?? null;
+        $sedeId    = $_SESSION['sede_id'] ?? null;
+
+        /*
+        ========================================
+        OBTENER ROL DEL USUARIO
+        ========================================
+        */
+
+        $stmt = $pdo->prepare("
+            SELECT rol_id
+            FROM usuario
+            WHERE id = ?
+            LIMIT 1
+        ");
+        $stmt->execute([$userId]);
+
+        $rolId = $stmt->fetchColumn();
+
+        /*
+        ========================================
+        BUSCAR ITEM_ACCION
+        1) ruta completa
+        2) fallback ruta raíz
+        ========================================
+        */
+
+        $itemAccionId = null;
+
+        $rutasBuscar = [$ruta];
+
+        if (strpos($ruta, '/') !== false) {
+            $raiz = explode('/', $ruta)[0];
+            if ($raiz !== $ruta) {
+                $rutasBuscar[] = $raiz;
+            }
+        }
+
+        foreach ($rutasBuscar as $rutaBuscar) {
+
+            $stmt = $pdo->prepare("
+                SELECT ia.id
+                FROM item_accion ia
+                INNER JOIN item i ON i.id = ia.item_id
+                INNER JOIN accion a ON a.id = ia.accion_id
+                WHERE i.ruta = ?
+                AND a.codigo = ?
+                LIMIT 1
+            ");
+
+            $stmt->execute([$rutaBuscar, $accion]);
+
+            $itemAccionId = $stmt->fetchColumn();
+
+            if ($itemAccionId) {
+                break;
+            }
+        }
+
+        if (!$itemAccionId) {
+            return false;
+        }
+
+        /*
+        ========================================
+        1) USUARIO DENEGAR
+        ========================================
+        */
+
+        $stmt = $pdo->prepare("
+            SELECT 1
+            FROM permiso
+            WHERE usuario_id = ?
+            AND item_accion_id = ?
+            AND estado_id = 6
+            LIMIT 1
+        ");
+
+        $stmt->execute([$userId, $itemAccionId]);
+
+        if ($stmt->fetch()) {
+            return false;
+        }
+
+        /*
+        ========================================
+        2) USUARIO PERMITIR
+        ========================================
+        */
+
+        $stmt = $pdo->prepare("
+            SELECT 1
+            FROM permiso
+            WHERE usuario_id = ?
+            AND item_accion_id = ?
+            AND estado_id = 5
+            LIMIT 1
+        ");
+
+        $stmt->execute([$userId, $itemAccionId]);
+
+        if ($stmt->fetch()) {
+            return true;
+        }
+
+        /*
+        ========================================
+        SI NO TIENE ROL
+        ========================================
+        */
+
+        if (!$rolId) {
+            return false;
+        }
+
+        /*
+        ========================================
+        3) ROL DENEGAR
+        ========================================
+        */
+
+        $stmt = $pdo->prepare("
+            SELECT 1
+            FROM rol_permiso
+            WHERE rol_id = ?
+            AND item_accion_id = ?
+            AND estado_id = 6
+            LIMIT 1
+        ");
+
+        $stmt->execute([$rolId, $itemAccionId]);
+
+        if ($stmt->fetch()) {
+            return false;
+        }
+
+        /*
+        ========================================
+        4) ROL PERMITIR
+        ========================================
+        */
+
+        $stmt = $pdo->prepare("
+            SELECT 1
+            FROM rol_permiso
+            WHERE rol_id = ?
+            AND item_accion_id = ?
+            AND estado_id = 5
+            LIMIT 1
+        ");
+
+        $stmt->execute([$rolId, $itemAccionId]);
+
+        if ($stmt->fetch()) {
+            return true;
+        }
+
+        return false;
+    }
+
+
+    /*
+    ========================================
+    VALIDAR POR item_accion_id
+    (botones CRUD)
+    ========================================
+    */
+
+    public static function canByItemAccion($itemAccionId)
+    {
+        if (!isset($_SESSION['user_id'])) {
+            return false;
+        }
+
+        $database = new Database();
+        $pdo = $database->connect();
+
+        $userId = $_SESSION['user_id'];
+
+        /*
+        ========================================
+        OBTENER ROL
+        ========================================
+        */
+
+        $stmt = $pdo->prepare("
+            SELECT rol_id
+            FROM usuario
+            WHERE id = ?
+            LIMIT 1
+        ");
+        $stmt->execute([$userId]);
+
+        $rolId = $stmt->fetchColumn();
+
+        /*
+        ========================================
+        1) USUARIO DENEGAR
+        ========================================
+        */
+
+        $stmt = $pdo->prepare("
+            SELECT 1
+            FROM permiso
+            WHERE usuario_id = ?
+            AND item_accion_id = ?
+            AND estado_id = 6
+            LIMIT 1
+        ");
+
+        $stmt->execute([$userId, $itemAccionId]);
+
+        if ($stmt->fetch()) {
+            return false;
+        }
+
+        /*
+        ========================================
+        2) USUARIO PERMITIR
+        ========================================
+        */
+
+        $stmt = $pdo->prepare("
+            SELECT 1
+            FROM permiso
+            WHERE usuario_id = ?
+            AND item_accion_id = ?
+            AND estado_id = 5
+            LIMIT 1
+        ");
+
+        $stmt->execute([$userId, $itemAccionId]);
+
+        if ($stmt->fetch()) {
+            return true;
+        }
+
+        /*
+        ========================================
+        3) ROL DENEGAR
+        ========================================
+        */
+
+        if ($rolId) {
+
+            $stmt = $pdo->prepare("
+                SELECT 1
+                FROM rol_permiso
+                WHERE rol_id = ?
+                AND item_accion_id = ?
+                AND estado_id = 6
+                LIMIT 1
+            ");
+
+            $stmt->execute([$rolId, $itemAccionId]);
+
+            if ($stmt->fetch()) {
+                return false;
+            }
+
+            /*
+            ========================================
+            4) ROL PERMITIR
+            ========================================
+            */
+
+            $stmt = $pdo->prepare("
+                SELECT 1
+                FROM rol_permiso
+                WHERE rol_id = ?
+                AND item_accion_id = ?
+                AND estado_id = 5
+                LIMIT 1
+            ");
+
+            $stmt->execute([$rolId, $itemAccionId]);
+
+            if ($stmt->fetch()) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}

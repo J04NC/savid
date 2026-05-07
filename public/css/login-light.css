@@ -1,0 +1,45 @@
+body {
+    background: #f5f7fa;
+}
+
+.theme-toggle {
+    border: 1px solid #ccc;
+    color: #333;
+}
+
+.main-container {
+    background: #ffffff;
+    border: 1px solid #ddd;
+}
+
+.login-box {
+    border: 1px solid #ddd;
+}
+
+.form-group label {
+    color: #0077b6;
+}
+
+.form-group input {
+    background: #f0f0f0;
+    color: #000;
+    border: 1px solid #ccc;
+}
+
+.btn {
+    color: #0077b6;
+}
+
+.btn.primary {
+    border-right: 1px solid #ddd;
+}
+
+.btn:hover {
+    background: rgba(0, 119, 182, 0.1);
+}
+
+.error-message {
+    background: #ffe5e5;
+    color: #cc0000;
+}
+

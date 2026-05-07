@@ -1,0 +1,35 @@
+2026-04-24 12:28:39 - REQUEST:
+Array
+(
+    [username] => joan
+    [password] => he
+)
+
+
+Username: joan
+User found: SI
+2026-04-24 12:28:52 - REQUEST:
+Array
+(
+    [username] => joan
+    [password] => Smp*0831
+)
+
+
+Username: joan
+User found: SI
+Empresas: [{"id":13,"razon_social":"prueba5"}]
+Final empresa_id: 13
+
+---
+Suscripción empresa 13: ❌ NO
+2026-04-24 12:30:32 - REQUEST:
+Array
+(
+    [username] => f
+    [password] => f
+)
+
+
+Username: f
+User found: NO

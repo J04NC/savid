@@ -1,0 +1,188 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: 'Segoe UI', sans-serif;
+}
+
+body {
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+    transition: background 0.3s ease;
+}
+
+/* LOGO DE FONDO REAL */
+.background-logo {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 50%;
+    opacity: 0.3;
+    z-index: 0;
+    pointer-events: none;
+}
+
+/* CONTENEDOR */
+.main-container {
+    position: relative;
+    z-index: 1;
+    width: 400px;
+    max-width: 90%;
+}
+
+/* CAJA LOGIN */
+.login-box {
+    border-radius: 25px;
+    padding: 40px 30px;
+    display: flex;
+    flex-direction: column;
+    background: #111;
+    border: 1px solid #333;
+    transition: 0.3s;
+}
+
+/* AVATAR */
+.avatar {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 30px;
+}
+
+.avatar img {
+    width: 90px;
+    height: 90px;
+    border-radius: 50%;
+    border: 2px solid #1dd1a1;
+}
+
+/* FORM */
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    font-size: 14px;
+}
+
+.form-group input {
+    width: 100%;
+    padding: 10px;
+    margin-top: 6px;
+    border-radius: 8px;
+    border: 1px solid #444;
+    transition: 0.3s;
+}
+
+/* BOTONES */
+.button-row {
+    display: flex;
+    margin-top: 25px;
+    border-top: 1px solid #444;
+}
+
+.btn {
+    flex: 1;
+    padding: 15px;
+    text-align: center;
+    text-decoration: none;
+    font-size: 15px;
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    transition: 0.3s;
+}
+
+.btn.primary {
+    border-right: 1px solid #444;
+}
+
+.btn:hover {
+    background: rgba(29, 209, 161, 0.1);
+}
+
+/* ERROR */
+.error-message {
+    background: #2a0000;
+    color: #ff6b6b;
+    padding: 10px;
+    border-radius: 6px;
+    margin-bottom: 10px;
+    font-size: 14px;
+}
+
+/* MODO OSCURO */
+.dark-mode {
+    background: #0b0b0b;
+    color: #fff;
+}
+
+.dark-mode .login-box {
+    background: rgba(0, 0, 0, 0);   /* transparencia */
+   /* backdrop-filter: blur(10px);       efecto vidrio */
+    border: 1px solid rgba(255,255,255,0.1);
+}
+
+.dark-mode input {
+    background: #181818;
+    color: #fff;
+    border: 1px solid #333;
+}
+
+.dark-mode label,
+.dark-mode .btn {
+    color: #1dd1a1;
+}
+
+/* MODO CLARO */
+.light-mode {
+    background: #f4f4f4;
+    color: #000;
+}
+
+.light-mode .login-box {
+    background: rgba(0, 0, 0, 0);   /* transparencia */
+    /*backdrop-filter: blur(10px);       efecto vidrio */
+    border: 1px solid rgba(255,255,255,0.1);
+}
+
+.light-mode input {
+    background: #f9f9f9;
+    color: #000;
+    border: 1px solid #ccc;
+}
+
+.light-mode label,
+.light-mode .btn {
+    color: #008060;
+}
+
+.light-mode .button-row {
+    border-top: 1px solid #ccc;
+}
+
+.light-mode .btn.primary {
+    border-right: 1px solid #ccc;
+}
+
+/* BOTON TEMA */
+.theme-toggle {
+    margin-top: 20px;
+    text-align: center;
+}
+
+.theme-icon {
+    background: none;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+    transition: transform 0.3s ease;
+}
+
+.theme-icon:hover {
+    transform: rotate(20deg) scale(1.2);
+}
+
