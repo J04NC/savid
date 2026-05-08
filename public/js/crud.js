@@ -189,6 +189,28 @@ function initCrudAcciones() {
 
                 break;
 
+                case "usuario_permisos":
+                case "user_permisos":
+                    if (typeof openModalGod === "function") {
+                        openModalGod(
+                            "usuario/permisos/" + selectedId,
+                            "xl",
+                            "Cargando permisos..."
+                        );
+                    }
+                break;
+
+                case "usuario_roles":
+                case "user_roles":
+                    if (typeof openModalGod === "function") {
+                        openModalGod(
+                            "usuario/roles/" + selectedId,
+                            "lg",
+                            "Cargando roles..."
+                        );
+                    }
+                break;
+
                 default:
                     alert("Acción: " + accion);
 

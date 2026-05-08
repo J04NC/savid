@@ -1,12 +1,14 @@
 <?php
-/**
- * Usuario - CRUD Automático + Multi-Rol
- */
-require_once BASE_PATH . '/core/Database.php';
-require_once BASE_PATH . '/app/services/CrudService.php';
 
 class UsuarioController
 {
+    private UserAccessService $userAccessService;
+
+    public function __construct()
+    {
+        $this->userAccessService = new UserAccessService();
+    }
+
     public function index()
     {
         require BASE_PATH . '/app/controllers/ModuleController.php';
@@ -14,31 +16,10 @@ class UsuarioController
         $module = new ModuleController();
         $module->index();
     }
-    private $service;
 
-    public function __construct()
-    {
-        $this->service = new CrudService();
-    }
-
-    // ✅ MÉTODO FALTANTE
-    public function index()
-    {
-        // CRUD AUTOMÁTICO - IGUAL QUE ROL
-        $tabla = 'usuario';
-        
-        // Filtros empresa/sede
-        $data = $this->service->getTableData($tabla);
-        
-        require BASE_PATH . '/app/views/crud/table.php';
-    }
-
-    public function permisos($usuarioId = null)
+    public function roles($usuarioId = null)
     {
         SessionManager::requireLogin();
-        
-        $database = new Database();
-        $pdo = $database->connect();
 
         if (!$usuarioId) {
             $_SESSION['error'] = "Usuario no especificado";
@@ -46,64 +27,65 @@ class UsuarioController
             exit;
         }
 
-        // Datos usuario
-        $stmt = $pdo->prepare("SELECT * FROM usuario WHERE id = ? AND estado_id = 1");
-        $stmt->execute([$usuarioId]);
-        $usuario = $stmt->fetch(PDO::FETCH_ASSOC);
+        $context = $this->userAccessService->getRolesContext((int)$usuarioId);
 
+        if (!$context) {
+            $_SESSION['error'] = "Usuario no encontrado";
+            header("Location: ?url=usuario");
+            exit;
+        }
+
+        $usuario = $context['usuario'];
+        $roles = $context['roles'];
+        $selectedRoles = $context['selectedRoles'];
+
+        require BASE_PATH . '/app/views/usuario/roles.php';
+    }
+
+    public function saveRoles($usuarioId)
+    {
+        SessionManager::requireLogin();
+
+        $usuario = $this->userAccessService->getUserOrNull((int)$usuarioId);
+        if (!$usuario) {
+            echo json_encode(['success' => false, 'message' => 'Usuario no encontrado']);
+            exit;
+        }
+
+        $roles = $_POST['roles'] ?? [];
+        $this->userAccessService->saveRoles((int)$usuarioId, $roles);
+
+        echo json_encode(['success' => true]);
+        exit;
+    }
+
+    public function permisos($usuarioId = null)
+    {
+        SessionManager::requireLogin();
+
+        if (!$usuarioId) {
+            $_SESSION['error'] = "Usuario no especificado";
+            header("Location: ?url=usuario");
+            exit;
+        }
+
+        $usuario = $this->userAccessService->getUserOrNull((int)$usuarioId);
         if (!$usuario) {
             $_SESSION['error'] = "Usuario no encontrado";
             header("Location: ?url=usuario");
             exit;
         }
 
-        // Roles del usuario
-        $stmt = $pdo->prepare("
-            SELECT ur.*, r.nombre, r.id as rol_id
-            FROM usuario_rol ur 
-            JOIN rol r ON r.id = ur.rol_id 
-            WHERE ur.usuario_id = ? AND ur.estado_id = 1
-        ");
-        $stmt->execute([$usuarioId]);
-        $rolesUsuario = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-        // Todos los roles
-        $stmt = $pdo->prepare("SELECT * FROM rol WHERE estado_id = 1 ORDER BY nombre");
-        $stmt->execute();
-        $todosRoles = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-        // Pasar a vista
-        $viewData = [
-            'usuario' => $usuario,
-            'rolesUsuario' => $rolesUsuario,
-            'todosRoles' => $todosRoles,
-            'usuarioId' => $usuarioId
-        ];
-
-        require BASE_PATH . '/app/views/usuario/permisos.php';
-    }
-
-    public function saveRoles($usuarioId)
-    {
-        SessionManager::requireLogin();
-        
-        $database = new Database();
-        $pdo = $database->connect();
-
-        // Limpiar roles anteriores
-        $stmt = $pdo->prepare("DELETE FROM usuario_rol WHERE usuario_id = ?");
-        $stmt->execute([$usuarioId]);
-
-        // Nuevos roles
-        if (!empty($_POST['roles'])) {
-            $stmt = $pdo->prepare("INSERT INTO usuario_rol (usuario_id, rol_id, estado_id) VALUES (?, ?, 1)");
-            foreach ($_POST['roles'] as $rolId) {
-                $stmt->execute([$usuarioId, $rolId]);
-            }
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $checks = $_POST['permisos'] ?? [];
+            echo json_encode($this->userAccessService->saveDirectPermissions((int)$usuarioId, $checks));
+            exit;
         }
 
-        $_SESSION['success'] = "Roles guardados correctamente";
-        header("Location: ?url=usuario/permisos/$usuarioId");
-        exit;
+        $matrix = $this->userAccessService->buildPermissionMatrix((int)$usuarioId);
+        $acciones = $matrix['acciones'];
+        $matriz = $matrix['matriz'];
+
+        require BASE_PATH . '/app/views/usuario/permisos.php';
     }
 }

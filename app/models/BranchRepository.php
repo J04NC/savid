@@ -37,4 +37,20 @@ class BranchRepository
 
         return $stmt->fetch(PDO::FETCH_ASSOC);
     }
+
+    public function findActiveByUserId($userId)
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT s.id, s.nombre
+            FROM usuario_sede us
+            JOIN sede s ON s.id = us.sede_id
+            WHERE us.usuario_id = ?
+            AND us.estado_id = 1
+            AND s.estado_id = 1
+            ORDER BY s.id
+        ");
+        $stmt->execute([$userId]);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
 }
