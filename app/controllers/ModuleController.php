@@ -113,6 +113,7 @@ class ModuleController
             $data = $crud['data'];
             $columns = $crud['columns'];
             $acciones = $crud['acciones'];
+            $relations = $crud['relations'];
             $relationData = $crud['relationData'];
 
             $view = BASE_PATH . "/app/views/crud/table.php";

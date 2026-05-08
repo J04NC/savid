@@ -108,6 +108,7 @@ class ModuleService
             'data' => $data,
             'columns' => $columns,
             'acciones' => $acciones,
+            'relations' => $relations,
             'relationData' => $relationData,
         ];
     }
