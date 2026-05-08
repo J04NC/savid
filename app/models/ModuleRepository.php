@@ -46,6 +46,32 @@ class ModuleRepository
         return $stmt->fetch(PDO::FETCH_ASSOC);
     }
 
+    public function findItemDetailById($itemId)
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT id, nombre, item_padre_id, modulo_id
+            FROM item
+            WHERE id = ?
+        ");
+        $stmt->execute([$itemId]);
+
+        return $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+
+    public function findChildrenByParentId($itemId)
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT *
+            FROM item
+            WHERE item_padre_id = ?
+            AND estado = 1
+            ORDER BY orden
+        ");
+        $stmt->execute([$itemId]);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
     public function deleteById($tabla, $id)
     {
         $stmt = $this->pdo->prepare("DELETE FROM {$tabla} WHERE id=?");
