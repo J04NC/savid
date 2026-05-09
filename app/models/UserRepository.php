@@ -12,9 +12,23 @@ class UserRepository
     public function findActiveByUsername($username)
     {
         $stmt = $this->pdo->prepare("
-            SELECT u.*, r.nombre AS rol_nombre
+            SELECT u.*,
+                (
+                    SELECT ur.rol_id
+                    FROM usuario_rol ur
+                    WHERE ur.usuario_id = u.id AND ur.estado_id = 1
+                    ORDER BY ur.rol_id
+                    LIMIT 1
+                ) AS rol_id,
+                (
+                    SELECT r.nombre
+                    FROM usuario_rol ur
+                    INNER JOIN rol r ON r.id = ur.rol_id AND r.estado_id = 1
+                    WHERE ur.usuario_id = u.id AND ur.estado_id = 1
+                    ORDER BY ur.rol_id
+                    LIMIT 1
+                ) AS rol_nombre
             FROM usuario u
-            LEFT JOIN rol r ON r.id = u.rol_id
             WHERE u.username = ?
             AND u.estado_id = 1
             LIMIT 1

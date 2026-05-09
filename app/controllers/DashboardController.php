@@ -62,5 +62,32 @@ class DashboardController
         require BASE_PATH . '/app/views/layouts/main.php';
 
     }
+
+    /**
+     * Sube la versión en sesión para los query strings de CSS/JS y fuerza recarga en el navegador.
+     */
+    public function refreshAssets()
+    {
+        if (!isset($_SESSION['user_id'])) {
+            header('Location: ?url=login');
+            exit;
+        }
+
+        $_SESSION['asset_cache_bust'] = time();
+
+        $host = $_SERVER['HTTP_HOST'] ?? '';
+        $ref = $_SERVER['HTTP_REFERER'] ?? '';
+
+        if ($ref !== '' && $host !== '') {
+            $parsed = parse_url($ref);
+            if (!empty($parsed['scheme']) && ($parsed['host'] ?? '') === $host) {
+                header('Location: ' . $ref);
+                exit;
+            }
+        }
+
+        header('Location: ?url=dashboard');
+        exit;
+    }
 }
 

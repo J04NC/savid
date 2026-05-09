@@ -2,6 +2,24 @@
 
 class PermisoService
 {
+    /**
+     * Roles activos del usuario (tabla puente usuario_rol).
+     *
+     * @return int[]
+     */
+    private static function rolIdsForUser(PDO $pdo, int $userId): array
+    {
+        $stmt = $pdo->prepare('
+            SELECT rol_id
+            FROM usuario_rol
+            WHERE usuario_id = ?
+            AND estado_id = 1
+        ');
+        $stmt->execute([$userId]);
+
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
     /*
     ========================================
     VALIDAR PERMISO COMPLETO PRO
@@ -35,15 +53,7 @@ class PermisoService
         ========================================
         */
 
-        $stmt = $pdo->prepare("
-            SELECT rol_id
-            FROM usuario
-            WHERE id = ?
-            LIMIT 1
-        ");
-        $stmt->execute([$userId]);
-
-        $rolId = $stmt->fetchColumn();
+        $rolIds = self::rolIdsForUser($pdo, (int)$userId);
 
         /*
         ========================================
@@ -137,26 +147,28 @@ class PermisoService
         ========================================
         */
 
-        if (!$rolId) {
+        if (empty($rolIds)) {
             return false;
         }
 
         /*
         ========================================
-        3) ROL DENEGAR
+        3) ROL DENEGAR (cualquier rol asignado)
         ========================================
         */
+
+        $placeholders = implode(',', array_fill(0, count($rolIds), '?'));
 
         $stmt = $pdo->prepare("
             SELECT 1
             FROM rol_permiso
-            WHERE rol_id = ?
+            WHERE rol_id IN ($placeholders)
             AND item_accion_id = ?
             AND estado_id = 6
             LIMIT 1
         ");
 
-        $stmt->execute([$rolId, $itemAccionId]);
+        $stmt->execute(array_merge($rolIds, [$itemAccionId]));
 
         if ($stmt->fetch()) {
             return false;
@@ -164,20 +176,20 @@ class PermisoService
 
         /*
         ========================================
-        4) ROL PERMITIR
+        4) ROL PERMITIR (cualquier rol asignado)
         ========================================
         */
 
         $stmt = $pdo->prepare("
             SELECT 1
             FROM rol_permiso
-            WHERE rol_id = ?
+            WHERE rol_id IN ($placeholders)
             AND item_accion_id = ?
             AND estado_id = 5
             LIMIT 1
         ");
 
-        $stmt->execute([$rolId, $itemAccionId]);
+        $stmt->execute(array_merge($rolIds, [$itemAccionId]));
 
         if ($stmt->fetch()) {
             return true;
@@ -211,15 +223,7 @@ class PermisoService
         ========================================
         */
 
-        $stmt = $pdo->prepare("
-            SELECT rol_id
-            FROM usuario
-            WHERE id = ?
-            LIMIT 1
-        ");
-        $stmt->execute([$userId]);
-
-        $rolId = $stmt->fetchColumn();
+        $rolIds = self::rolIdsForUser($pdo, (int)$userId);
 
         /*
         ========================================
@@ -265,22 +269,24 @@ class PermisoService
 
         /*
         ========================================
-        3) ROL DENEGAR
+        3) ROL DENEGAR (cualquier rol asignado)
         ========================================
         */
 
-        if ($rolId) {
+        if (!empty($rolIds)) {
+
+            $placeholders = implode(',', array_fill(0, count($rolIds), '?'));
 
             $stmt = $pdo->prepare("
                 SELECT 1
                 FROM rol_permiso
-                WHERE rol_id = ?
+                WHERE rol_id IN ($placeholders)
                 AND item_accion_id = ?
                 AND estado_id = 6
                 LIMIT 1
             ");
 
-            $stmt->execute([$rolId, $itemAccionId]);
+            $stmt->execute(array_merge($rolIds, [$itemAccionId]));
 
             if ($stmt->fetch()) {
                 return false;
@@ -288,20 +294,20 @@ class PermisoService
 
             /*
             ========================================
-            4) ROL PERMITIR
+            4) ROL PERMITIR (cualquier rol asignado)
             ========================================
             */
 
             $stmt = $pdo->prepare("
                 SELECT 1
                 FROM rol_permiso
-                WHERE rol_id = ?
+                WHERE rol_id IN ($placeholders)
                 AND item_accion_id = ?
                 AND estado_id = 5
                 LIMIT 1
             ");
 
-            $stmt->execute([$rolId, $itemAccionId]);
+            $stmt->execute(array_merge($rolIds, [$itemAccionId]));
 
             if ($stmt->fetch()) {
                 return true;

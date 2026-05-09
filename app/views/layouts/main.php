@@ -10,6 +10,13 @@ if ($moduloId) {
     $menuItems = $menuService->getItemsByModulo($moduloId);
 }
 
+$assetRef = BASE_PATH . '/public/js/app.js';
+$assetsV = max(
+    is_readable($assetRef) ? (int)filemtime($assetRef) : time(),
+    (int)($_SESSION['asset_cache_bust'] ?? 0),
+    1
+);
+
 ?>
 
 <!DOCTYPE html>
@@ -19,7 +26,7 @@ if ($moduloId) {
 <meta charset="UTF-8">
 <title>SAVID</title>
 
-<link rel="stylesheet" href="/css/app.css">
+<link rel="stylesheet" href="/css/app.css?v=<?= (int)$assetsV ?>">
 
 </head>
 
@@ -51,6 +58,8 @@ if ($moduloId) {
 <div class="sidebar-actions">
 
 <a href="#" id="btnCambiarSede" title="Cambiar empresa / sede">🔄</a>
+
+<a href="?url=dashboard/refreshAssets" title="Actualizar JS y CSS (evitar caché antigua)">🧹</a>
 
 <a href="?url=login/logout" title="Cerrar sesión">🚪</a>
 
@@ -150,10 +159,10 @@ url:"?url=<?php echo $item['ruta']; ?>"
 
 </script>
 
-<script src="/js/app.js"></script>
-<script src="/js/theme.js"></script>
-<script src="/js/search.js"></script>
-<script src="/js/crud.js?v=<?= file_exists(BASE_PATH . '/public/js/crud.js') ? (int)filemtime(BASE_PATH . '/public/js/crud.js') : 1 ?>"></script>
+<script src="/js/app.js?v=<?= (int)$assetsV ?>"></script>
+<script src="/js/theme.js?v=<?= (int)$assetsV ?>"></script>
+<script src="/js/search.js?v=<?= (int)$assetsV ?>"></script>
+<script src="/js/crud.js?v=<?= (int)$assetsV ?>"></script>
 
 </body>
 </html>

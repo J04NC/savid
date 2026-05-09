@@ -13,6 +13,10 @@ class CrudService
 
     public function getTableData($tabla)
     {
+        if ($tabla === 'usuario') {
+            return $this->getTableDataUsuario();
+        }
+
         $columns = $this->getColumns($tabla);
 
         $fields = array_column($columns, 'Field');
@@ -33,6 +37,59 @@ class CrudService
         }
 
         $sql .= " ORDER BY id DESC";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Ámbito por usuario_empresa / usuario_sede (columnas empresa_id/sede_id eliminadas de usuario).
+     */
+    private function getTableDataUsuario(): array
+    {
+        if ((int)($_SESSION['rol_id'] ?? 0) === 1) {
+            $stmt = $this->pdo->query('SELECT * FROM usuario ORDER BY id DESC');
+
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        }
+
+        $sql = 'SELECT DISTINCT u.* FROM usuario u WHERE 1=1';
+        $params = [];
+
+        $empresaSession = $_SESSION['empresa_id'] ?? null;
+        $sedeSession = $_SESSION['sede_id'] ?? null;
+        $hasEmpresaSession = $empresaSession !== null && $empresaSession !== '';
+        $hasSedeSession = $sedeSession !== null && $sedeSession !== '';
+
+        if ($hasEmpresaSession) {
+            $sql .= ' AND EXISTS (
+                SELECT 1 FROM usuario_empresa ue
+                WHERE ue.usuario_id = u.id AND ue.empresa_id = ? AND ue.estado_id = 1
+            )';
+            $params[] = (int)$empresaSession;
+        } else {
+            $uid = (int)($_SESSION['user_id'] ?? 0);
+            $sql .= ' AND EXISTS (
+                SELECT 1 FROM usuario_empresa ue_target
+                INNER JOIN usuario_empresa ue_self
+                    ON ue_self.empresa_id = ue_target.empresa_id AND ue_self.estado_id = 1
+                WHERE ue_target.usuario_id = u.id AND ue_target.estado_id = 1
+                AND ue_self.usuario_id = ?
+            )';
+            $params[] = $uid;
+        }
+
+        if ($hasSedeSession) {
+            $sql .= ' AND EXISTS (
+                SELECT 1 FROM usuario_sede us
+                WHERE us.usuario_id = u.id AND us.sede_id = ? AND us.estado_id = 1
+            )';
+            $params[] = (int)$sedeSession;
+        }
+
+        $sql .= ' ORDER BY u.id DESC';
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
@@ -257,6 +314,13 @@ class CrudService
             ]);
         }
 
+        if ($ok && !$id && $tabla === 'usuario') {
+            $newId = (int)$this->pdo->lastInsertId();
+            if ($newId > 0) {
+                $this->linkNewUsuarioToSessionScope($newId);
+            }
+        }
+
         return $ok;
     }
 
@@ -399,6 +463,31 @@ class CrudService
         }
 
         return false;
+    }
+
+    /**
+     * Tras crear un usuario, enlazar empresa/sede del contexto actual en las tablas puente.
+     */
+    private function linkNewUsuarioToSessionScope(int $usuarioId): void
+    {
+        $eid = $_SESSION['empresa_id'] ?? null;
+        $sid = $_SESSION['sede_id'] ?? null;
+
+        if ($eid !== null && $eid !== '') {
+            $stmt = $this->pdo->prepare('
+                INSERT IGNORE INTO usuario_empresa (usuario_id, empresa_id, estado_id)
+                VALUES (?, ?, 1)
+            ');
+            $stmt->execute([$usuarioId, (int)$eid]);
+        }
+
+        if ($sid !== null && $sid !== '') {
+            $stmt = $this->pdo->prepare('
+                INSERT IGNORE INTO usuario_sede (usuario_id, sede_id, estado_id)
+                VALUES (?, ?, 1)
+            ');
+            $stmt->execute([$usuarioId, (int)$sid]);
+        }
     }
 
 }

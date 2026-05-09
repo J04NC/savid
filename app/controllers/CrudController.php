@@ -33,20 +33,6 @@ class CrudController
     public function specialFields($tabla, $column)
     {
         if ($tabla === 'usuario') {
-            if ($column === 'empresa_id') {
-                return [
-                    'type' => 'select',
-                    'options' => $this->getEmpresasUsuario(),
-                    'label' => 'Empresas'
-                ];
-            }
-            if ($column === 'sede_id') {
-                return [
-                    'type' => 'select',
-                    'options' => $this->getSedesUsuario($_SESSION['empresa_id']),
-                    'label' => 'Sedes'
-                ];
-            }
             if ($column === 'roles') { // ← COLUMNA VIRTUAL
                 return [
                     'type' => 'multiselect',
