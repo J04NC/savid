@@ -178,47 +178,59 @@ function initCrudAcciones() {
                 return;
             }
 
-            let accion = this.dataset.accion;
+            const raw = this.getAttribute("data-accion") ?? this.dataset.accion ?? "";
+            const accion = String(raw).trim().toLowerCase();
 
-            switch (accion) {
+            if (typeof openModalGod !== "function") {
+                alert("Modal no disponible (openModalGod)");
+                return;
+            }
 
-                case "rol_permisos":
+            const modales = {
+                rol_permisos: [
+                    "rol/permisos&id=" + selectedId,
+                    "xl",
+                    "Cargando permisos..."
+                ],
+                usuario_permisos: [
+                    "usuario/permisos/" + selectedId,
+                    "xl",
+                    "Cargando permisos..."
+                ],
+                user_permisos: [
+                    "usuario/permisos/" + selectedId,
+                    "xl",
+                    "Cargando permisos..."
+                ],
+                usuario_roles: [
+                    "usuario/roles/" + selectedId,
+                    "lg",
+                    "Cargando roles..."
+                ],
+                user_roles: [
+                    "usuario/roles/" + selectedId,
+                    "lg",
+                    "Cargando roles..."
+                ],
+                usuario_sedes: [
+                    "usuario/empresa_sede/" + selectedId,
+                    "lg",
+                    "Cargando empresas y sedes..."
+                ],
+                usuario_sede: [
+                    "usuario/empresa_sede/" + selectedId,
+                    "lg",
+                    "Cargando empresas y sedes..."
+                ]
+            };
 
-                    if (typeof openModalGod === "function") {
-                        openModalGod(
-                            "rol/permisos&id=" + selectedId,
-                            "xl",
-                            "Cargando permisos..."
-                        );
-                    }
+            const cfg = modales[accion];
 
-                break;
-
-                case "usuario_permisos":
-                case "user_permisos":
-                    if (typeof openModalGod === "function") {
-                        openModalGod(
-                            "usuario/permisos/" + selectedId,
-                            "xl",
-                            "Cargando permisos..."
-                        );
-                    }
-                break;
-
-                case "usuario_roles":
-                case "user_roles":
-                    if (typeof openModalGod === "function") {
-                        openModalGod(
-                            "usuario/roles/" + selectedId,
-                            "lg",
-                            "Cargando roles..."
-                        );
-                    }
-                break;
-
-                default:
-                    alert("Acción: " + accion);
-
+            if (cfg) {
+                openModalGod(cfg[0], cfg[1], cfg[2]);
+            } else {
+                alert("Acción sin handler en crud.js: " + (raw || "(vacío)") +
+                    "\nNormalizada: " + accion);
             }
 
         });

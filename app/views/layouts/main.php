@@ -153,7 +153,7 @@ url:"?url=<?php echo $item['ruta']; ?>"
 <script src="/js/app.js"></script>
 <script src="/js/theme.js"></script>
 <script src="/js/search.js"></script>
-<script src="/js/crud.js"></script>
+<script src="/js/crud.js?v=<?= file_exists(BASE_PATH . '/public/js/crud.js') ? (int)filemtime(BASE_PATH . '/public/js/crud.js') : 1 ?>"></script>
 
 </body>
 </html>

@@ -1,16 +1,16 @@
 <?php
 
+/**
+ * Rutas legacy `action/*`. Preferir controladores dedicados (ej. usuario/empresa_sede).
+ */
 class ActionController
 {
-
     public function usuario_sedes($usuarioId)
     {
+        SessionManager::requireLogin();
 
-        echo "<div class='modal-content'>";
-        echo "<h2>Sedes del usuario</h2>";
-        echo "<p>Aquí puedes seleccionar sedes.</p>";
-        echo "</div>";
-
+        require_once BASE_PATH . '/app/controllers/UsuarioController.php';
+        $usuarioController = new UsuarioController();
+        $usuarioController->empresa_sede($usuarioId);
     }
-
 }

@@ -137,7 +137,15 @@ La vista CRUD necesita estas variables (si falta `relations`, se rompen los sele
 4. Caso en `public/js/crud.js` (`switch` de `data-accion`).
 5. Endpoint en controller (delegando a service/repository).
 
-Ejemplos: `rol_permisos`, `usuario_permisos`, `usuario_roles`.
+Ejemplos: `rol_permisos`, `usuario_permisos`, `usuario_roles`, `usuario_sedes`.
+
+### Boton empresa/sede por usuario (`usuario_sedes`)
+
+- Ruta del modal: `usuario/empresa_sede/{id}` (compatibilidad: `action/usuario_sedes/{id}` delega en lo mismo).
+- Persistencia en tablas `usuario_empresa` y `usuario_sede` (reemplazo completo al guardar).
+- Superadmin (`rol_id = 1`): puede asignar cualquier empresa activa.
+- Resto de usuarios: solo empresas que ya tengan en `usuario_empresa` para si mismos (misma idea que la matriz de permisos por rol).
+- Las sedes marcadas deben pertenecer a empresas tambien marcadas; si desmarcas una empresa, las sedes de esa empresa se deshabilitan y no se guardan.
 
 ---
 

@@ -3,10 +3,12 @@
 class UsuarioController
 {
     private UserAccessService $userAccessService;
+    private UserScopeService $userScopeService;
 
     public function __construct()
     {
         $this->userAccessService = new UserAccessService();
+        $this->userScopeService = new UserScopeService();
     }
 
     public function index()
@@ -87,5 +89,33 @@ class UsuarioController
         $matriz = $matrix['matriz'];
 
         require BASE_PATH . '/app/views/usuario/permisos.php';
+    }
+
+    public function empresa_sede($usuarioId = null)
+    {
+        SessionManager::requireLogin();
+
+        if (!$usuarioId) {
+            echo '<div class="modal-content"><p>Usuario no especificado</p></div>';
+            exit;
+        }
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $empresas = $_POST['empresas'] ?? [];
+            $sedes = $_POST['sedes'] ?? [];
+            echo json_encode($this->userScopeService->saveEmpresaSede((int)$usuarioId, $empresas, $sedes));
+            exit;
+        }
+
+        $data = $this->userScopeService->getEmpresaSedeModalData((int)$usuarioId);
+
+        if (!$data) {
+            echo '<div class="modal-content"><p>Usuario no encontrado</p></div>';
+            exit;
+        }
+
+        extract($data);
+
+        require BASE_PATH . '/app/views/usuario/empresa_sede.php';
     }
 }
