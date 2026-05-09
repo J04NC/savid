@@ -155,6 +155,7 @@ if(!$config['showForm']) continue;
 $value = $old[$campo] ?? '';
 $error = $errors[$campo] ?? null;
 $required = ($col['IS_NULLABLE'] == 'NO') ? 'required' : '';
+$requiredAttr = ($config['type'] === 'password') ? '' : $required;
 ?>
 
 <div class="form-group">
@@ -164,7 +165,7 @@ $required = ($col['IS_NULLABLE'] == 'NO') ? 'required' : '';
 <?php if(isset($relations[$campo])): ?>
 
 <select name="<?= $campo ?>"
-<?= $required ?>
+<?= $requiredAttr ?>
 data-label="<?= formatLabel($campo) ?>"
 data-rules="<?= $config['rules'] ?>"
 class="form-input <?= $error ? 'input-error' : '' ?>">
@@ -181,11 +182,24 @@ class="form-input <?= $error ? 'input-error' : '' ?>">
 
 <?php else: ?>
 
-<?php if($config['type'] == 'textarea'): ?>
+<?php if($config['type'] == 'password'): ?>
+
+<input
+type="password"
+name="<?= $campo ?>"
+value=""
+autocomplete="new-password"
+data-password="1"
+placeholder="<?= htmlspecialchars($config['placeholder'] ?: 'Contraseña; vacío al editar = sin cambios') ?>"
+data-label="<?= formatLabel($campo) ?>"
+data-rules="<?= $config['rules'] ?>"
+class="form-input <?= $error ? 'input-error' : '' ?>">
+
+<?php elseif($config['type'] == 'textarea'): ?>
 
 <textarea
 name="<?= $campo ?>"
-<?= $required ?>
+<?= $requiredAttr ?>
 placeholder="<?= $config['placeholder'] ?>"
 data-label="<?= formatLabel($campo) ?>"
 data-rules="<?= $config['rules'] ?>"
@@ -197,7 +211,7 @@ class="form-input <?= $error ? 'input-error' : '' ?>"><?= htmlspecialchars($valu
 type="<?= $config['type'] ?>"
 name="<?= $campo ?>"
 value="<?= htmlspecialchars($value) ?>"
-<?= $required ?>
+<?= $requiredAttr ?>
 placeholder="<?= $config['placeholder'] ?>"
 data-label="<?= formatLabel($campo) ?>"
 data-rules="<?= $config['rules'] ?>"
@@ -275,10 +289,14 @@ $valor = $row[$campo];
 if(isset($relationMaps[$campo])){
     $valor = $relationMaps[$campo][$valor] ?? $valor;
 }
+
+if ($config['type'] === 'password') {
+    $valor = $row[$campo] !== null && $row[$campo] !== '' ? '••••••••' : '';
+}
 ?>
 
-<td data-field="<?= $campo ?>" data-value="<?= $row[$campo] ?>">
-<?= $valor ?>
+<td data-field="<?= $campo ?>" data-value="<?= ($config['type'] === 'password') ? '' : htmlspecialchars((string)$row[$campo]) ?>">
+<?= htmlspecialchars((string)$valor) ?>
 </td>
 
 <?php endforeach; ?>

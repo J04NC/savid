@@ -2,6 +2,8 @@
 
 Documentacion unica del proyecto: guia rapida para el dia a dia y detalle tecnico para mantenimiento.
 
+**Antes de ejecutar la aplicacion:** configura la conexion a MySQL. Lee la seccion [Configuracion de base de datos](#configuracion-de-base-de-datos) (archivo `config/.env` a partir de `config.example/env.example`). Sin ellos la app no podra conectar a la base de datos.
+
 ---
 
 ## Indice
@@ -20,28 +22,75 @@ Documentacion unica del proyecto: guia rapida para el dia a dia y detalle tecnic
 
 ## Configuracion de base de datos
 
-La clase `Database` ya no esta en `core/`. El punto de entrada (`public/index.php`) carga en este orden:
+La clase `Database` vive fuera de `core/` y usa variables de entorno para no versionar secretos.
 
-1. `config/Database.php` si existe (configuracion local).
-2. Si no, `config.example/Database.php` (plantilla segura, sin credenciales en el codigo).
+### Como se carga la clase
 
-La carpeta `/config/` esta en `.gitignore`: no subas credenciales al repositorio.
+`public/index.php` resuelve la clase en este orden:
 
-### Opcion recomendada: archivo `.env`
+1. **`config/Database.php`** si existe (override total, opcional).
+2. Si no existe, **`config.example/Database.php`** (plantilla incluida en el repo).
 
-1. Crea la carpeta `config/` en la raiz del proyecto (no se versiona).
-2. Copia la plantilla: `cp config.example/env.example config/.env`
-3. Edita `config/.env` con tu host, usuario y contraseña MySQL.
+La carpeta **`/config/`** esta listada en `.gitignore`: todo lo que pongas ahi (`.env`, `Database.php` propio) no se sube al repositorio.
 
-Variables: `DB_HOST`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`, `DB_CHARSET`.
+### Opcion recomendada: `config/.env`
 
-Tambien se lee `.env` en la raiz del proyecto si prefieres ese archivo.
+Es el metodo habitual para desarrollo y servidores propios.
 
-### Opcion alternativa: clase propia
+| Paso | Accion |
+|------|--------|
+| 1 | Crear carpeta local (no versionada): `mkdir -p config` |
+| 2 | Copiar plantilla: `cp config.example/env.example config/.env` |
+| 3 | Editar `config/.env` con tus valores reales (sobre todo `DB_PASSWORD`) |
 
-Copia la plantilla y personalizala:
+Plantilla de referencia en el repo: **`config.example/env.example`**.
 
-`cp config.example/Database.php config/Database.php`
+#### Variables de entorno (`DB_*`)
+
+| Variable | Descripcion | Valor por defecto si no esta definida |
+|----------|-------------|--------------------------------------|
+| `DB_HOST` | Servidor MySQL/MariaDB | `localhost` |
+| `DB_DATABASE` | Nombre de la base de datos | `savid` |
+| `DB_USERNAME` | Usuario de la base de datos | `root` |
+| `DB_PASSWORD` | Contrasena (dejar vacio si no usas clave) | cadena vacia |
+| `DB_CHARSET` | Charset PDO | `utf8mb4` |
+
+Formato del archivo `.env` (una variable por linea, sin comillas salvo que las necesites):
+
+```env
+DB_HOST=localhost
+DB_DATABASE=savid
+DB_USERNAME=root
+DB_PASSWORD=tu_clave_aqui
+DB_CHARSET=utf8mb4
+```
+
+- Lineas que empiezan por `#` se ignoran (comentarios).
+- No subas `config/.env` al git: la carpeta `config/` ya esta ignorada.
+
+#### Orden de lectura del archivo `.env`
+
+La clase `Database` intenta cargar variables en este orden y usa el **primer archivo que exista y se pueda leer**:
+
+1. `config/.env` (recomendado, junto con credenciales ignoradas por git)
+2. `.env` en la **raiz del proyecto** (alternativa si prefieres un solo archivo en la raiz)
+
+Si ninguno existe, se usan solo los valores por defecto de la tabla anterior (usuario `root`, contrasena vacia, etc.).
+
+### Opcion alternativa: clase `Database` propia
+
+Si necesitas logica especial (SSL, socket, etc.), copia la plantilla y editala solo en local:
+
+```bash
+cp config.example/Database.php config/Database.php
+```
+
+Ese archivo en `config/` tampoco se versiona. El bootstrap cargara `config/Database.php` antes que la plantilla de `config.example/`.
+
+### Resumen de seguridad
+
+- Las credenciales reales deben estar solo en **`config/.env`** o en **`config/Database.php`** local, nunca commiteadas.
+- El repositorio solo incluye **`config.example/`** como referencia segura.
 
 ---
 
@@ -127,6 +176,26 @@ Flujo de request:
 - Datos: `ModuleService` -> `CrudService`.
 - Acciones estandar: `ver`, `limpiar`, `guardar`, `eliminar`.
 - Especiales: botones si existen en `item_accion` y el usuario tiene permiso sobre esa `item_accion`.
+
+### Campos tipo password (generico)
+
+Cualquier columna cuyo **comentario en MySQL** incluya `type:password` (junto al resto de opciones que ya usas, separadas por `|`) se comporta asi:
+
+- Al **guardar**, el valor se guarda con `password_hash()` (algoritmo por defecto de PHP).
+- En **edicion** (registro con `id`), si el campo llega **vacío**, **no** se actualiza la contraseña (se mantiene el hash anterior).
+- En **alta**, si la columna es `NOT NULL` y envias vacío, el servidor devuelve error de obligatoriedad.
+- En la **tabla** y al **seleccionar una fila**, no se muestra ni copia el hash; el input siempre va vacío para no filtrar el secreto.
+
+Ejemplo de comentario en la columna `password` de la tabla `usuario`:
+
+```sql
+ALTER TABLE usuario MODIFY COLUMN password VARCHAR(255) NOT NULL
+  COMMENT 'type:password|order:5|placeholder:Contraseña del usuario';
+```
+
+Para **ocultar** la columna en la grilla pero dejarla solo en el formulario, añade por ejemplo `show:form` (segun tu convencion actual en `getConfigFromComment`).
+
+Recomendacion: columna `password` de longitud **al menos 255** para hashes bcrypt/argon.
 
 ---
 

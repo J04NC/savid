@@ -46,6 +46,11 @@ function initCrudRows() {
 
                 if (!input) return;
 
+                if (input.type === "password" || input.dataset.password === "1") {
+                    input.value = "";
+                    return;
+                }
+
                 let value = cell.dataset.value ?? cell.innerText.trim();
 
                 input.value = value;

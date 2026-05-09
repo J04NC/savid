@@ -158,13 +158,45 @@ class CrudService
             if (array_key_exists($name, $data)) {
 
                 $value = trim((string)$data[$name]);
+                $isPassword = $this->columnCommentIsPasswordType($col['COLUMN_COMMENT'] ?? '');
 
-                if ($nullable == 'NO' && $value === '') {
-                    $errors[$name] = "Este campo es obligatorio";
-                }
+                if ($isPassword) {
 
-                if ($value === '') {
-                    $value = null;
+                    if ($id) {
+
+                        if ($value === '') {
+                            continue;
+                        }
+
+                        $value = password_hash($value, PASSWORD_DEFAULT);
+
+                    } else {
+
+                        if ($value === '') {
+
+                            if ($nullable == 'NO') {
+                                $errors[$name] = "Este campo es obligatorio";
+                            }
+
+                            $value = null;
+
+                        } else {
+
+                            $value = password_hash($value, PASSWORD_DEFAULT);
+
+                        }
+                    }
+
+                } else {
+
+                    if ($nullable == 'NO' && $value === '') {
+                        $errors[$name] = "Este campo es obligatorio";
+                    }
+
+                    if ($value === '') {
+                        $value = null;
+                    }
+
                 }
 
                 $fields[] = $name;
@@ -347,6 +379,26 @@ class CrudService
         $stmt->execute($params);
 
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Columnas con comentario type:password se tratan con password_hash al guardar.
+     * En UPDATE, valor vacio no actualiza el hash (ver save()).
+     */
+    private function columnCommentIsPasswordType($comment)
+    {
+        $comment = (string) $comment;
+
+        foreach (explode('|', $comment) as $part) {
+
+            $part = trim($part);
+
+            if (str_starts_with($part, 'type:')) {
+                return str_replace('type:', '', $part) === 'password';
+            }
+        }
+
+        return false;
     }
 
 }
