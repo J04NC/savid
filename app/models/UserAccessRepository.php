@@ -83,36 +83,47 @@ class UserAccessRepository
         ")->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    public function getAllowedPermissionItemAccionIdsByUserId($usuarioId)
+    /**
+     * Permisos directos del usuario para el contexto (empresa/sede) indicado.
+     * Coincide con la lógica de alcance de PermisoService::tenantScopeSql.
+     */
+    public function getAllowedPermissionItemAccionIdsForScope(int $usuarioId, ?int $empresaId, ?int $sedeId): array
     {
-        $stmt = $this->pdo->prepare("
-            SELECT item_accion_id
-            FROM permiso
-            WHERE usuario_id = ?
-            AND estado_id = 5
-        ");
-        $stmt->execute([$usuarioId]);
+        [$scopeSql, $scopeParams] = PermisoService::tenantScopeSql('p', $empresaId, $sedeId);
+
+        $sql = "
+            SELECT DISTINCT p.item_accion_id
+            FROM permiso p
+            WHERE p.usuario_id = ?
+            AND p.estado_id = 5
+            $scopeSql
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute(array_merge([$usuarioId], $scopeParams));
 
         return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
     }
 
-    public function insertAllowedPermission($usuarioId, $itemAccionId)
+    public function insertAllowedPermission(int $usuarioId, int $itemAccionId, ?int $empresaId, ?int $sedeId): void
     {
-        $stmt = $this->pdo->prepare("
-            INSERT INTO permiso (usuario_id, item_accion_id, estado_id)
-            VALUES (?, ?, 5)
-        ");
-        $stmt->execute([$usuarioId, $itemAccionId]);
+        $stmt = $this->pdo->prepare('
+            INSERT INTO permiso (usuario_id, item_accion_id, estado_id, empresa_id, sede_id)
+            VALUES (?, ?, 5, ?, ?)
+        ');
+        $stmt->execute([$usuarioId, $itemAccionId, $empresaId, $sedeId]);
     }
 
-    public function deleteAllowedPermission($usuarioId, $itemAccionId)
+    public function deleteAllowedPermission(int $usuarioId, int $itemAccionId, ?int $empresaId, ?int $sedeId): void
     {
-        $stmt = $this->pdo->prepare("
+        $stmt = $this->pdo->prepare('
             DELETE FROM permiso
             WHERE usuario_id = ?
             AND item_accion_id = ?
             AND estado_id = 5
-        ");
-        $stmt->execute([$usuarioId, $itemAccionId]);
+            AND empresa_id <=> ?
+            AND sede_id <=> ?
+        ');
+        $stmt->execute([$usuarioId, $itemAccionId, $empresaId, $sedeId]);
     }
 }

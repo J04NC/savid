@@ -30,6 +30,19 @@ class ModuleController
 
         /*
         =========================
+        VER (servidor): sin esto, tras cambiar sede podía cargarse la tabla sin botones
+        pero la URL seguía siendo válida (el middleware no revisa index).
+        =========================
+        */
+
+        if ($currentItem && class_exists('PermisoService') && !PermisoService::can($currentItem['ruta'], 'ver')) {
+            $_SESSION['flash_notice'] = 'No tiene permiso para esta pantalla en la empresa o sede actual.';
+            header('Location: ?url=dashboard');
+            exit;
+        }
+
+        /*
+        =========================
         DELETE
         =========================
         */
@@ -65,7 +78,12 @@ class ModuleController
 
         $view = BASE_PATH . "/app/views/$ruta/index.php";
 
-        if(file_exists($view)){
+        if (file_exists($view)) {
+            if (!$currentItem) {
+                $_SESSION['flash_notice'] = 'La ruta solicitada no está disponible.';
+                header('Location: ?url=dashboard');
+                exit;
+            }
             require BASE_PATH . '/app/views/layouts/main.php';
             return;
         }

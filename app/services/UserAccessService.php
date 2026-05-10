@@ -40,10 +40,26 @@ class UserAccessService
         }
     }
 
+    private function permisoScopeFromSession(): array
+    {
+        $e = isset($_SESSION['empresa_id']) ? (int)$_SESSION['empresa_id'] : null;
+        $s = isset($_SESSION['sede_id']) ? (int)$_SESSION['sede_id'] : null;
+
+        if ($e !== null && $e <= 0) {
+            $e = null;
+        }
+        if ($s !== null && $s <= 0) {
+            $s = null;
+        }
+
+        return [$e, $s];
+    }
+
     public function buildPermissionMatrix($usuarioId)
     {
         $rows = $this->repository->getPermissionMatrixRows();
-        $actuales = $this->repository->getAllowedPermissionItemAccionIdsByUserId($usuarioId);
+        [$empresaId, $sedeId] = $this->permisoScopeFromSession();
+        $actuales = $this->repository->getAllowedPermissionItemAccionIdsForScope((int)$usuarioId, $empresaId, $sedeId);
 
         $acciones = [];
         $matriz = [];
@@ -79,17 +95,18 @@ class UserAccessService
     public function saveDirectPermissions($usuarioId, $checks)
     {
         $checks = array_map('intval', $checks);
-        $actuales = $this->repository->getAllowedPermissionItemAccionIdsByUserId($usuarioId);
+        [$empresaId, $sedeId] = $this->permisoScopeFromSession();
+        $actuales = $this->repository->getAllowedPermissionItemAccionIdsForScope((int)$usuarioId, $empresaId, $sedeId);
 
         $insertar = array_diff($checks, $actuales);
         $eliminar = array_diff($actuales, $checks);
 
         foreach ($insertar as $itemAccionId) {
-            $this->repository->insertAllowedPermission($usuarioId, $itemAccionId);
+            $this->repository->insertAllowedPermission((int)$usuarioId, $itemAccionId, $empresaId, $sedeId);
         }
 
         foreach ($eliminar as $itemAccionId) {
-            $this->repository->deleteAllowedPermission($usuarioId, $itemAccionId);
+            $this->repository->deleteAllowedPermission((int)$usuarioId, $itemAccionId, $empresaId, $sedeId);
         }
 
         return ['success' => true];

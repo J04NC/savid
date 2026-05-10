@@ -19,6 +19,28 @@ class DashboardService
         return $this->menuService->getMenuPrincipal();
     }
 
+    /**
+     * El menú ya filtra por permisos en contexto; si el módulo no aparece, no hay acceso.
+     */
+    public function userHasAccessToModulo(int $moduloId): bool
+    {
+        foreach ($this->getMenuPrincipal() as $m) {
+            if ((int)($m['id'] ?? 0) === $moduloId) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Fila de ítem para comprobar PermisoService::can(ruta, 'ver').
+     */
+    public function findItemForAccessCheck(int $itemId): ?array
+    {
+        return $this->moduleRepository->findItemDetailById($itemId) ?: null;
+    }
+
     public function getModuloData($moduloId)
     {
         return [

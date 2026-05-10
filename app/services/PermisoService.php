@@ -2,6 +2,9 @@
 
 class PermisoService
 {
+    /** @var array<string, bool> */
+    private static $canCache = [];
+
     /**
      * Roles activos del usuario (tabla puente usuario_rol).
      *
@@ -20,15 +23,69 @@ class PermisoService
         return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
     }
 
+    /**
+     * Condición SQL para permiso / rol_permiso aplicable al contexto:
+     * global (NULL,NULL), solo empresa, o empresa+sede.
+     *
+     * @return array{0: string, 1: array<int|float>}
+     */
+    public static function tenantScopeSql(string $alias, ?int $empresaId, ?int $sedeId): array
+    {
+        if ($empresaId === null || $empresaId <= 0) {
+            return [
+                " AND ({$alias}.empresa_id IS NULL AND {$alias}.sede_id IS NULL) ",
+                [],
+            ];
+        }
+
+        $e = (int)$empresaId;
+
+        if ($sedeId === null || $sedeId <= 0) {
+            return [
+                " AND (
+                    ({$alias}.empresa_id IS NULL AND {$alias}.sede_id IS NULL)
+                    OR ({$alias}.empresa_id = ? AND {$alias}.sede_id IS NULL)
+                ) ",
+                [$e],
+            ];
+        }
+
+        $s = (int)$sedeId;
+
+        return [
+            " AND (
+                ({$alias}.empresa_id IS NULL AND {$alias}.sede_id IS NULL)
+                OR ({$alias}.empresa_id = ? AND {$alias}.sede_id IS NULL)
+                OR ({$alias}.empresa_id = ? AND {$alias}.sede_id = ?)
+            ) ",
+            [$e, $e, $s],
+        ];
+    }
+
+    private static function sessionEmpresaSede(): array
+    {
+        $empresaId = isset($_SESSION['empresa_id']) ? (int)$_SESSION['empresa_id'] : null;
+        $sedeId = isset($_SESSION['sede_id']) ? (int)$_SESSION['sede_id'] : null;
+
+        if ($empresaId !== null && $empresaId <= 0) {
+            $empresaId = null;
+        }
+        if ($sedeId !== null && $sedeId <= 0) {
+            $sedeId = null;
+        }
+
+        return [$empresaId, $sedeId];
+    }
+
     /*
     ========================================
     VALIDAR PERMISO COMPLETO PRO
     ========================================
     Prioridad:
 
-    1. Permiso usuario DENEGAR
+    1. Permiso usuario DENEGAR (permiso.empresa_id / sede_id)
     2. Permiso usuario PERMITIR
-    3. Permiso rol DENEGAR
+    3. Permiso rol DENEGAR (rol_permiso por contexto)
     4. Permiso rol PERMITIR
     5. Sin permiso = false
     ========================================
@@ -44,35 +101,37 @@ class PermisoService
             return true;
         }
 
+        $cacheKey = ($ruta ?? '') . '|' . ($accion ?? '');
+        if (isset(self::$canCache[$cacheKey])) {
+            return self::$canCache[$cacheKey];
+        }
+
         $database = new Database();
         $pdo = $database->connect();
 
-        $userId    = $_SESSION['user_id'];
-        $empresaId = $_SESSION['empresa_id'] ?? null;
-        $sedeId    = $_SESSION['sede_id'] ?? null;
+        $userId = $_SESSION['user_id'];
 
-        /*
-        ========================================
-        OBTENER ROL DEL USUARIO
-        ========================================
-        */
+        $itemAccionId = self::resolveItemAccionId($pdo, $ruta, $accion);
 
-        $rolIds = self::rolIdsForUser($pdo, (int)$userId);
+        if (!$itemAccionId) {
+            self::$canCache[$cacheKey] = false;
 
-        /*
-        ========================================
-        BUSCAR ITEM_ACCION
-        1) ruta completa
-        2) fallback ruta raíz
-        ========================================
-        */
+            return false;
+        }
 
-        $itemAccionId = null;
+        $ok = self::checkItemAccionPermission($pdo, (int)$userId, (int)$itemAccionId);
 
+        self::$canCache[$cacheKey] = $ok;
+
+        return $ok;
+    }
+
+    private static function resolveItemAccionId(PDO $pdo, $ruta, $accion): ?int
+    {
         $rutasBuscar = [$ruta];
 
-        if (strpos($ruta, '/') !== false) {
-            $raiz = explode('/', $ruta)[0];
+        if (strpos((string)$ruta, '/') !== false) {
+            $raiz = explode('/', (string)$ruta)[0];
             if ($raiz !== $ruta) {
                 $rutasBuscar[] = $raiz;
             }
@@ -95,30 +154,42 @@ class PermisoService
             $itemAccionId = $stmt->fetchColumn();
 
             if ($itemAccionId) {
-                break;
+                return (int)$itemAccionId;
             }
         }
 
-        if (!$itemAccionId) {
-            return false;
-        }
+        return null;
+    }
+
+    /**
+     * Evalúa permiso para un item_accion con contexto de sesión (empresa/sede).
+     */
+    private static function checkItemAccionPermission(PDO $pdo, int $userId, int $itemAccionId): bool
+    {
+        [$empresaId, $sedeId] = self::sessionEmpresaSede();
+
+        $rolIds = self::rolIdsForUser($pdo, $userId);
+
+        [$permScopeSql, $permScopeParams] = self::tenantScopeSql('p', $empresaId, $sedeId);
 
         /*
         ========================================
-        1) USUARIO DENEGAR
+        1) USUARIO DENEGAR (alcance empresa/sede en tabla permiso)
         ========================================
         */
 
-        $stmt = $pdo->prepare("
+        $sqlUserDeny = "
             SELECT 1
-            FROM permiso
-            WHERE usuario_id = ?
-            AND item_accion_id = ?
-            AND estado_id = 6
+            FROM permiso p
+            WHERE p.usuario_id = ?
+            AND p.item_accion_id = ?
+            AND p.estado_id = 6
+            $permScopeSql
             LIMIT 1
-        ");
+        ";
 
-        $stmt->execute([$userId, $itemAccionId]);
+        $stmt = $pdo->prepare($sqlUserDeny);
+        $stmt->execute(array_merge([$userId, $itemAccionId], $permScopeParams));
 
         if ($stmt->fetch()) {
             return false;
@@ -130,16 +201,18 @@ class PermisoService
         ========================================
         */
 
-        $stmt = $pdo->prepare("
+        $sqlUserAllow = "
             SELECT 1
-            FROM permiso
-            WHERE usuario_id = ?
-            AND item_accion_id = ?
-            AND estado_id = 5
+            FROM permiso p
+            WHERE p.usuario_id = ?
+            AND p.item_accion_id = ?
+            AND p.estado_id = 5
+            $permScopeSql
             LIMIT 1
-        ");
+        ";
 
-        $stmt->execute([$userId, $itemAccionId]);
+        $stmt = $pdo->prepare($sqlUserAllow);
+        $stmt->execute(array_merge([$userId, $itemAccionId], $permScopeParams));
 
         if ($stmt->fetch()) {
             return true;
@@ -147,7 +220,7 @@ class PermisoService
 
         /*
         ========================================
-        SI NO TIENE ROL
+        ROL: requiere roles y rol_permiso acotado a contexto
         ========================================
         */
 
@@ -155,24 +228,28 @@ class PermisoService
             return false;
         }
 
-        /*
-        ========================================
-        3) ROL DENEGAR (cualquier rol asignado)
-        ========================================
-        */
+        [$scopeSql, $scopeParams] = self::tenantScopeSql('rp', $empresaId, $sedeId);
 
         $placeholders = implode(',', array_fill(0, count($rolIds), '?'));
 
-        $stmt = $pdo->prepare("
-            SELECT 1
-            FROM rol_permiso
-            WHERE rol_id IN ($placeholders)
-            AND item_accion_id = ?
-            AND estado_id = 6
-            LIMIT 1
-        ");
+        /*
+        ========================================
+        3) ROL DENEGAR
+        ========================================
+        */
 
-        $stmt->execute(array_merge($rolIds, [$itemAccionId]));
+        $sqlDeny = "
+            SELECT 1
+            FROM rol_permiso rp
+            WHERE rp.rol_id IN ($placeholders)
+            AND rp.item_accion_id = ?
+            AND rp.estado_id = 6
+            $scopeSql
+            LIMIT 1
+        ";
+
+        $stmt = $pdo->prepare($sqlDeny);
+        $stmt->execute(array_merge($rolIds, [$itemAccionId], $scopeParams));
 
         if ($stmt->fetch()) {
             return false;
@@ -180,28 +257,25 @@ class PermisoService
 
         /*
         ========================================
-        4) ROL PERMITIR (cualquier rol asignado)
+        4) ROL PERMITIR
         ========================================
         */
 
-        $stmt = $pdo->prepare("
+        $sqlAllow = "
             SELECT 1
-            FROM rol_permiso
-            WHERE rol_id IN ($placeholders)
-            AND item_accion_id = ?
-            AND estado_id = 5
+            FROM rol_permiso rp
+            WHERE rp.rol_id IN ($placeholders)
+            AND rp.item_accion_id = ?
+            AND rp.estado_id = 5
+            $scopeSql
             LIMIT 1
-        ");
+        ";
 
-        $stmt->execute(array_merge($rolIds, [$itemAccionId]));
+        $stmt = $pdo->prepare($sqlAllow);
+        $stmt->execute(array_merge($rolIds, [$itemAccionId], $scopeParams));
 
-        if ($stmt->fetch()) {
-            return true;
-        }
-
-        return false;
+        return (bool) $stmt->fetch();
     }
-
 
     /*
     ========================================
@@ -223,112 +297,15 @@ class PermisoService
         $database = new Database();
         $pdo = $database->connect();
 
-        $userId = $_SESSION['user_id'];
+        $userId = (int)$_SESSION['user_id'];
 
-        /*
-        ========================================
-        OBTENER ROL
-        ========================================
-        */
-
-        $rolIds = self::rolIdsForUser($pdo, (int)$userId);
-
-        /*
-        ========================================
-        1) USUARIO DENEGAR
-        ========================================
-        */
-
-        $stmt = $pdo->prepare("
-            SELECT 1
-            FROM permiso
-            WHERE usuario_id = ?
-            AND item_accion_id = ?
-            AND estado_id = 6
-            LIMIT 1
-        ");
-
-        $stmt->execute([$userId, $itemAccionId]);
-
-        if ($stmt->fetch()) {
-            return false;
-        }
-
-        /*
-        ========================================
-        2) USUARIO PERMITIR
-        ========================================
-        */
-
-        $stmt = $pdo->prepare("
-            SELECT 1
-            FROM permiso
-            WHERE usuario_id = ?
-            AND item_accion_id = ?
-            AND estado_id = 5
-            LIMIT 1
-        ");
-
-        $stmt->execute([$userId, $itemAccionId]);
-
-        if ($stmt->fetch()) {
-            return true;
-        }
-
-        /*
-        ========================================
-        3) ROL DENEGAR (cualquier rol asignado)
-        ========================================
-        */
-
-        if (!empty($rolIds)) {
-
-            $placeholders = implode(',', array_fill(0, count($rolIds), '?'));
-
-            $stmt = $pdo->prepare("
-                SELECT 1
-                FROM rol_permiso
-                WHERE rol_id IN ($placeholders)
-                AND item_accion_id = ?
-                AND estado_id = 6
-                LIMIT 1
-            ");
-
-            $stmt->execute(array_merge($rolIds, [$itemAccionId]));
-
-            if ($stmt->fetch()) {
-                return false;
-            }
-
-            /*
-            ========================================
-            4) ROL PERMITIR (cualquier rol asignado)
-            ========================================
-            */
-
-            $stmt = $pdo->prepare("
-                SELECT 1
-                FROM rol_permiso
-                WHERE rol_id IN ($placeholders)
-                AND item_accion_id = ?
-                AND estado_id = 5
-                LIMIT 1
-            ");
-
-            $stmt->execute(array_merge($rolIds, [$itemAccionId]));
-
-            if ($stmt->fetch()) {
-                return true;
-            }
-        }
-
-        return false;
+        return self::checkItemAccionPermission($pdo, $userId, (int)$itemAccionId);
     }
 
     /**
      * Indica si el usuario tiene al menos un permiso "permitir" (estado 5):
      * en tabla permiso (usuario) o en rol_permiso (alguno de sus roles).
-     * Super Admin no debe usar este método (se asume acceso global antes).
+     * No filtra por contexto: sirve para bloqueo temprano en login.
      */
     public static function userHasAssignedGrants(int $userId): bool
     {

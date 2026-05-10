@@ -12,6 +12,47 @@ class MenuService
         $this->usuarioId = $usuarioId;
     }
 
+    /**
+     * Deja ítems con permiso "ver" en el contexto actual y ancestros necesarios para el árbol.
+     *
+     * @param array<int, array<string, mixed>> $items
+     * @return array<int, array<string, mixed>>
+     */
+    private function filterItemsWithAncestors(array $items): array
+    {
+        $byId = [];
+
+        foreach ($items as $item) {
+            $byId[$item['id']] = $item;
+        }
+
+        $keep = [];
+
+        foreach ($items as $item) {
+            $ruta = isset($item['ruta']) ? trim((string)$item['ruta']) : '';
+            if ($ruta === '') {
+                continue;
+            }
+            if (PermisoService::can($ruta, 'ver')) {
+                $keep[$item['id']] = true;
+                $pid = $item['item_padre_id'] ?? null;
+                while ($pid && isset($byId[$pid])) {
+                    $keep[$pid] = true;
+                    $pid = $byId[$pid]['item_padre_id'] ?? null;
+                }
+            }
+        }
+
+        $out = [];
+        foreach ($items as $item) {
+            if (!empty($keep[$item['id']])) {
+                $out[] = $item;
+            }
+        }
+
+        return $out;
+    }
+
     public function getMenuPrincipal()
     {
 
@@ -23,24 +64,36 @@ class MenuService
             ')->fetchAll(PDO::FETCH_ASSOC);
         }
 
-        $sql = "
+        $stmt = $this->pdo->query('
             SELECT DISTINCT m.*
             FROM modulo m
-            JOIN item i ON i.modulo_id = m.id
-            JOIN item_accion ia ON ia.item_id = i.id
-            JOIN accion a ON a.id = ia.accion_id
-            JOIN permiso p ON p.item_accion_id = ia.id
-            WHERE p.usuario_id = ?
-            AND a.codigo = 'ver'
-            AND p.estado_id = 5
-            AND m.estado_id = 1
+            INNER JOIN item i ON i.modulo_id = m.id
+            WHERE m.estado_id = 1
+            AND i.estado_id = 1
             ORDER BY m.orden
-        ";
+        ');
+        $modulos = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$this->usuarioId]);
+        $result = [];
 
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($modulos as $m) {
+
+            $stmt = $this->pdo->prepare('
+                SELECT * FROM item
+                WHERE modulo_id = ?
+                AND estado_id = 1
+                ORDER BY orden
+            ');
+            $stmt->execute([$m['id']]);
+            $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            $filtered = $this->filterItemsWithAncestors($items);
+
+            if (count($filtered) > 0) {
+                $result[] = $m;
+            }
+        }
+
+        return $result;
     }
 
     public function getItemsByModulo($moduloId)
@@ -59,29 +112,17 @@ class MenuService
             return $this->buildTree($items);
         }
 
-        $sql = "
-            SELECT DISTINCT i.*
-            FROM item i
-            JOIN item_accion ia ON ia.item_id = i.id
-            JOIN accion a ON a.id = ia.accion_id
-            JOIN permiso p ON p.item_accion_id = ia.id
-            WHERE i.modulo_id = ?
-            AND p.usuario_id = ?
-            AND a.codigo = 'ver'
-            AND p.estado_id = 5
-            AND i.estado_id = 1
-            ORDER BY i.orden
-        ";
-
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([
-            $moduloId,
-            $this->usuarioId
-        ]);
-
+        $stmt = $this->pdo->prepare('
+            SELECT * FROM item
+            WHERE modulo_id = ?
+            AND estado_id = 1
+            ORDER BY orden
+        ');
+        $stmt->execute([$moduloId]);
         $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $filtered = $this->filterItemsWithAncestors($items);
 
-        return $this->buildTree($items);
+        return $this->buildTree($filtered);
     }
 
     private function buildTree($items, $parentId = null)
@@ -135,24 +176,7 @@ class MenuService
             ')->fetchAll(PDO::FETCH_ASSOC);
         }
 
-        $sql = "
-            SELECT DISTINCT m.*
-            FROM modulo m
-            JOIN item i ON i.modulo_id = m.id
-            JOIN item_accion ia ON ia.item_id = i.id
-            JOIN accion a ON a.id = ia.accion_id
-            JOIN permiso p ON p.item_accion_id = ia.id
-            WHERE p.usuario_id = ?
-            AND a.codigo = 'ver'
-            AND p.estado_id = 5
-            AND m.estado_id = 1
-            ORDER BY m.orden
-        ";
-
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$this->usuarioId]);
-
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return $this->getMenuPrincipal();
     }
 
     public function getSearchItems()
@@ -167,22 +191,23 @@ class MenuService
             ')->fetchAll(PDO::FETCH_ASSOC);
         }
 
-        $sql = "
+        $stmt = $this->pdo->query('
             SELECT DISTINCT i.nombre, i.ruta
             FROM item i
-            JOIN item_accion ia ON ia.item_id = i.id
-            JOIN accion a ON a.id = ia.accion_id
-            JOIN permiso p ON p.item_accion_id = ia.id
-            WHERE p.usuario_id = ?
-            AND a.codigo = 'ver'
-            AND p.estado_id = 5
-            AND i.estado_id = 1
+            WHERE i.estado_id = 1
             ORDER BY i.nombre
-        ";
+        ');
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$this->usuarioId]);
+        $out = [];
 
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($rows as $row) {
+            $ruta = isset($row['ruta']) ? trim((string)$row['ruta']) : '';
+            if ($ruta !== '' && PermisoService::can($ruta, 'ver')) {
+                $out[] = $row;
+            }
+        }
+
+        return $out;
     }
 }

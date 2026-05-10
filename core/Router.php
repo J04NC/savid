@@ -43,23 +43,25 @@ class Router
 
     private function middleware($controllerName, $method)
     {
-        // Proteger todas las rutas excepto login
-        if ($controllerName !== 'LoginController' && 
-            !in_array($method, ['index', 'modulo', 'item'])) {
-            
+        /*
+         * Sesión obligatoria en todo el sistema salvo pantallas de Login.
+         * (Antes se excluían index/modulo/item y cualquier usuario podía pegar ?url=usuario sin sesión.)
+         */
+        if ($controllerName !== 'LoginController') {
             SessionManager::requireLogin();
         }
 
-        // Permisos dinámicos (tu lógica existente)
+        /*
+         * Permiso "ver" por URL para controladores dedicados (usuario/permisos, rol/permisos, etc.).
+         * Dashboard y CRUD dinámico se validan dentro de cada controlador con PermisoService::can(ruta).
+         */
         $rutaCompleta = $_GET['url'] ?? '';
-        if (SessionManager::userLogged() && 
-            !in_array($controllerName, ['LoginController', 'DashboardController']) &&
-            !in_array($method, ['index', 'modulo', 'item'])) {
-            
-            if (class_exists('PermisoService') && !PermisoService::can($rutaCompleta, 'ver')) {
-                http_response_code(403);
-                die("Acceso denegado a: $rutaCompleta");
-            }
+        if (SessionManager::userLogged()
+            && !in_array($controllerName, ['LoginController', 'DashboardController', 'ModuleController'], true)
+            && class_exists('PermisoService')
+            && !PermisoService::can($rutaCompleta, 'ver')) {
+            http_response_code(403);
+            exit('Acceso denegado.');
         }
     }
 }

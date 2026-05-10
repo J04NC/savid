@@ -197,8 +197,12 @@ function bindContextForm() {
 
         e.preventDefault();
 
+        const empresaHidden = document.getElementById("empresaHidden");
+        const empresaSelect = document.getElementById("empresaSelect");
         const empresa =
-            document.getElementById("empresaSelect")?.value;
+            (empresaHidden && empresaHidden.value) ||
+            (empresaSelect && empresaSelect.value) ||
+            "";
 
         const sede =
             document.getElementById("sedeSelect")?.value;
@@ -217,7 +221,7 @@ function bindContextForm() {
 
             if (data.success) {
                 closeModalGod();
-                location.reload();
+                window.location.href = "?url=dashboard";
             } else {
                 alert(data.error || "No se pudo guardar");
             }
@@ -237,67 +241,78 @@ SEDES AJAX
 
 function activarAjaxSedes() {
 
+    const form =
+        document.querySelector("#contextContainer #contextForm") ||
+        document.getElementById("contextForm");
+
     const empresaSelect = document.getElementById("empresaSelect");
     const empresaHidden = document.getElementById("empresaHidden");
-    const empresa = empresaSelect || empresaHidden;
+    const sede = document.getElementById("sedeSelect");
 
-    const sede =
-        document.getElementById("sedeSelect");
+    if (!sede) return;
 
-    if (!empresa || !sede) return;
+    const preSede =
+        form && form.dataset && form.dataset.preselectSede
+            ? String(form.dataset.preselectSede).trim()
+            : "";
 
-    function cargar(id) {
+    let initialLoad = true;
 
-        sede.innerHTML =
-            `<option value="">Cargando...</option>`;
+    function cargar(empresaId) {
 
-        if (!id) {
-            sede.innerHTML =
-                `<option value="">Seleccione sede</option>`;
+        if (!empresaId) {
+            sede.innerHTML = `<option value="">Seleccione sede</option>`;
             return;
         }
 
-        fetch(`?url=context/cambiarSede&empresa_id=${id}`)
-        .then(r => r.json())
-        .then(rows => {
+        sede.innerHTML = `<option value="">Cargando...</option>`;
 
-            sede.innerHTML =
-                `<option value="">Seleccione sede</option>`;
+        fetch(
+            `?url=context/cambiarSede&empresa_id=${encodeURIComponent(empresaId)}`
+        )
+            .then((r) => r.json())
+            .then((rows) => {
+                sede.innerHTML = `<option value="">Seleccione sede</option>`;
 
-            if (!rows || !rows.length) {
-                sede.innerHTML +=
-                    `<option value="" disabled>No tiene sedes autorizadas</option>`;
-                return;
-            }
+                if (!rows || !rows.length) {
+                    sede.innerHTML += `<option value="" disabled>No tiene sedes autorizadas</option>`;
+                    initialLoad = false;
+                    return;
+                }
 
-            rows.forEach(x => {
-
-                sede.innerHTML += `
+                rows.forEach((x) => {
+                    sede.innerHTML += `
                     <option value="${x.id}">
                         ${x.nombre}
                     </option>
                 `;
+                });
 
+                if (initialLoad && preSede) {
+                    const sid = String(preSede);
+                    if ([...sede.options].some((o) => o.value === sid)) {
+                        sede.value = sid;
+                    }
+                }
+                initialLoad = false;
+            })
+            .catch(() => {
+                sede.innerHTML = `<option value="">Error cargando sedes</option>`;
+                initialLoad = false;
             });
-
-        })
-        .catch(() => {
-
-            sede.innerHTML =
-                `<option value="">Error cargando sedes</option>`;
-
-        });
-
     }
 
     if (empresaSelect) {
-        empresaSelect.onchange = function () {
+        empresaSelect.addEventListener("change", function () {
+            initialLoad = false;
             cargar(this.value);
-        };
+        });
+        if (empresaSelect.value) {
+            cargar(empresaSelect.value);
+        }
     }
 
     if (empresaHidden && empresaHidden.value) {
         cargar(empresaHidden.value);
     }
-
 }

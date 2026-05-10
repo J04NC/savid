@@ -32,6 +32,12 @@ class DashboardController
             exit;
         }
 
+        if (!$this->dashboardService->userHasAccessToModulo((int)$moduloId)) {
+            $_SESSION['flash_notice'] = 'No tiene permiso para acceder a este módulo en el contexto actual.';
+            header('Location: ?url=dashboard');
+            exit;
+        }
+
         $moduloData = $this->dashboardService->getModuloData($moduloId);
         $items = $moduloData['items'];
         $moduloNombre = $moduloData['moduloNombre'];
@@ -50,6 +56,20 @@ class DashboardController
     {
         if (!isset($_SESSION['user_id'])) {
             header("Location: ?url=login");
+            exit;
+        }
+
+        $itemRow = $this->dashboardService->findItemForAccessCheck((int)$itemId);
+
+        if (!$itemRow || empty($itemRow['ruta'])) {
+            $_SESSION['flash_notice'] = 'Ítem no encontrado o sin acceso.';
+            header('Location: ?url=dashboard');
+            exit;
+        }
+
+        if (class_exists('PermisoService') && !PermisoService::can((string)$itemRow['ruta'], 'ver')) {
+            $_SESSION['flash_notice'] = 'No tiene permiso para este ítem en la empresa o sede actual.';
+            header('Location: ?url=dashboard');
             exit;
         }
 

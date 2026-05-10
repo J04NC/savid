@@ -49,7 +49,7 @@ class ModuleRepository
     public function findItemDetailById($itemId)
     {
         $stmt = $this->pdo->prepare("
-            SELECT id, nombre, item_padre_id, modulo_id
+            SELECT id, nombre, item_padre_id, modulo_id, ruta
             FROM item
             WHERE id = ?
         ");

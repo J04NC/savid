@@ -1,9 +1,11 @@
 <?php
 $soloEmpresa = $soloEmpresa ?? false;
 $empresaFijaId = $empresaFijaId ?? null;
+$contextoEmpresaId = $contextoEmpresaId ?? null;
+$contextoSedeId = $contextoSedeId ?? null;
 ?>
 
-<form method="POST" id="contextForm">
+<form method="POST" id="contextForm" data-preselect-sede="<?= $contextoSedeId !== null ? (int)$contextoSedeId : '' ?>">
 
 <div class="form-group">
 <label>Empresa</label>
@@ -17,7 +19,9 @@ $empresaFijaId = $empresaFijaId ?? null;
 <select name="empresa_id" id="empresaSelect" class="form-input" required>
 <option value="">Seleccione empresa</option>
 <?php foreach ($empresas as $emp): ?>
-<option value="<?= (int)$emp['id'] ?>">
+<option value="<?= (int)$emp['id'] ?>"<?=
+    ($contextoEmpresaId !== null && (int)$emp['id'] === $contextoEmpresaId) ? ' selected' : ''
+?>>
 <?= htmlspecialchars($emp['razon_social']) ?>
 </option>
 <?php endforeach; ?>
@@ -48,14 +52,16 @@ Continuar
 
 (function () {
 
+const form = document.getElementById("contextForm");
 const empresaHidden = document.getElementById("empresaHidden");
 const empresaSelect = document.getElementById("empresaSelect");
 const sedeSelect = document.getElementById("sedeSelect");
 
-function empresaIdActual() {
-    if (empresaHidden) return empresaHidden.value;
-    return empresaSelect ? empresaSelect.value : "";
-}
+const preSede = (form && form.dataset && form.dataset.preselectSede)
+    ? String(form.dataset.preselectSede).trim()
+    : "";
+
+let initialLoad = true;
 
 function cargarSedes(empresaId) {
 
@@ -71,22 +77,36 @@ function cargarSedes(empresaId) {
 
             if (!rows || !rows.length) {
                 sedeSelect.innerHTML += "<option value=\"\" disabled>No tiene sedes autorizadas</option>";
+                initialLoad = false;
                 return;
             }
 
             rows.forEach(x => {
                 sedeSelect.innerHTML += "<option value=\"" + x.id + "\">" + x.nombre + "</option>";
             });
+
+            if (initialLoad && preSede) {
+                const sid = String(preSede);
+                if ([...sedeSelect.options].some(o => o.value === sid)) {
+                    sedeSelect.value = sid;
+                }
+            }
+            initialLoad = false;
         })
         .catch(() => {
             sedeSelect.innerHTML = "<option value=\"\">Error cargando sedes</option>";
+            initialLoad = false;
         });
 }
 
 if (empresaSelect) {
     empresaSelect.addEventListener("change", function () {
+        initialLoad = false;
         cargarSedes(this.value);
     });
+    if (empresaSelect.value) {
+        cargarSedes(empresaSelect.value);
+    }
 }
 
 if (empresaHidden && empresaHidden.value) {

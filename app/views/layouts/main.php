@@ -92,6 +92,11 @@ if ($menuItems) {
 </header>
 
 <main class="content">
+<?php if (!empty($_SESSION['flash_notice'])): ?>
+<div class="error-message" style="margin-bottom:16px;">
+<?= htmlspecialchars((string)$_SESSION['flash_notice'], ENT_QUOTES, 'UTF-8') ?>
+</div>
+<?php unset($_SESSION['flash_notice']); endif; ?>
 <?php require $view; ?>
 </main>
 

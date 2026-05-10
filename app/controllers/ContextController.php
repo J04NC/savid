@@ -34,6 +34,13 @@ class ContextController
         $soloEmpresa = count($empresas) === 1;
         $empresaFijaId = $soloEmpresa ? (int)$empresas[0]['id'] : null;
 
+        $contextoEmpresaId = isset($_SESSION['empresa_id']) && $_SESSION['empresa_id'] !== ''
+            ? (int)$_SESSION['empresa_id']
+            : null;
+        $contextoSedeId = isset($_SESSION['sede_id']) && $_SESSION['sede_id'] !== ''
+            ? (int)$_SESSION['sede_id']
+            : null;
+
         $partial = isset($_GET['partial']) && $_GET['partial'] === '1';
 
         if ($partial) {
