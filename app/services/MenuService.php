@@ -15,6 +15,14 @@ class MenuService
     public function getMenuPrincipal()
     {
 
+        if (!empty($_SESSION['es_super_admin'])) {
+            return $this->pdo->query('
+                SELECT * FROM modulo
+                WHERE estado_id = 1
+                ORDER BY orden
+            ')->fetchAll(PDO::FETCH_ASSOC);
+        }
+
         $sql = "
             SELECT DISTINCT m.*
             FROM modulo m
@@ -37,6 +45,19 @@ class MenuService
 
     public function getItemsByModulo($moduloId)
     {
+
+        if (!empty($_SESSION['es_super_admin'])) {
+            $stmt = $this->pdo->prepare('
+                SELECT * FROM item
+                WHERE modulo_id = ?
+                AND estado_id = 1
+                ORDER BY orden
+            ');
+            $stmt->execute([$moduloId]);
+            $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            return $this->buildTree($items);
+        }
 
         $sql = "
             SELECT DISTINCT i.*
@@ -106,6 +127,14 @@ class MenuService
     public function getModulos()
     {
 
+        if (!empty($_SESSION['es_super_admin'])) {
+            return $this->pdo->query('
+                SELECT * FROM modulo
+                WHERE estado_id = 1
+                ORDER BY orden
+            ')->fetchAll(PDO::FETCH_ASSOC);
+        }
+
         $sql = "
             SELECT DISTINCT m.*
             FROM modulo m
@@ -128,6 +157,15 @@ class MenuService
 
     public function getSearchItems()
     {
+
+        if (!empty($_SESSION['es_super_admin'])) {
+            return $this->pdo->query('
+                SELECT DISTINCT i.nombre, i.ruta
+                FROM item i
+                WHERE i.estado_id = 1
+                ORDER BY i.nombre
+            ')->fetchAll(PDO::FETCH_ASSOC);
+        }
 
         $sql = "
             SELECT DISTINCT i.nombre, i.ruta

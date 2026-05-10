@@ -17,6 +17,12 @@ class Router
         // 🔥 MIDDLEWARE DE SEGURIDAD
         $this->middleware($controllerName, $method);
 
+        if (SessionManager::userLogged()
+            && ContextGateService::mustRedirectToContextSelection($controllerName, $method)) {
+            header('Location: ?url=context/cambiarSede');
+            exit;
+        }
+
         $controllerFile = BASE_PATH . '/app/controllers/' . $controllerName . '.php';
 
         if (!file_exists($controllerFile)) {

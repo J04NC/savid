@@ -70,7 +70,12 @@ function initModalSystem() {
         container.innerHTML =
             `<div class="modal-loader">${loading}</div>`;
 
-        fetch("?url=" + url)
+        let fetchUrl = "?url=" + url;
+        if (url.includes("context/cambiarSede") && !url.includes("partial=")) {
+            fetchUrl += "&partial=1";
+        }
+
+        fetch(fetchUrl)
         .then(r => r.text())
         .then(html => {
 
@@ -214,7 +219,7 @@ function bindContextForm() {
                 closeModalGod();
                 location.reload();
             } else {
-                alert("No se pudo guardar");
+                alert(data.error || "No se pudo guardar");
             }
 
         })
@@ -232,17 +237,16 @@ SEDES AJAX
 
 function activarAjaxSedes() {
 
-    const empresa =
-        document.getElementById("empresaSelect");
+    const empresaSelect = document.getElementById("empresaSelect");
+    const empresaHidden = document.getElementById("empresaHidden");
+    const empresa = empresaSelect || empresaHidden;
 
     const sede =
         document.getElementById("sedeSelect");
 
     if (!empresa || !sede) return;
 
-    empresa.onchange = function () {
-
-        const id = this.value;
+    function cargar(id) {
 
         sede.innerHTML =
             `<option value="">Cargando...</option>`;
@@ -259,6 +263,12 @@ function activarAjaxSedes() {
 
             sede.innerHTML =
                 `<option value="">Seleccione sede</option>`;
+
+            if (!rows || !rows.length) {
+                sede.innerHTML +=
+                    `<option value="" disabled>No tiene sedes autorizadas</option>`;
+                return;
+            }
 
             rows.forEach(x => {
 
@@ -278,6 +288,16 @@ function activarAjaxSedes() {
 
         });
 
-    };
+    }
+
+    if (empresaSelect) {
+        empresaSelect.onchange = function () {
+            cargar(this.value);
+        };
+    }
+
+    if (empresaHidden && empresaHidden.value) {
+        cargar(empresaHidden.value);
+    }
 
 }

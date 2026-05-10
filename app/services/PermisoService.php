@@ -40,6 +40,10 @@ class PermisoService
             return false;
         }
 
+        if (!empty($_SESSION['es_super_admin'])) {
+            return true;
+        }
+
         $database = new Database();
         $pdo = $database->connect();
 
@@ -212,6 +216,10 @@ class PermisoService
             return false;
         }
 
+        if (!empty($_SESSION['es_super_admin'])) {
+            return true;
+        }
+
         $database = new Database();
         $pdo = $database->connect();
 
@@ -315,5 +323,48 @@ class PermisoService
         }
 
         return false;
+    }
+
+    /**
+     * Indica si el usuario tiene al menos un permiso "permitir" (estado 5):
+     * en tabla permiso (usuario) o en rol_permiso (alguno de sus roles).
+     * Super Admin no debe usar este método (se asume acceso global antes).
+     */
+    public static function userHasAssignedGrants(int $userId): bool
+    {
+        $database = new Database();
+        $pdo = $database->connect();
+
+        $stmt = $pdo->prepare('
+            SELECT 1
+            FROM permiso
+            WHERE usuario_id = ?
+            AND estado_id = 5
+            LIMIT 1
+        ');
+        $stmt->execute([$userId]);
+
+        if ($stmt->fetch()) {
+            return true;
+        }
+
+        $rolIds = self::rolIdsForUser($pdo, $userId);
+
+        if (empty($rolIds)) {
+            return false;
+        }
+
+        $placeholders = implode(',', array_fill(0, count($rolIds), '?'));
+
+        $stmt = $pdo->prepare("
+            SELECT 1
+            FROM rol_permiso
+            WHERE rol_id IN ($placeholders)
+            AND estado_id = 5
+            LIMIT 1
+        ");
+        $stmt->execute($rolIds);
+
+        return (bool) $stmt->fetchColumn();
     }
 }

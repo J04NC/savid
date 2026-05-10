@@ -53,4 +53,24 @@ class BranchRepository
 
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
+
+    /**
+     * Sedes a las que el usuario tiene acceso dentro de una empresa concreta.
+     */
+    public function findActiveByUserIdAndEmpresaId($userId, $empresaId)
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT s.id, s.nombre
+            FROM usuario_sede us
+            JOIN sede s ON s.id = us.sede_id
+            WHERE us.usuario_id = ?
+            AND us.estado_id = 1
+            AND s.estado_id = 1
+            AND s.empresa_id = ?
+            ORDER BY s.nombre
+        ");
+        $stmt->execute([$userId, $empresaId]);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
 }

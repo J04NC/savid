@@ -49,7 +49,7 @@ class CrudService
      */
     private function getTableDataUsuario(): array
     {
-        if ((int)($_SESSION['rol_id'] ?? 0) === 1) {
+        if ((int)($_SESSION['rol_id'] ?? 0) === 1 || !empty($_SESSION['es_super_admin'])) {
             $stmt = $this->pdo->query('SELECT * FROM usuario ORDER BY id DESC');
 
             return $stmt->fetchAll(PDO::FETCH_ASSOC);

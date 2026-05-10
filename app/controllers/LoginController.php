@@ -14,9 +14,12 @@ class LoginController
 
     public function index()
     {
-        // Redirigir si ya está logueado
         if (SessionManager::userLogged()) {
-            header("Location: ?url=dashboard");
+            if (ContextGateService::hasOperationalContext()) {
+                header('Location: ?url=dashboard');
+            } else {
+                header('Location: ?url=context/cambiarSede');
+            }
             exit;
         }
         require BASE_PATH . '/app/views/login.php';
@@ -43,12 +46,13 @@ class LoginController
         $auth = $this->authService->authenticate($username, $password);
 
         if (!$auth['success']) {
-            $_SESSION['login_error'] = $auth['error'];
+            $_SESSION['login_error'] = $auth['error'] ?? 'No se pudo iniciar sesión';
             header("Location: ?url=login");
             exit;
         }
 
-        header("Location: ?url=dashboard");
+        $target = $auth['redirect'] ?? '?url=dashboard';
+        header('Location: ' . $target);
         exit;
     }
 

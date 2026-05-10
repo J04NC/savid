@@ -2,6 +2,9 @@
 
 class AuthService
 {
+    /** Coincide con comprobaciones existentes (ej. RolController). */
+    private const SUPER_ADMIN_ROL_ID = 1;
+
     private UserRepository $userRepository;
     private CompanyRepository $companyRepository;
     private BranchRepository $branchRepository;
@@ -18,6 +21,9 @@ class AuthService
         $this->subscriptionRepository = new SubscriptionRepository($pdo);
     }
 
+    /**
+     * @return array{success:bool, error?:string, redirect?:string}
+     */
     public function authenticate($username, $password)
     {
         if ($username === '' || $password === '') {
@@ -30,19 +36,145 @@ class AuthService
             return ['success' => false, 'error' => 'Usuario o contraseña incorrectos'];
         }
 
-        $this->setUserSession($user);
-        $this->setEmpresaSession($user['id']);
+        $userId = (int)$user['id'];
 
-        if (!empty($_SESSION['empresa_id'])) {
-            $subscriptionValidation = $this->validateAndSetSubscription($_SESSION['empresa_id'], $_SESSION['empresa'] ?? '');
-            if (!$subscriptionValidation['success']) {
-                return $subscriptionValidation;
-            }
+        $this->clearStaleContextKeys();
+        $this->setUserSession($user);
+
+        if ($this->userRepository->hasRole($userId, self::SUPER_ADMIN_ROL_ID)) {
+            $_SESSION['es_super_admin'] = true;
+            $this->applySuperAdminSessionDefaults();
+
+            return ['success' => true, 'redirect' => '?url=dashboard'];
         }
 
-        $this->setSedeSession($user['id']);
+        $_SESSION['es_super_admin'] = false;
 
-        return ['success' => true];
+        if (!PermisoService::userHasAssignedGrants($userId)) {
+            $this->clearAuthState();
+
+            return [
+                'success' => false,
+                'error' => 'No tiene permisos asignados en el sistema. Comuníquese con el administrador.',
+            ];
+        }
+
+        $ctx = $this->resolveOperationalContext($userId);
+
+        if (!$ctx['success']) {
+            $this->clearAuthState();
+
+            return ['success' => false, 'error' => $ctx['error']];
+        }
+
+        return ['success' => true, 'redirect' => $ctx['redirect']];
+    }
+
+    private function clearStaleContextKeys(): void
+    {
+        unset(
+            $_SESSION['empresa_id'],
+            $_SESSION['empresa'],
+            $_SESSION['empresas'],
+            $_SESSION['sede_id'],
+            $_SESSION['sede'],
+            $_SESSION['sedes'],
+            $_SESSION['es_super_admin'],
+            $_SESSION['plan_id'],
+            $_SESSION['plan_nombre'],
+            $_SESSION['fecha_fin']
+        );
+    }
+
+    private function clearAuthState(): void
+    {
+        unset(
+            $_SESSION['user_id'],
+            $_SESSION['nombre'],
+            $_SESSION['rol_id'],
+            $_SESSION['rol_nombre'],
+            $_SESSION['es_super_admin'],
+            $_SESSION['empresa_id'],
+            $_SESSION['empresa'],
+            $_SESSION['empresas'],
+            $_SESSION['sede_id'],
+            $_SESSION['sede'],
+            $_SESSION['sedes'],
+            $_SESSION['plan_id'],
+            $_SESSION['plan_nombre'],
+            $_SESSION['fecha_fin']
+        );
+    }
+
+    private function applySuperAdminSessionDefaults(): void
+    {
+        $_SESSION['empresa_id'] = null;
+        $_SESSION['sede_id'] = null;
+        $_SESSION['empresa'] = '';
+        $_SESSION['sede'] = '';
+        unset($_SESSION['empresas'], $_SESSION['sedes']);
+        unset($_SESSION['plan_id'], $_SESSION['plan_nombre'], $_SESSION['fecha_fin']);
+    }
+
+    /**
+     * Usuario operativo (no Super Admin): empresa + sede obligatorias salvo flujo de selección.
+     *
+     * @return array{success:bool, error?:string, redirect?:string}
+     */
+    private function resolveOperationalContext(int $userId): array
+    {
+        $empresas = $this->companyRepository->findActiveByUserId($userId);
+
+        if (count($empresas) === 0) {
+            return [
+                'success' => false,
+                'error' => "No tiene ninguna empresa asociada.\nComuníquese con el administrador del sistema.",
+            ];
+        }
+
+        if (count($empresas) > 1) {
+            $_SESSION['empresas'] = $empresas;
+            $_SESSION['empresa_id'] = null;
+            $_SESSION['empresa'] = 'Seleccione empresa';
+            $_SESSION['sedes'] = null;
+            $_SESSION['sede_id'] = null;
+            $_SESSION['sede'] = 'Seleccione sede';
+
+            return ['success' => true, 'redirect' => '?url=context/cambiarSede'];
+        }
+
+        $empresa = $empresas[0];
+        $_SESSION['empresa_id'] = $empresa['id'];
+        $_SESSION['empresa'] = $empresa['razon_social'];
+        $_SESSION['empresas'] = $empresas;
+
+        $subscriptionValidation = $this->validateAndSetSubscription((int)$empresa['id'], $empresa['razon_social'] ?? '');
+        if (!$subscriptionValidation['success']) {
+            return $subscriptionValidation;
+        }
+
+        $sedes = $this->branchRepository->findActiveByUserIdAndEmpresaId($userId, (int)$empresa['id']);
+
+        if (count($sedes) === 0) {
+            return [
+                'success' => false,
+                'error' => "No tiene ninguna sede asignada.\nComuníquese con el administrador del sistema.",
+            ];
+        }
+
+        if (count($sedes) === 1) {
+            $_SESSION['sede_id'] = $sedes[0]['id'];
+            $_SESSION['sede'] = $sedes[0]['nombre'];
+            $_SESSION['sedes'] = $sedes;
+
+            return ['success' => true, 'redirect' => '?url=dashboard'];
+        }
+
+        $_SESSION['sedes'] = $sedes;
+        $_SESSION['sede_id'] = null;
+        $_SESSION['sede'] = 'Seleccione sede';
+
+        return ['success' => true, 'redirect' => '?url=context/cambiarSede'];
     }
 
     private function setUserSession($user)
@@ -53,40 +185,9 @@ class AuthService
         $_SESSION['rol_nombre'] = $user['rol_nombre'] ?? '';
     }
 
-    private function setEmpresaSession($userId)
-    {
-        $empresas = $this->companyRepository->findActiveByUserId($userId);
-
-        if (count($empresas) === 1) {
-            $_SESSION['empresa_id'] = $empresas[0]['id'];
-            $_SESSION['empresa'] = $empresas[0]['razon_social'];
-        } elseif (count($empresas) > 1) {
-            $_SESSION['empresas'] = $empresas;
-            $_SESSION['empresa_id'] = null;
-            $_SESSION['empresa'] = 'Seleccione empresa';
-        } else {
-            $_SESSION['empresa_id'] = null;
-            $_SESSION['empresa'] = 'Sin empresa';
-        }
-    }
-
-    private function setSedeSession($userId)
-    {
-        $sedes = $this->branchRepository->findActiveByUserId($userId);
-
-        if (count($sedes) === 1) {
-            $_SESSION['sede_id'] = $sedes[0]['id'];
-            $_SESSION['sede'] = $sedes[0]['nombre'];
-        } elseif (count($sedes) > 1) {
-            $_SESSION['sedes'] = $sedes;
-            $_SESSION['sede_id'] = $sedes[0]['id'] ?? null;
-            $_SESSION['sede'] = $sedes[0]['nombre'] ?? 'Seleccione sede';
-        } else {
-            $_SESSION['sede_id'] = null;
-            $_SESSION['sede'] = 'Sin sede';
-        }
-    }
-
+    /**
+     * @return array{success:bool, error?:string}
+     */
     private function validateAndSetSubscription($empresaId, $empresaNombre)
     {
         $suscripcion = $this->subscriptionRepository->findActiveLatestByEmpresaId($empresaId);
