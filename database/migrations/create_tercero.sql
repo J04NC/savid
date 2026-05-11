@@ -1,0 +1,5 @@
+-- Deprecado: el esquema completo (tercero + territorio + tipopersona) está en:
+--   database/migrations/schema_maestros_territorio_tercero.sql
+--
+-- Si solo agregas la columna en usuario:
+--   database/migrations/add_usuario_tercero_id.sql

@@ -39,7 +39,10 @@ class UsuarioController
 
         $usuario = $context['usuario'];
         $roles = $context['roles'];
-        $selectedRoles = $context['selectedRoles'];
+        $assignments = $context['assignments'];
+        $empresasDisponibles = $context['empresasDisponibles'];
+        $sedesPorEmpresa = $context['sedesPorEmpresa'];
+        $puedeRolGlobal = !empty($_SESSION['es_super_admin']) || (int)($_SESSION['rol_id'] ?? 0) === 1;
 
         require BASE_PATH . '/app/views/usuario/roles.php';
     }
@@ -54,10 +57,15 @@ class UsuarioController
             exit;
         }
 
-        $roles = $_POST['roles'] ?? [];
-        $this->userAccessService->saveRoles((int)$usuarioId, $roles);
+        $assignments = $_POST['assignments'] ?? [];
+        if (!is_array($assignments)) {
+            $assignments = [];
+        }
+        $assignments = array_values($assignments);
 
-        echo json_encode(['success' => true]);
+        $result = $this->userAccessService->saveRoles((int)$usuarioId, $assignments);
+
+        echo json_encode($result);
         exit;
     }
 

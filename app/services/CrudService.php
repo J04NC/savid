@@ -181,13 +181,26 @@ class CrudService
 
         $id = $data['id'] ?? null;
 
+        $columnNames = array_column($columns, 'Field');
+
+        /*
+        =========================
+        USUARIO: username + tercero_id (vincular empresa si mismo tercero)
+        =========================
+        */
+
+        if (!$id && $tabla === 'usuario') {
+            if ($this->usuarioDuplicateSameTerceroLinkOrThrow($data, $columnNames)) {
+                return true;
+            }
+        }
+
         /*
         =========================
         AUTO EMPRESA / SEDE
         =========================
         */
 
-        $columnNames = array_column($columns, 'Field');
 
         if (in_array('empresa_id', $columnNames) && empty($data['empresa_id'])) {
             $data['empresa_id'] = $_SESSION['empresa_id'] ?? null;
@@ -343,9 +356,46 @@ class CrudService
         return $relations;
     }
 
+    /**
+     * Lista opcional de filtro para opciones del SELECT de un *_id.
+     * Solo se aplica si en COLUMN_COMMENT (partes separadas por |) existe relfilter:...
+     * Ej.: type:text|relfilter:1,2,3  →  solo ids 1,2,3
+     * Sin relfilter:, el comentario no filtra (antes se interpretaba todo el texto y el combo quedaba vacío).
+     */
+    private function extractRelFilterListFromColumnComment(?string $comment): ?string
+    {
+        $comment = trim((string)$comment);
+        if ($comment === '') {
+            return null;
+        }
+
+        foreach (explode('|', $comment) as $part) {
+            $part = trim($part);
+            if ($part === '') {
+                continue;
+            }
+            $lower = strtolower($part);
+            if (str_starts_with($lower, 'relfilter:')) {
+                return trim(substr($part, strlen('relfilter:')));
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Identificador de tabla seguro para interpolar en SQL (solo alfanumérico y guión bajo).
+     */
+    private function sqlIdentifierTable(string $tabla): string
+    {
+        return preg_replace('/[^A-Za-z0-9_]/', '', $tabla) ?: 'invalid_table';
+    }
+
     public function getRelationData($tabla, $column = null, $comment = null)
     {
-        $stmt = $this->pdo->query("SHOW COLUMNS FROM $tabla");
+        $tablaSql = '`' . $this->sqlIdentifierTable($tabla) . '`';
+
+        $stmt = $this->pdo->query("SHOW COLUMNS FROM $tablaSql");
         $columns = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         $displayColumn = null;
@@ -370,12 +420,36 @@ class CrudService
             }
         }
 
-        $sql = "SELECT id, $displayColumn as nombre FROM $tabla";
+        if (!$displayColumn) {
+            return [];
+        }
+
+        $isTercero = ($tabla === 'tercero');
+        $hasNombres = false;
+        $hasApellidos = false;
+        foreach ($columns as $col) {
+            if ($col['Field'] === 'nombres') {
+                $hasNombres = true;
+            }
+            if ($col['Field'] === 'apellidos') {
+                $hasApellidos = true;
+            }
+        }
+
+        if ($isTercero && $hasNombres && $hasApellidos) {
+            $displayExpr = "COALESCE(NULLIF(TRIM(CONCAT_WS(' ', NULLIF(TRIM(COALESCE(`nombres`,'')), ''), NULLIF(TRIM(COALESCE(`apellidos`,'')), ''))), ''), NULLIF(TRIM(COALESCE(`razon_social`,'')), ''), CONCAT('Tercero #', `id`))";
+        } else {
+            $displayExpr = '`' . str_replace('`', '', $displayColumn) . '`';
+        }
+
+        $sql = "SELECT `id`, ($displayExpr) AS nombre FROM $tablaSql";
         $params = [];
 
-        if ($comment) {
+        $filterList = $this->extractRelFilterListFromColumnComment($comment);
 
-            $items = array_map('trim', explode(',', $comment));
+        if ($filterList !== null && $filterList !== '') {
+
+            $items = array_map('trim', explode(',', $filterList));
 
             $includeIds = [];
             $excludeIds = [];
@@ -384,7 +458,9 @@ class CrudService
 
             foreach ($items as $item) {
 
-                if ($item === '') continue;
+                if ($item === '') {
+                    continue;
+                }
 
                 $isExclude = str_starts_with($item, '!');
 
@@ -413,22 +489,22 @@ class CrudService
             $conditions = [];
 
             if (!empty($includeIds)) {
-                $conditions[] = "id IN (" . implode(',', array_fill(0, count($includeIds), '?')) . ")";
+                $conditions[] = "`id` IN (" . implode(',', array_fill(0, count($includeIds), '?')) . ")";
                 $params = array_merge($params, $includeIds);
             }
 
             if (!empty($includeNames)) {
-                $conditions[] = "$displayColumn IN (" . implode(',', array_fill(0, count($includeNames), '?')) . ")";
+                $conditions[] = "($displayExpr) IN (" . implode(',', array_fill(0, count($includeNames), '?')) . ")";
                 $params = array_merge($params, $includeNames);
             }
 
             if (!empty($excludeIds)) {
-                $conditions[] = "id NOT IN (" . implode(',', array_fill(0, count($excludeIds), '?')) . ")";
+                $conditions[] = "`id` NOT IN (" . implode(',', array_fill(0, count($excludeIds), '?')) . ")";
                 $params = array_merge($params, $excludeIds);
             }
 
             if (!empty($excludeNames)) {
-                $conditions[] = "$displayColumn NOT IN (" . implode(',', array_fill(0, count($excludeNames), '?')) . ")";
+                $conditions[] = "($displayExpr) NOT IN (" . implode(',', array_fill(0, count($excludeNames), '?')) . ")";
                 $params = array_merge($params, $excludeNames);
             }
 
@@ -468,6 +544,57 @@ class CrudService
     /**
      * Tras crear un usuario, enlazar empresa/sede del contexto actual en las tablas puente.
      */
+    /**
+     * Creación de usuario: si el username ya existe, solo se permite cuando el
+     * tercero_id coincide; entonces se enlaza empresa/sede de sesión sin duplicar fila.
+     * Si el tercero no coincide → error en campo username.
+     *
+     * @return bool true si ya se enlazó y no debe ejecutarse INSERT
+     */
+    private function usuarioDuplicateSameTerceroLinkOrThrow(array $data, array $columnNames): bool
+    {
+        if (!in_array('tercero_id', $columnNames, true)) {
+            return false;
+        }
+
+        $username = trim((string)($data['username'] ?? ''));
+        if ($username === '') {
+            return false;
+        }
+
+        $terceroNew = isset($data['tercero_id']) && $data['tercero_id'] !== ''
+            ? (int)$data['tercero_id']
+            : null;
+
+        $stmt = $this->pdo->prepare('
+            SELECT id, tercero_id
+            FROM usuario
+            WHERE LOWER(TRIM(username)) = LOWER(TRIM(?))
+            AND estado_id = 1
+            LIMIT 1
+        ');
+        $stmt->execute([$username]);
+        $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$existing) {
+            return false;
+        }
+
+        $terceroOld = isset($existing['tercero_id']) && $existing['tercero_id'] !== '' && $existing['tercero_id'] !== null
+            ? (int)$existing['tercero_id']
+            : null;
+
+        if ($terceroOld !== $terceroNew) {
+            throw new Exception(json_encode([
+                'username' => 'Este nombre de usuario no está disponible porque ya existe para otro tercero.',
+            ], JSON_UNESCAPED_UNICODE));
+        }
+
+        $this->linkNewUsuarioToSessionScope((int)$existing['id']);
+
+        return true;
+    }
+
     private function linkNewUsuarioToSessionScope(int $usuarioId): void
     {
         $eid = $_SESSION['empresa_id'] ?? null;

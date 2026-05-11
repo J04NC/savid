@@ -35,17 +35,34 @@ class UserAccessRepository
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    public function findRoleIdsByUserId($usuarioId)
+    /**
+     * Asignaciones activas rol + alcance (empresa/sede NULL = global o según negocio).
+     *
+     * @return array<int, array{rol_id:int, empresa_id:?int, sede_id:?int}>
+     */
+    public function findRoleAssignmentsByUserId(int $usuarioId): array
     {
         $stmt = $this->pdo->prepare("
-            SELECT rol_id
+            SELECT rol_id, empresa_id, sede_id
             FROM usuario_rol
             WHERE usuario_id = ?
             AND estado_id = 1
+            ORDER BY rol_id, empresa_id, sede_id
         ");
         $stmt->execute([$usuarioId]);
 
-        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $out = [];
+
+        foreach ($rows as $r) {
+            $out[] = [
+                'rol_id' => (int)$r['rol_id'],
+                'empresa_id' => $r['empresa_id'] === null || $r['empresa_id'] === '' ? null : (int)$r['empresa_id'],
+                'sede_id' => $r['sede_id'] === null || $r['sede_id'] === '' ? null : (int)$r['sede_id'],
+            ];
+        }
+
+        return $out;
     }
 
     public function deleteRolesByUserId($usuarioId)
@@ -54,13 +71,13 @@ class UserAccessRepository
         $stmt->execute([$usuarioId]);
     }
 
-    public function insertUserRole($usuarioId, $rolId)
+    public function insertUserRole(int $usuarioId, int $rolId, ?int $empresaId, ?int $sedeId): void
     {
         $stmt = $this->pdo->prepare("
-            INSERT INTO usuario_rol (usuario_id, rol_id, estado_id)
-            VALUES (?, ?, 1)
+            INSERT INTO usuario_rol (usuario_id, rol_id, empresa_id, sede_id, estado_id)
+            VALUES (?, ?, ?, ?, 1)
         ");
-        $stmt->execute([$usuarioId, $rolId]);
+        $stmt->execute([$usuarioId, $rolId, $empresaId, $sedeId]);
     }
 
     public function getPermissionMatrixRows()

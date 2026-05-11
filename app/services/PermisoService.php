@@ -12,13 +12,17 @@ class PermisoService
      */
     private static function rolIdsForUser(PDO $pdo, int $userId): array
     {
-        $stmt = $pdo->prepare('
-            SELECT rol_id
-            FROM usuario_rol
-            WHERE usuario_id = ?
-            AND estado_id = 1
-        ');
-        $stmt->execute([$userId]);
+        [$empresaId, $sedeId] = self::sessionEmpresaSede();
+        [$urScopeSql, $urScopeParams] = self::tenantScopeSql('ur', $empresaId, $sedeId);
+
+        $stmt = $pdo->prepare("
+            SELECT DISTINCT ur.rol_id
+            FROM usuario_rol ur
+            WHERE ur.usuario_id = ?
+            AND ur.estado_id = 1
+            $urScopeSql
+        ");
+        $stmt->execute(array_merge([$userId], $urScopeParams));
 
         return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
     }
@@ -325,7 +329,7 @@ class PermisoService
             return true;
         }
 
-        $rolIds = self::rolIdsForUser($pdo, $userId);
+        $rolIds = self::rolIdsForUserAllScopes($pdo, $userId);
 
         if (empty($rolIds)) {
             return false;
@@ -343,5 +347,24 @@ class PermisoService
         $stmt->execute($rolIds);
 
         return (bool) $stmt->fetchColumn();
+    }
+
+    /**
+     * Todos los rol_id activos en usuario_rol sin filtrar por empresa/sede de sesión.
+     * Usado en login (userHasAssignedGrants) antes de tener contexto.
+     *
+     * @return int[]
+     */
+    private static function rolIdsForUserAllScopes(PDO $pdo, int $userId): array
+    {
+        $stmt = $pdo->prepare('
+            SELECT DISTINCT ur.rol_id
+            FROM usuario_rol ur
+            WHERE ur.usuario_id = ?
+            AND ur.estado_id = 1
+        ');
+        $stmt->execute([$userId]);
+
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
     }
 }

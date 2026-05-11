@@ -204,12 +204,12 @@ function initCrudAcciones() {
                 ],
                 usuario_roles: [
                     "usuario/roles/" + selectedId,
-                    "lg",
+                    "xl",
                     "Cargando roles..."
                 ],
                 user_roles: [
                     "usuario/roles/" + selectedId,
-                    "lg",
+                    "xl",
                     "Cargando roles..."
                 ],
                 usuario_sedes: [
