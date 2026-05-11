@@ -1,0 +1,32 @@
+/**
+ * tokens.css — variables de tema SAVID
+ * Cargar antes que app.css (ver app/views/layouts/main.php)
+ */
+
+:root {
+    --savid-accent: #1dd1a1;
+    --savid-accent-hover: #17c495;
+    --savid-accent-muted: rgba(29, 209, 161, 0.12);
+    --savid-accent-strong: #008060;
+    --savid-toolbar-btn: #1abc9c;
+}
+
+.dark-mode {
+    --crud-th-bg: #000000;
+    --crud-th-fg: var(--savid-accent);
+    --crud-td-border: rgba(255, 255, 255, 0.05);
+    --crud-row-hover: rgba(29, 209, 161, 0.06);
+    --crud-row-selected: rgba(29, 209, 161, 0.12);
+    --modal-form-muted: #a3a3a3;
+    --modal-form-text: #e5e5e5;
+}
+
+.light-mode {
+    --crud-th-bg: #f4f4f4;
+    --crud-th-fg: var(--savid-accent-strong);
+    --crud-td-border: #ececec;
+    --crud-row-hover: rgba(0, 128, 96, 0.08);
+    --crud-row-selected: rgba(0, 128, 96, 0.14);
+    --modal-form-muted: #64748b;
+    --modal-form-text: #334155;
+}

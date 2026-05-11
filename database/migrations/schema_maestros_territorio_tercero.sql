@@ -28,24 +28,6 @@ SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
 /* =============================================================================
-   01 — tipodocumento (omitir si ya la tienes)
-   ============================================================================= */
-
-CREATE TABLE IF NOT EXISTS `tipodocumento` (
-    `id` TINYINT(3) UNSIGNED NOT NULL AUTO_INCREMENT,
-    `codigo` VARCHAR(4) NOT NULL COMMENT 'Código según resolución DIAN / RUT normativa local',
-    `nombre` VARCHAR(100) NOT NULL COMMENT 'Nombre del tipo de documento',
-    `estado_id` SMALLINT(5) UNSIGNED NOT NULL DEFAULT '1' COMMENT 'activo,inactivo',
-    `created_at` TIMESTAMP NULL DEFAULT NULL,
-    `updated_at` TIMESTAMP NULL DEFAULT NULL,
-    PRIMARY KEY (`id`) USING BTREE,
-    UNIQUE INDEX `tipo_documento_codigo_unique` (`codigo`) USING BTREE,
-    INDEX `fk_tipodocumento_estado` (`estado_id`) USING BTREE,
-    CONSTRAINT `fk_tipodocumento_estado` FOREIGN KEY (`estado_id`) REFERENCES `estado` (`id`)
-        ON UPDATE NO ACTION ON DELETE NO ACTION
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-/* =============================================================================
    02 — tipopersona
    ============================================================================= */
 

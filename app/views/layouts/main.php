@@ -11,8 +11,12 @@ if ($moduloId) {
 }
 
 $assetRef = BASE_PATH . '/public/js/app.js';
+$cssTokens = BASE_PATH . '/public/css/tokens.css';
+$cssApp = BASE_PATH . '/public/css/app.css';
 $assetsV = max(
     is_readable($assetRef) ? (int)filemtime($assetRef) : time(),
+    is_readable($cssTokens) ? (int)filemtime($cssTokens) : 0,
+    is_readable($cssApp) ? (int)filemtime($cssApp) : 0,
     (int)($_SESSION['asset_cache_bust'] ?? 0),
     1
 );
@@ -26,6 +30,7 @@ $assetsV = max(
 <meta charset="UTF-8">
 <title>SAVID</title>
 
+<link rel="stylesheet" href="/css/tokens.css?v=<?= (int)$assetsV ?>">
 <link rel="stylesheet" href="/css/app.css?v=<?= (int)$assetsV ?>">
 
 </head>

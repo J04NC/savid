@@ -1,7 +1,12 @@
 /* ==================================================
-SAVID CSS MASTER + MODAL SYSTEM GOD
-Archivo completo: public/css/app.css
-================================================== */
+   SAVID — hoja principal (public/css/app.css)
+
+   Orden de carga:
+   1. tokens.css   — variables (--savid-*, --crud-*); enlazar antes que este archivo en main.php
+   2. (este archivo) reset, layout, sidebar, CRUD, modal, dashboard, permisos
+
+   Login: public/css/login.css (página aparte)
+   ================================================== */
 
 /* ============================= */
 /* RESET */
@@ -608,17 +613,17 @@ button:hover{
 }
 
 .crud-table td{
-    border-bottom:1px solid rgba(255,255,255,.05);
+    border-bottom:1px solid var(--crud-td-border);
 }
 
 .dark-mode .crud-table th{
-    background:#000;
-    color:#1dd1a1;
+    background:var(--crud-th-bg);
+    color:var(--crud-th-fg);
 }
 
 .light-mode .crud-table th{
-    background:#f4f4f4;
-    color:#008060;
+    background:var(--crud-th-bg);
+    color:var(--crud-th-fg);
 }
 
 .crud-row{
@@ -626,11 +631,130 @@ button:hover{
 }
 
 .crud-row:hover{
-    background:rgba(29,209,161,.06);
+    background:var(--crud-row-hover);
 }
 
 .crud-row.selected{
-    background:rgba(29,209,161,.12);
+    background:var(--crud-row-selected);
+}
+
+/* Tablas embebidas en modales: mismo skin que CRUD automático */
+.modal .crud-table{
+    border-radius:12px;
+}
+
+.modal .crud-table th{
+    position:sticky;
+    top:0;
+    z-index:2;
+}
+
+/* Celdas con selects: permitir que el texto del option no fuerce filas enormes */
+.modal .crud-table td .form-input{
+    min-width:0;
+    max-width:100%;
+}
+
+.modal .crud-table td{
+    vertical-align:middle;
+}
+
+.crud-table-actions{
+    width:52px;
+    text-align:center;
+    white-space:nowrap;
+}
+
+/* Formularios dentro del modal de contexto (#contextContainer) */
+.modal-form-head{
+    margin-bottom:16px;
+}
+
+.modal-form-title{
+    margin:0 0 8px;
+    font-size:18px;
+    font-weight:700;
+    letter-spacing:.02em;
+    color:var(--modal-form-text);
+}
+
+.modal-form-meta{
+    margin:0 0 6px;
+    font-size:14px;
+    color:var(--modal-form-muted);
+}
+
+.modal-form-meta strong{
+    color:var(--modal-form-text);
+}
+
+.modal-form-help{
+    margin:0 0 16px;
+    font-size:13px;
+    line-height:1.5;
+    color:var(--modal-form-muted);
+}
+
+.modal-form-alert{
+    color:#ff6b6b;
+    font-size:14px;
+    margin:0 0 12px;
+}
+
+.modal-form-toolbar{
+    margin-top:12px;
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px;
+    align-items:center;
+}
+
+.btn-add-crud-row{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    padding:10px 16px;
+    border-radius:10px;
+    font-weight:600;
+    font-size:14px;
+    border:1px solid rgba(29,209,161,.35);
+    background:rgba(29,209,161,.1);
+    color:var(--savid-accent);
+    cursor:pointer;
+    transition:.15s ease;
+}
+
+.light-mode .btn-add-crud-row{
+    border-color:rgba(0,128,96,.25);
+    background:rgba(0,128,96,.08);
+    color:var(--savid-accent-strong);
+}
+
+.btn-add-crud-row:hover{
+    filter:brightness(1.08);
+    box-shadow:0 0 0 3px rgba(29,209,161,.12);
+}
+
+.btn-row-remove{
+    width:36px;
+    height:36px;
+    border:none;
+    border-radius:10px;
+    background:rgba(255,255,255,.06);
+    color:#fca5a5;
+    font-size:18px;
+    line-height:1;
+    cursor:pointer;
+    transition:.15s ease;
+}
+
+.light-mode .btn-row-remove{
+    background:#f1f5f9;
+    color:#dc2626;
+}
+
+.btn-row-remove:hover{
+    background:rgba(248,113,113,.18);
 }
 
 /* ==================================================

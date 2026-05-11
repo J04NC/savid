@@ -19,39 +19,41 @@ $renderSedeOptions = static function (?int $empresaId, array $sedesPorEmpresa, $
 };
 ?>
 
-<form id="formUsuarioRoles" style="padding:16px;">
-    <h3 style="margin:0 0 8px;">Roles por alcance</h3>
-    <p style="margin:0 0 6px; color:#555; font-size:14px;">
-        Usuario: <strong><?= htmlspecialchars($usuario['nombre'] ?? $usuario['username'] ?? 'Usuario') ?></strong>
-    </p>
-    <p style="margin:0 0 16px; color:#666; font-size:13px; line-height:1.45;">
-        Cada fila asigna un <strong>rol</strong> al contexto <strong>empresa</strong> y opcionalmente <strong>sede</strong>.
-        <?php if (!empty($puedeRolGlobal)): ?>
-            Alcance <em>Global</em> (empresa y sede vacíos) aplica en cualquier contexto de sesión.
-        <?php else: ?>
-            Debe elegir empresa en cada fila (solo administradores globales pueden dejar alcance global vacío).
-        <?php endif; ?>
-    </p>
+<form id="formUsuarioRoles" class="modal-user-roles-form">
+    <div class="modal-form-head">
+        <h3 class="modal-form-title">Roles por alcance</h3>
+        <p class="modal-form-meta">
+            Usuario: <strong><?= htmlspecialchars($usuario['nombre'] ?? $usuario['username'] ?? 'Usuario') ?></strong>
+        </p>
+        <p class="modal-form-help">
+            Cada fila asigna un <strong>rol</strong> al contexto <strong>empresa</strong> y opcionalmente <strong>sede</strong>.
+            <?php if (!empty($puedeRolGlobal)): ?>
+                Alcance <em>Global</em> (empresa y sede vacíos) aplica en cualquier contexto de sesión.
+            <?php else: ?>
+                Debe elegir empresa en cada fila (solo administradores globales pueden dejar alcance global vacío).
+            <?php endif; ?>
+        </p>
+    </div>
 
     <?php if (empty($empresasDisponibles)): ?>
-        <p style="color:#b00;">No hay empresas disponibles para asignar roles con alcance. Revise permisos o use un administrador global.</p>
+        <p class="modal-form-alert">No hay empresas disponibles para asignar roles con alcance. Revise permisos o use un administrador global.</p>
     <?php else: ?>
 
-    <div style="overflow-x:auto; border:1px solid #e8e8e8; border-radius:8px;">
-        <table class="role-assign-table" style="width:100%; border-collapse:collapse; font-size:14px;">
+    <div class="crud-table">
+        <table>
             <thead>
-                <tr style="background:#f5f5f5; text-align:left;">
-                    <th style="padding:10px 12px; min-width:200px;">Rol</th>
-                    <th style="padding:10px 12px; min-width:200px;">Empresa</th>
-                    <th style="padding:10px 12px; min-width:200px;">Sede</th>
-                    <th style="padding:10px 12px; width:56px;"></th>
+                <tr>
+                    <th>Rol</th>
+                    <th>Empresa</th>
+                    <th>Sede</th>
+                    <th class="crud-table-actions" aria-label="Acciones"></th>
                 </tr>
             </thead>
             <tbody id="roleAssignBody">
-                <?php foreach ($assignments as $a): ?>
-                <tr class="role-assign-row">
-                    <td style="padding:8px 12px; vertical-align:middle;">
-                        <select name="assignments[][rol_id]" class="form-input ra-rol" style="width:100%;">
+                <?php foreach (array_values($assignments) as $i => $a): ?>
+                <tr class="crud-row role-assign-row">
+                    <td>
+                        <select name="assignments[<?= (int)$i ?>][rol_id]" class="form-input ra-rol">
                             <option value="">— Rol —</option>
                             <?php foreach ($roles as $rol): ?>
                                 <?php $rid = (int)$rol['id']; ?>
@@ -61,8 +63,8 @@ $renderSedeOptions = static function (?int $empresaId, array $sedesPorEmpresa, $
                             <?php endforeach; ?>
                         </select>
                     </td>
-                    <td style="padding:8px 12px; vertical-align:middle;">
-                        <select name="assignments[][empresa_id]" class="form-input ra-empresa" style="width:100%;" data-ra-empresa>
+                    <td>
+                        <select name="assignments[<?= (int)$i ?>][empresa_id]" class="form-input ra-empresa" data-ra-empresa>
                             <?php
                             $eSel = $a['empresa_id'] ?? null;
                             $eSelNull = ($eSel === null || $eSel === '');
@@ -81,13 +83,13 @@ $renderSedeOptions = static function (?int $empresaId, array $sedesPorEmpresa, $
                             <?php endforeach; ?>
                         </select>
                     </td>
-                    <td style="padding:8px 12px; vertical-align:middle;">
-                        <select name="assignments[][sede_id]" class="form-input ra-sede" style="width:100%;" data-ra-sede>
+                    <td>
+                        <select name="assignments[<?= (int)$i ?>][sede_id]" class="form-input ra-sede" data-ra-sede>
                             <?php $renderSedeOptions($eSelNull ? null : (int)$eSel, $sedesPorEmpresa, $a['sede_id'] ?? null); ?>
                         </select>
                     </td>
-                    <td style="padding:8px 12px; vertical-align:middle; text-align:center;">
-                        <button type="button" class="btn-remove-row" title="Quitar fila" style="border:none;background:transparent;cursor:pointer;font-size:18px;line-height:1;">✕</button>
+                    <td class="crud-table-actions">
+                        <button type="button" class="btn-row-remove" title="Quitar fila" aria-label="Quitar fila">✕</button>
                     </td>
                 </tr>
                 <?php endforeach; ?>
@@ -95,15 +97,13 @@ $renderSedeOptions = static function (?int $empresaId, array $sedesPorEmpresa, $
         </table>
     </div>
 
-    <div style="margin-top:12px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
-        <button type="button" id="btnAddRoleRow" class="form-input" style="width:auto; cursor:pointer; padding:8px 14px;">
-            + Agregar fila
-        </button>
+    <div class="modal-form-toolbar">
+        <button type="button" id="btnAddRoleRow" class="btn-add-crud-row">+ Agregar fila</button>
     </div>
 
     <?php endif; ?>
 
-    <div class="role-footer" style="margin-top:20px;">
+    <div class="role-footer">
         <button type="button" class="btn-cancel" onclick="closeModalGod()">Cancelar</button>
         <button type="submit" class="btn-save">💾 Guardar</button>
     </div>
@@ -113,6 +113,18 @@ $renderSedeOptions = static function (?int $empresaId, array $sedesPorEmpresa, $
 (function(){
 const SEDES_POR_EMPRESA = <?= json_encode($sedesPorEmpresa ?? [], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_UNESCAPED_UNICODE) ?>;
 const PUEDE_GLOBAL = <?= !empty($puedeRolGlobal) ? 'true' : 'false' ?>;
+
+function reindexRoleRows() {
+    const rows = document.querySelectorAll('#roleAssignBody .role-assign-row');
+    rows.forEach(function (tr, i) {
+        const rol = tr.querySelector('.ra-rol');
+        const emp = tr.querySelector('.ra-empresa');
+        const sed = tr.querySelector('.ra-sede');
+        if (rol) rol.name = 'assignments[' + i + '][rol_id]';
+        if (emp) emp.name = 'assignments[' + i + '][empresa_id]';
+        if (sed) sed.name = 'assignments[' + i + '][sede_id]';
+    });
+}
 
 function fillSedeSelect(empresaSelect, sedeSelect) {
     const e = empresaSelect.value.trim();
@@ -143,7 +155,7 @@ function wireRow(tr) {
             }
         });
     }
-    const rm = tr.querySelector('.btn-remove-row');
+    const rm = tr.querySelector('.btn-row-remove');
     if (rm) {
         rm.addEventListener('click', function () {
             const body = document.getElementById('roleAssignBody');
@@ -153,9 +165,11 @@ function wireRow(tr) {
                 const s2 = tr.querySelector('.ra-sede');
                 const e2 = tr.querySelector('.ra-empresa');
                 if (e2 && s2) fillSedeSelect(e2, s2);
+                reindexRoleRows();
                 return;
             }
             tr.remove();
+            reindexRoleRows();
         });
     }
 }
@@ -181,14 +195,18 @@ if (btnAdd && tbody) {
         if (emp && sed) fillSedeSelect(emp, sed);
         tbody.appendChild(tr);
         wireRow(tr);
+        reindexRoleRows();
     });
 }
+
+reindexRoleRows();
 
 const form = document.getElementById('formUsuarioRoles');
 if (!form) return;
 
 form.addEventListener('submit', function (e) {
     e.preventDefault();
+    reindexRoleRows();
 
     const btn = this.querySelector('.btn-save');
     const txt = btn.innerHTML;
