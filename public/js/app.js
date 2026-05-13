@@ -102,15 +102,42 @@ function initModalSystem() {
 
     window.closeModalGod = function (silent = false) {
 
-        modal.classList.add("hidden");
-        document.body.classList.remove("modal-open");
+        const finishClose = function () {
+            window.__modalBeforeClose = null;
+            modal.classList.add("hidden");
+            document.body.classList.remove("modal-open");
 
-        container.innerHTML = "";
-        box.className = "modal-content";
+            container.innerHTML = "";
+            box.className = "modal-content";
 
-        if (!silent) {
-            document.activeElement?.blur();
+            if (!silent) {
+                document.activeElement?.blur();
+            }
+        };
+
+        if (typeof window.__modalBeforeClose === "function") {
+            try {
+                const ret = window.__modalBeforeClose(silent);
+
+                if (ret != null && typeof ret.then === "function") {
+                    ret.then(function (ok) {
+                        if (ok !== false) {
+                            finishClose();
+                        }
+                    }).catch(function () {
+                        /* error ya mostrada; no cerrar */
+                    });
+
+                    return;
+                }
+            } catch (e) {
+                finishClose();
+
+                return;
+            }
         }
+
+        finishClose();
 
     };
 

@@ -1353,6 +1353,236 @@ AGREGAR AL FINAL DE public/css/app.css
     font-size:18px;
 }
 
+/* Modal permisos usuario: alcance + indicador rol */
+
+.usuario-permisos-toolbar{
+    padding:12px 16px;
+    border-bottom:1px solid rgba(0,0,0,.08);
+    margin-bottom:10px;
+}
+
+.dark-mode .usuario-permisos-toolbar{
+    border-bottom-color:rgba(255,255,255,.1);
+}
+
+.usuario-permisos-toolbar-title{
+    display:flex;
+    flex-wrap:wrap;
+    align-items:baseline;
+    gap:8px;
+    margin-bottom:12px;
+}
+
+.usuario-permisos-user{
+    font-weight:600;
+    opacity:.85;
+}
+
+.usuario-permisos-scope{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:12px;
+    max-width:720px;
+}
+
+@media(max-width:560px){
+    .usuario-permisos-scope{
+        grid-template-columns:1fr;
+    }
+}
+
+.usuario-permisos-label{
+    display:block;
+    font-size:11px;
+    font-weight:700;
+    letter-spacing:.04em;
+    margin-bottom:4px;
+    opacity:.85;
+}
+
+.usuario-permisos-select{
+    width:100%;
+}
+
+.usuario-permisos-legend{
+    margin:12px 0 0;
+    font-size:12px;
+    line-height:1.45;
+    opacity:.88;
+}
+
+.usuario-permisos-legend code{
+    font-size:11px;
+}
+
+.usuario-permisos-loading{
+    padding:28px 16px;
+    text-align:center;
+    font-size:14px;
+}
+
+.usuario-perm-save-status{
+    margin:8px 0 0;
+    font-size:12px;
+    font-weight:600;
+    min-height:1.25em;
+    color:rgba(29,209,161,.95);
+}
+
+.dark-mode .usuario-perm-save-status{
+    color:rgba(52,211,153,.95);
+}
+
+.usuario-perm-cell{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:6px;
+    flex-wrap:wrap;
+}
+
+/* Checkbox + opcional “−” dentro del mismo cuadrado (denegado) */
+.usuario-perm-cell .perm-check-slot{
+    position:relative;
+    display:inline-flex;
+    width:18px;
+    height:18px;
+    flex-shrink:0;
+    align-items:center;
+    justify-content:center;
+    vertical-align:middle;
+}
+
+.usuario-perm-cell .perm-check-slot .check-perm{
+    position:relative;
+    z-index:1;
+}
+
+.usuario-perm-cell.perm-cell-denied .perm-check-slot .check-perm{
+    position:absolute;
+    left:0;
+    top:0;
+    width:18px;
+    height:18px;
+    margin:0;
+    opacity:0;
+    cursor:pointer;
+    z-index:2;
+}
+
+.usuario-perm-cell.perm-cell-denied .perm-deny-inside{
+    position:absolute;
+    left:0;
+    top:0;
+    width:18px;
+    height:18px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    pointer-events:none;
+    border:2px solid rgba(225,29,72,.55);
+    border-radius:4px;
+    background:rgba(254,226,226,.4);
+    font-size:13px;
+    font-weight:900;
+    line-height:1;
+    color:#be123c;
+    z-index:1;
+    box-sizing:border-box;
+}
+
+.dark-mode .usuario-perm-cell.perm-cell-denied .perm-deny-inside{
+    border-color:rgba(251,113,133,.5);
+    background:rgba(127,29,29,.28);
+    color:#fecaca;
+}
+
+.perm-deny-legend-icon{
+    display:inline-flex;
+    vertical-align:middle;
+    align-items:center;
+    justify-content:center;
+    margin:0 3px;
+}
+
+.perm-deny-legend-inner{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    width:14px;
+    height:14px;
+    border:2px solid rgba(225,29,72,.5);
+    border-radius:3px;
+    font-size:10px;
+    font-weight:900;
+    line-height:1;
+    color:#be123c;
+    background:rgba(254,226,226,.35);
+    box-sizing:border-box;
+}
+
+.dark-mode .perm-deny-legend-inner{
+    border-color:rgba(251,113,133,.45);
+    background:rgba(127,29,29,.22);
+    color:#fecaca;
+}
+
+.perm-legend-swatch{
+    display:inline-block;
+    vertical-align:middle;
+    width:14px;
+    height:14px;
+    border-radius:3px;
+    margin:0 4px 0 2px;
+    box-sizing:border-box;
+    border:2px solid transparent;
+}
+
+.perm-legend-swatch--role{
+    background:rgba(99,102,241,.35);
+    border-color:rgba(79,70,229,.45);
+}
+
+.perm-legend-swatch--direct{
+    background:rgba(29,209,161,.35);
+    border-color:rgba(16,185,129,.5);
+}
+
+.dark-mode .perm-legend-swatch--role{
+    background:rgba(129,140,248,.4);
+    border-color:rgba(165,180,252,.5);
+}
+
+.dark-mode .perm-legend-swatch--direct{
+    background:rgba(52,211,153,.35);
+    border-color:rgba(45,212,191,.55);
+}
+
+/* Permiso por rol: mismo checkbox nativo que el resto; solo cambia el color (accent) */
+#permisosMatriz .role-table td.cell-check.cell-has-role .usuario-perm-cell:not(.perm-cell-denied) .perm-check-slot .check-perm{
+    accent-color:#6366f1;
+}
+
+.dark-mode #permisosMatriz .role-table td.cell-check.cell-has-role .usuario-perm-cell:not(.perm-cell-denied) .perm-check-slot .check-perm{
+    accent-color:#818cf8;
+}
+
+.role-table td.cell-has-role{
+    box-shadow:inset 0 0 0 1px rgba(99,102,241,.28);
+}
+
+.dark-mode .role-table td.cell-has-role{
+    box-shadow:inset 0 0 0 1px rgba(129,140,248,.22);
+}
+
+.role-table td.cell-has-deny{
+    box-shadow:inset 0 0 0 1px rgba(225,29,72,.35);
+}
+
+.dark-mode .role-table td.cell-has-deny{
+    box-shadow:inset 0 0 0 1px rgba(251,113,133,.4);
+}
+
 .role-footer{
     display:flex;
     justify-content:flex-end;

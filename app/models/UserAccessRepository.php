@@ -122,11 +122,99 @@ class UserAccessRepository
         return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
     }
 
+    /**
+     * Permisos denegados explícitos (estado 6) para el alcance indicado.
+     *
+     * @return int[]
+     */
+    public function getDeniedPermissionItemAccionIdsForScope(int $usuarioId, ?int $empresaId, ?int $sedeId): array
+    {
+        [$scopeSql, $scopeParams] = PermisoService::tenantScopeSql('p', $empresaId, $sedeId);
+
+        $sql = "
+            SELECT DISTINCT p.item_accion_id
+            FROM permiso p
+            WHERE p.usuario_id = ?
+            AND p.estado_id = 6
+            $scopeSql
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute(array_merge([$usuarioId], $scopeParams));
+
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /**
+     * Permisos concedidos vía roles del usuario (rol_permiso) para el mismo alcance empresa/sede
+     * que usuario_rol y rol_permiso (alineado con PermisoService::checkItemAccionPermission).
+     *
+     * @return int[]
+     */
+    public function getRoleGrantedItemAccionIdsForUserScope(int $usuarioId, ?int $empresaId, ?int $sedeId): array
+    {
+        [$urSql, $urParams] = PermisoService::tenantScopeSql('ur', $empresaId, $sedeId);
+        [$rpSql, $rpParams] = PermisoService::tenantScopeSql('rp', $empresaId, $sedeId);
+
+        $sql = "
+            SELECT DISTINCT rp.item_accion_id
+            FROM usuario_rol ur
+            INNER JOIN rol_permiso rp ON rp.rol_id = ur.rol_id AND rp.estado_id = 5
+            WHERE ur.usuario_id = ?
+            AND ur.estado_id = 1
+            $urSql
+            $rpSql
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute(array_merge([$usuarioId], $urParams, $rpParams));
+
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
     public function insertAllowedPermission(int $usuarioId, int $itemAccionId, ?int $empresaId, ?int $sedeId): void
     {
         $stmt = $this->pdo->prepare('
             INSERT INTO permiso (usuario_id, item_accion_id, estado_id, empresa_id, sede_id)
             VALUES (?, ?, 5, ?, ?)
+        ');
+        $stmt->execute([$usuarioId, $itemAccionId, $empresaId, $sedeId]);
+    }
+
+    public function insertDeniedPermission(int $usuarioId, int $itemAccionId, ?int $empresaId, ?int $sedeId): void
+    {
+        $stmt = $this->pdo->prepare('
+            INSERT INTO permiso (usuario_id, item_accion_id, estado_id, empresa_id, sede_id)
+            VALUES (?, ?, 6, ?, ?)
+        ');
+        $stmt->execute([$usuarioId, $itemAccionId, $empresaId, $sedeId]);
+    }
+
+    /**
+     * Elimina cualquier fila permiso del usuario para ese item_accion.
+     * Necesario porque uk_permiso es (usuario_id, item_accion_id) sin empresa/sede.
+     */
+    public function deletePermissionForUserItem(int $usuarioId, int $itemAccionId): void
+    {
+        $stmt = $this->pdo->prepare('
+            DELETE FROM permiso
+            WHERE usuario_id = ?
+            AND item_accion_id = ?
+        ');
+        $stmt->execute([$usuarioId, $itemAccionId]);
+    }
+
+    /**
+     * Quita cualquier fila permiso (permitir o denegar) para ese alcance.
+     */
+    public function deletePermissionForScope(int $usuarioId, int $itemAccionId, ?int $empresaId, ?int $sedeId): void
+    {
+        $stmt = $this->pdo->prepare('
+            DELETE FROM permiso
+            WHERE usuario_id = ?
+            AND item_accion_id = ?
+            AND empresa_id <=> ?
+            AND sede_id <=> ?
         ');
         $stmt->execute([$usuarioId, $itemAccionId, $empresaId, $sedeId]);
     }
@@ -142,5 +230,47 @@ class UserAccessRepository
             AND sede_id <=> ?
         ');
         $stmt->execute([$usuarioId, $itemAccionId, $empresaId, $sedeId]);
+    }
+
+    /**
+     * @param int[] $removeIds eliminar fila permiso (cualquier estado) en el alcance
+     * @param int[] $grantIds insertar permitir (5) — solo ítems sin concesión por rol en este alcance
+     * @param int[] $denyIds insertar denegar (6) — solo ítems con concesión por rol en este alcance
+     */
+    public function applyUsuarioPermisosMutations(
+        int $usuarioId,
+        array $removeIds,
+        array $grantIds,
+        array $denyIds,
+        ?int $empresaId,
+        ?int $sedeId
+    ): void {
+        $removeIds = array_values(array_unique(array_map('intval', $removeIds)));
+        $grantIds = array_values(array_unique(array_map('intval', $grantIds)));
+        $denyIds = array_values(array_unique(array_map('intval', $denyIds)));
+
+        $this->pdo->beginTransaction();
+
+        try {
+            foreach ($removeIds as $itemAccionId) {
+                $this->deletePermissionForUserItem($usuarioId, $itemAccionId);
+            }
+
+            foreach ($grantIds as $itemAccionId) {
+                $this->deletePermissionForUserItem($usuarioId, $itemAccionId);
+                $this->insertAllowedPermission($usuarioId, $itemAccionId, $empresaId, $sedeId);
+            }
+
+            foreach ($denyIds as $itemAccionId) {
+                $this->deletePermissionForUserItem($usuarioId, $itemAccionId);
+                $this->insertDeniedPermission($usuarioId, $itemAccionId, $empresaId, $sedeId);
+            }
+
+            $this->pdo->commit();
+        } catch (\Throwable $e) {
+            $this->pdo->rollBack();
+
+            throw $e;
+        }
     }
 }
