@@ -708,6 +708,11 @@ function initCrudAcciones() {
                     "usuario/empresa_sede/" + selectedId,
                     "lg",
                     "Cargando empresas y sedes..."
+                ],
+                tercero_identificaciones: [
+                    "tercero/identificaciones/" + selectedId,
+                    "lg",
+                    "Cargando identificaciones…"
                 ]
             };
 
