@@ -259,6 +259,12 @@ class CrudService
 
                 } else {
 
+                    if ($this->columnCommentIsUppercaseOnly($col['COLUMN_COMMENT'] ?? '') && $value !== '') {
+                        $value = function_exists('mb_strtoupper')
+                            ? mb_strtoupper($value, 'UTF-8')
+                            : strtoupper($value);
+                    }
+
                     if ($nullable == 'NO' && $value === '') {
                         $errors[$name] = "Este campo es obligatorio";
                     }
@@ -357,6 +363,274 @@ class CrudService
     }
 
     /**
+     * FKs salientes desde una tabla (INFORMATION_SCHEMA).
+     *
+     * @return array<int, array{column: string, referenced_table: string, referenced_column: string}>
+     */
+    public function getOutgoingForeignKeys(string $table): array
+    {
+        $table = $this->sqlIdentifierTable($table);
+        $stmt = $this->pdo->prepare('
+            SELECT COLUMN_NAME AS `column`,
+                   REFERENCED_TABLE_NAME AS referenced_table,
+                   REFERENCED_COLUMN_NAME AS referenced_column
+            FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+            WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = ?
+            AND REFERENCED_TABLE_NAME IS NOT NULL
+            AND REFERENCED_COLUMN_NAME IS NOT NULL
+            ORDER BY COLUMN_NAME
+        ');
+        $stmt->execute([$table]);
+
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $byColumn = [];
+
+        foreach ($rows as $row) {
+            $col = $row['column'];
+            if (!isset($byColumn[$col])) {
+                $byColumn[$col] = $row;
+            }
+        }
+
+        return array_values($byColumn);
+    }
+
+    /**
+     * FK de contexto.campo → tabla referenciada (solo si existe en INFORMATION_SCHEMA).
+     *
+     * @return array{column: string, referenced_table: string, referenced_column: string}|null
+     */
+    public function getForeignKeyForColumn(string $contextTable, string $fkColumn): ?array
+    {
+        foreach ($this->getOutgoingForeignKeys($contextTable) as $fk) {
+            if ($fk['column'] === $fkColumn) {
+                return $fk;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Columnas en la tabla referenciada que filtran por el mismo nombre de campo en el formulario (context).
+     * Convención: si `departamento` tiene `pais_id` y `tercero` tiene `pais_id`, el combo departamento se filtra por tercero.pais_id.
+     *
+     * @return list<string> nombres de campo (coinciden en context y en tabla hija)
+     */
+    public function getCatalogParentFieldsForFk(string $contextTable, string $fkColumn): array
+    {
+        $fk = $this->getForeignKeyForColumn($contextTable, $fkColumn);
+
+        if ($fk === null) {
+            return [];
+        }
+
+        $ref = $this->sqlIdentifierTable($fk['referenced_table']);
+        $ctxCols = [];
+        $ctxSafe = $this->sqlIdentifierTable($contextTable);
+
+        foreach ($this->pdo->query('SHOW COLUMNS FROM `' . $ctxSafe . '`')->fetchAll(PDO::FETCH_ASSOC) as $c) {
+            $ctxCols[$c['Field']] = true;
+        }
+
+        $parents = [];
+        /*
+         * No encadenar por columnas de “vida”/ámbito: suelen existir en ambas tablas (estado_id)
+         * pero no son jerarquía de catálogo; si las incluimos, el API exige parent_estado_id y el
+         * formulario a veces no tiene ese campo → búsqueda siempre vacía.
+         */
+        $skipParentNames = ['estado_id', 'empresa_id', 'sede_id', 'created_at', 'updated_at'];
+
+        foreach ($this->getOutgoingForeignKeys($ref) as $childFk) {
+            $col = $childFk['column'];
+            if (in_array($col, $skipParentNames, true)) {
+                continue;
+            }
+            if (isset($ctxCols[$col])) {
+                $parents[] = $col;
+            }
+        }
+
+        return array_values(array_unique($parents));
+    }
+
+    /**
+     * Estimación de filas (rápido) para relmode:auto.
+     */
+    public function getApproxTableRows(string $table): int
+    {
+        $t = $this->sqlIdentifierTable($table);
+        $stmt = $this->pdo->prepare('
+            SELECT COALESCE(TABLE_ROWS, 0) AS n
+            FROM INFORMATION_SCHEMA.TABLES
+            WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = ?
+            LIMIT 1
+        ');
+        $stmt->execute([$t]);
+        $n = (int)$stmt->fetchColumn();
+
+        return max(0, $n);
+    }
+
+    /**
+     * Metadatos para UI autocomplete + API catalogSearch.
+     *
+     * @return array{referenced_table: string, referenced_column: string, parent_fields: string[]}|null
+     */
+    public function buildCatalogMetaForFk(string $contextTable, string $fkColumn): ?array
+    {
+        $fk = $this->getForeignKeyForColumn($contextTable, $fkColumn);
+
+        if ($fk === null) {
+            return null;
+        }
+
+        return [
+            'referenced_table' => $fk['referenced_table'],
+            'referenced_column' => $fk['referenced_column'],
+            'parent_fields' => $this->getCatalogParentFieldsForFk($contextTable, $fkColumn),
+        ];
+    }
+
+    /**
+     * Búsqueda server-side para autocomplete CRUD. Solo tablas/columnas validadas por INFORMATION_SCHEMA.
+     *
+     * @param array<string, scalar> $parentValues nombre campo contexto => id
+     * @return list<array{id: int, nombre: string}>
+     */
+    public function searchCatalogOptions(
+        string $contextTable,
+        string $fkColumn,
+        string $q,
+        array $parentValues,
+        int $limit = 25
+    ): array {
+        $meta = $this->buildCatalogMetaForFk($contextTable, $fkColumn);
+
+        if ($meta === null) {
+            return [];
+        }
+
+        $qTrim = trim($q);
+
+        /*
+         * Sin texto de búsqueda: exigir todos los padres de jerarquía (listado inicial acotado).
+         * Con texto: aplicar solo los padres que vengan informados (evita lista vacía si falta un combo previo).
+         */
+        if ($qTrim === '') {
+            foreach ($meta['parent_fields'] as $pf) {
+                if (!array_key_exists($pf, $parentValues)) {
+                    return [];
+                }
+                $pv = $parentValues[$pf];
+                if ($pv === '' || $pv === null) {
+                    return [];
+                }
+            }
+        }
+
+        $refTable = $this->sqlIdentifierTable($meta['referenced_table']);
+        $refCol = $this->sqlIdentifierTable($meta['referenced_column']);
+        $limit = max(1, min(100, $limit));
+
+        $stmtCols = $this->pdo->query('SHOW COLUMNS FROM `' . $refTable . '`');
+        $refColumns = $stmtCols ? $stmtCols->fetchAll(PDO::FETCH_ASSOC) : [];
+        $refFieldNames = array_column($refColumns, 'Field');
+
+        $displayColumn = null;
+        $preferred = ['nombre', 'razon_social', 'descripcion', 'titulo', 'username', 'email'];
+
+        foreach ($preferred as $pref) {
+            if (in_array($pref, $refFieldNames, true)) {
+                $displayColumn = $pref;
+                break;
+            }
+        }
+
+        if ($displayColumn === null) {
+            foreach ($refFieldNames as $fn) {
+                if ($fn !== $refCol) {
+                    $displayColumn = $fn;
+                    break;
+                }
+            }
+        }
+
+        if ($displayColumn === null) {
+            return [];
+        }
+
+        $displaySafe = str_replace('`', '', $displayColumn);
+
+        $isTercero = ($refTable === 'tercero');
+        $hasNombres = in_array('nombres', $refFieldNames, true);
+        $hasApellidos = in_array('apellidos', $refFieldNames, true);
+
+        $pkQuoted = '`' . $refCol . '`';
+
+        if ($isTercero && $hasNombres && $hasApellidos) {
+            $displayExpr = "COALESCE(NULLIF(TRIM(CONCAT_WS(' ', NULLIF(TRIM(COALESCE(`nombres`,'')), ''), NULLIF(TRIM(COALESCE(`apellidos`,'')), ''))), ''), NULLIF(TRIM(COALESCE(`razon_social`,'')), ''), CONCAT('Tercero #', " . $pkQuoted . '))';
+        } else {
+            $displayExpr = '`' . $displaySafe . '`';
+        }
+
+        $allowedParents = array_flip($meta['parent_fields']);
+        $where = ['1=1'];
+        $params = [];
+
+        foreach ($parentValues as $pname => $pval) {
+            if (!isset($allowedParents[$pname])) {
+                continue;
+            }
+            $pc = $this->sqlIdentifierTable((string)$pname);
+            if (!in_array($pc, $refFieldNames, true)) {
+                continue;
+            }
+            if ($pval === '' || $pval === null) {
+                continue;
+            }
+            $where[] = '`' . $pc . '` = ?';
+            $params[] = (int)$pval;
+        }
+
+        if ($qTrim !== '') {
+            $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $qTrim) . '%';
+            $where[] = '(' . $displayExpr . ' LIKE ?)';
+            $params[] = $like;
+        }
+
+        if (in_array('estado_id', $refFieldNames, true)) {
+            $where[] = '`estado_id` = 1';
+        }
+
+        $includeCatalogTipo = ($refTable === 'zona') && in_array('tipo', $refFieldNames, true);
+        $tipoSelectSql = $includeCatalogTipo ? ', `tipo`' : '';
+
+        $sql = 'SELECT ' . $pkQuoted . ' AS id' . $tipoSelectSql . ', (' . $displayExpr . ') AS nombre FROM `' . $refTable . '` WHERE ' . implode(' AND ', $where)
+            . ' ORDER BY (' . $displayExpr . ') ASC LIMIT ' . (int)$limit;
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+
+        $out = [];
+
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $item = [
+                'id' => (int)$row['id'],
+                'nombre' => (string)($row['nombre'] ?? ''),
+            ];
+            if ($includeCatalogTipo) {
+                $item['tipo'] = isset($row['tipo']) ? (string)$row['tipo'] : '';
+            }
+            $out[] = $item;
+        }
+
+        return $out;
+    }
+
+    /**
      * Lista opcional de filtro para opciones del SELECT de un *_id.
      * Solo se aplica si en COLUMN_COMMENT (partes separadas por |) existe relfilter:...
      * Ej.: type:text|relfilter:1,2,3  →  solo ids 1,2,3
@@ -381,6 +655,33 @@ class CrudService
         }
 
         return null;
+    }
+
+    /**
+     * Modo de widget para FK en comentario de columna: relmode:select|autocomplete|auto
+     * Vacío = select completo (comportamiento histórico).
+     */
+    public function extractRelModeFromComment(?string $comment): string
+    {
+        $comment = trim((string)$comment);
+        if ($comment === '') {
+            return '';
+        }
+
+        foreach (explode('|', $comment) as $part) {
+            $part = trim($part);
+            if ($part === '') {
+                continue;
+            }
+            if (str_starts_with(strtolower($part), 'relmode:')) {
+                $v = strtolower(trim(substr($part, strlen('relmode:'))));
+                if (in_array($v, ['select', 'autocomplete', 'auto'], true)) {
+                    return $v;
+                }
+            }
+        }
+
+        return '';
     }
 
     /**
@@ -442,7 +743,11 @@ class CrudService
             $displayExpr = '`' . str_replace('`', '', $displayColumn) . '`';
         }
 
-        $sql = "SELECT `id`, ($displayExpr) AS nombre FROM $tablaSql";
+        $includeTipo = ($this->sqlIdentifierTable($tabla) === 'zona')
+            && in_array('tipo', array_column($columns, 'Field'), true);
+        $tipoSql = $includeTipo ? ', `tipo`' : '';
+
+        $sql = "SELECT `id`{$tipoSql}, ($displayExpr) AS nombre FROM $tablaSql";
         $params = [];
 
         $filterList = $this->extractRelFilterListFromColumnComment($comment);
@@ -535,6 +840,20 @@ class CrudService
 
             if (str_starts_with($part, 'type:')) {
                 return str_replace('type:', '', $part) === 'password';
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Comentario con trozo exacto "uppercase" → texto solo en mayúsculas (formulario + persistencia).
+     */
+    private function columnCommentIsUppercaseOnly(string $comment): bool
+    {
+        foreach (explode('|', $comment) as $part) {
+            if (trim($part) === 'uppercase') {
+                return true;
             }
         }
 

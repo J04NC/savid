@@ -133,6 +133,8 @@ class ModuleController
             $acciones = $crud['acciones'];
             $relations = $crud['relations'];
             $relationData = $crud['relationData'];
+            $catalogRegistry = $crud['catalogRegistry'] ?? [];
+            $crudContextTable = $currentItem['ruta'];
 
             $view = BASE_PATH . "/app/views/crud/table.php";
             require BASE_PATH . '/app/views/layouts/main.php';
@@ -140,6 +142,55 @@ class ModuleController
         }
 
         echo "Módulo no encontrado";
+    }
+
+    /**
+     * Búsqueda JSON para FK con relmode autocomplete/auto (validación por INFORMATION_SCHEMA + permiso ver en context).
+     */
+    public function catalogSearch(): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+
+        $context = preg_replace('/[^A-Za-z0-9_]/', '', (string)($_GET['context'] ?? ''));
+        $field = preg_replace('/[^A-Za-z0-9_]/', '', (string)($_GET['field'] ?? ''));
+        $q = (string)($_GET['q'] ?? '');
+        $limit = (int)($_GET['limit'] ?? 25);
+
+        if ($context === '' || $field === '') {
+            http_response_code(400);
+            echo json_encode(['ok' => false, 'error' => 'context y field son obligatorios'], JSON_UNESCAPED_UNICODE);
+
+            return;
+        }
+
+        $currentItem = $this->moduleService->findCurrentItem($context);
+
+        if (!$currentItem || (class_exists('PermisoService') && !PermisoService::can($context, 'ver'))) {
+            http_response_code(403);
+            echo json_encode(['ok' => false, 'error' => 'forbidden'], JSON_UNESCAPED_UNICODE);
+
+            return;
+        }
+
+        $parents = [];
+
+        foreach ($_GET as $k => $v) {
+            if (!is_string($k) || !str_starts_with($k, 'parent_')) {
+                continue;
+            }
+            $pname = preg_replace('/[^A-Za-z0-9_]/', '', substr($k, strlen('parent_')));
+
+            if ($pname === '') {
+                continue;
+            }
+
+            $parents[$pname] = is_scalar($v) ? $v : '';
+        }
+
+        $crudService = new CrudService();
+        $items = $crudService->searchCatalogOptions($context, $field, $q, $parents, $limit);
+
+        echo json_encode(['ok' => true, 'items' => $items], JSON_UNESCAPED_UNICODE);
     }
 
     public function __call($method,$params)

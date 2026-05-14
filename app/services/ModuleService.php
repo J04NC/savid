@@ -2,6 +2,8 @@
 
 class ModuleService
 {
+    private const CRUD_CATALOG_AUTO_THRESHOLD = 250;
+
     private ModuleRepository $moduleRepository;
     private CrudService $crudService;
 
@@ -104,12 +106,50 @@ class ModuleService
             );
         }
 
+        $catalogRegistry = [];
+
+        foreach ($relations as $campo => $tablaRelacion) {
+            $comment = null;
+
+            foreach ($columns as $col) {
+                if ($col['Field'] === $campo) {
+                    $comment = $col['COLUMN_COMMENT'] ?? null;
+                    break;
+                }
+            }
+
+            $relmode = $this->crudService->extractRelModeFromComment($comment);
+            $useCatalog = false;
+
+            if ($relmode === 'autocomplete') {
+                $useCatalog = true;
+            } elseif ($relmode === 'auto') {
+                $useCatalog = $this->crudService->getApproxTableRows($tablaRelacion) > self::CRUD_CATALOG_AUTO_THRESHOLD;
+            }
+
+            if (!$useCatalog) {
+                continue;
+            }
+
+            $meta = $this->crudService->buildCatalogMetaForFk($tabla, $campo);
+
+            if ($meta === null) {
+                continue;
+            }
+
+            $catalogRegistry[$campo] = [
+                'parent_fields' => $meta['parent_fields'],
+                'referenced_table' => $meta['referenced_table'],
+            ];
+        }
+
         return [
             'data' => $data,
             'columns' => $columns,
             'acciones' => $acciones,
             'relations' => $relations,
             'relationData' => $relationData,
+            'catalogRegistry' => $catalogRegistry,
         ];
     }
 

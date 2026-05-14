@@ -12,7 +12,7 @@ Documentacion unica del proyecto: guia rapida para el dia a dia y detalle tecnic
 2. [Guia rapida (equipo)](#guia-rapida-equipo)
 3. [Arquitectura y flujo](#arquitectura-y-flujo)
 4. [Modulos refactorizados](#modulos-refactorizados)
-5. [CRUD automatico y acciones especiales](#crud-automatico-y-acciones-especiales)
+5. [CRUD automatico y acciones especiales](#crud-automatico-y-acciones-especiales) (tercero / `zona.tipo`, [comentarios MySQL](#opciones-reconocidas-en-column_comment-mysql))
 6. [Como agregar funcionalidad](#como-agregar-funcionalidad)
 7. [Detalle tecnico (capas y contratos)](#detalle-tecnico-capas-y-contratos)
 8. [Checklist y verificacion](#checklist-y-verificacion)
@@ -124,10 +124,13 @@ Archivos clave:
 - `public/js/crud.js`
 - `app/controllers/ModuleController.php`
 - `app/services/ModuleService.php`
+- `app/services/CrudService.php` (relaciones, catalogo y metadatos como `tipo` en `zona`)
 
 La vista CRUD necesita estas variables (si falta `relations`, se rompen los selects `*_id`):
 
 - `$data`, `$columns`, `$acciones`, `$relations`, `$relationData`
+
+En el CRUD de **`tercero`**, el modo urbano/rural se basa en **`zona.tipo`** (no en columna `zona_ubicacion`); el detalle esta en la subseccion **Tercero: modo urbano o rural** dentro de [CRUD automatico y acciones especiales](#crud-automatico-y-acciones-especiales). Las directivas del comentario de columna (`type:`, `relmode:`, etc.) estan descritas en [Opciones reconocidas en COLUMN_COMMENT](#opciones-reconocidas-en-column_comment-mysql).
 
 ### Acciones especiales (botones)
 
@@ -187,6 +190,8 @@ Flujo de request:
 
 ### Campos tipo password (generico)
 
+Forma parte de la directiva **`type:password`** descrita en [Opciones reconocidas en COLUMN_COMMENT](#opciones-reconocidas-en-column_comment-mysql).
+
 Cualquier columna cuyo **comentario en MySQL** incluya `type:password` (junto al resto de opciones que ya usas, separadas por `|`) se comporta asi:
 
 - Al **guardar**, el valor se guarda con `password_hash()` (algoritmo por defecto de PHP).
@@ -204,6 +209,61 @@ ALTER TABLE usuario MODIFY COLUMN password VARCHAR(255) NOT NULL
 Para **ocultar** la columna en la grilla pero dejarla solo en el formulario, añade por ejemplo `show:form` (segun tu convencion actual en `getConfigFromComment`).
 
 Recomendacion: columna `password` de longitud **al menos 255** para hashes bcrypt/argon.
+
+### Tercero: modo urbano o rural (`zona_id` + `zona.tipo`)
+
+El formulario CRUD de la tabla **`tercero`** alterna bloques de ubicacion segun el **tipo de la zona** elegida (`tercero.zona_id` → `zona.tipo`). **No** se usa ninguna columna `zona_ubicacion` en base de datos.
+
+| `zona.tipo` | Campos visibles (el otro bloque se oculta y se limpia) |
+|-------------|--------------------------------------------------------|
+| `rural` (comparacion en minusculas) | **Corregimiento** y **vereda** |
+| Cualquier otro valor (p. ej. `urbana`) | **Comuna** y **barrio** |
+
+**Condiciones para activar el toggle en la vista** (`data-crud-zona-ubicacion-toggle` en `app/views/crud/table.php`):
+
+- Contexto de tabla `tercero`.
+- Columna `zona_id`.
+- Al menos una columna entre `comuna_id`, `barrio_id`, `corregimiento_id`, `vereda_id`.
+
+**Datos y API:** en `app/services/CrudService.php`, cuando la tabla referenciada es **`zona`** y existe la columna **`tipo`**, tanto `getRelationData` como `searchCatalogOptions` (autocomplete del catalogo) devuelven `tipo` para que el front pueda etiquetar opciones y celdas con `data-zona-tipo`.
+
+**Front:** `public/js/crud.js` lee el tipo desde el `<select name="zona_id">` o desde el input oculto del catalogo (`dataset.zonaTipo`), aplica clases `crud-zona-urban` / `crud-zona-rural` y ajusta `required` y limpieza de grupos.
+
+**Migracion:** el archivo `database/migrations/add_tercero_zona_ubicacion_comuna_corregimiento.sql` quedo como **obsoleto** (solo comentario + `SELECT 1`). No ejecutar un ALTER que anada `zona_ubicacion` ni duplique `comuna_id` / `corregimiento_id` si el esquema maestro de territorio ya esta aplicado.
+
+### Autocomplete del catalogo (teclado)
+
+En el desplegable de busqueda del catalogo CRUD, **Tab** (sin Shift) confirma la opcion resaltada igual que **Enter**; **Shift+Tab** sigue moviendo el foco hacia atras sin seleccionar.
+
+### Opciones reconocidas en COLUMN_COMMENT (MySQL)
+
+En MySQL, el comentario de cada columna (`COLUMN_COMMENT`) puede llevar **varias directivas en una sola cadena**, separadas por **`|`** (pipe). Cada trozo se recorta con espacios (`trim`). La vista las interpreta en **`getConfigFromComment`** (`app/views/crud/table.php`); **`CrudService`** añade lectura de **`relmode`**, **`relfilter`**, **`type:password`** y la marca **`uppercase`**. **Mayusculas:** `relmode` y `relfilter` aceptan prefijo en cualquier mezcla (se normaliza a minusculas). **`type:`**, **`show:`**, **`order:`** y **`placeholder:`** deben ir en **minusculas** para que la vista los reconozca. La palabra clave **`uppercase`** es un trozo exacto en minusculas (igual que **`required`**).
+
+| Directiva | Ejemplo | Efecto |
+|-----------|---------|--------|
+| **`type:`** *valor* | `type:email` | Define el control en el formulario. Valores especiales: **`password`** (input dedicado, hash al guardar en servidor, ver mas abajo); **`textarea`**. Cualquier otro valor se usa como **`type` del `<input>` HTML** (p. ej. `text`, `email`, `number`, `date`…); el navegador puede aplicar validacion nativa (`email`, etc.). |
+| **`relmode:`** *modo* | `relmode:autocomplete` | Solo en columnas **clave foranea** (`*_id` con relacion declarada). **`select`**: lista completa (comportamiento por defecto si no pones `relmode`). **`autocomplete`**: siempre widget de busqueda con API `catalogSearch`. **`auto`**: catalogo solo si la tabla referenciada supera **~250 filas** (`ModuleService::CRUD_CATALOG_AUTO_THRESHOLD` y `CrudService::getApproxTableRows`); si no, lista tipo `select`. En `getConfigFromComment` los tres valores se guardan tal cual en configuracion de la vista; la decision catalogo vs select para `auto` ocurre al armar datos en `ModuleService`. |
+| **`relfilter:`** *lista* | `relfilter:1,2,3` o `relfilter:!5,Bogota` | Restringe las filas que alimentan el **combo relacion** en `getRelationData` (opciones del `<select>`). Lista separada por comas: numeros se interpretan como **`id`**; texto como coincidencia por **etiqueta mostrada** (`nombre`, etc.). Prefijo **`!`** en un elemento → **excluir** ese id o ese nombre (se generan condiciones `NOT IN`). Si no usas `relfilter`, no se añade filtro SQL extra. **Nota:** la busqueda del **catalogo** (`searchCatalogOptions`) **no** reaplica hoy esta lista; el filtro aplica de forma fiable al listado del modo `select` y a datos auxiliares cargados con la misma funcion. |
+| **`show:`** *vistas* | `show:none`, `show:form`, `show:table`, `show:form,table` | **`none`**: oculta la columna en **formulario y tabla**. Sin `none`: puedes combinar **`form`** y **`table`** separados por coma para mostrar solo en formulario, solo en grilla, o en ambos. |
+| **`order:`** *n* | `order:10` | Entero para **ordenar** columnas en formulario y cabecera de grilla (menor numero = mas arriba). Por defecto interno `999` si no se indica. |
+| **`placeholder:`** *texto* | `placeholder:Buscar…` | Texto de **marcador de posicion** en inputs/selects del formulario. Evita el caracter `|` dentro del texto (partiria la directiva). |
+| **`required`** | `required` | Se concatena en la cadena **`data-rules`** del input (convencion reservada). El atributo HTML **`required`** que bloquea el envio lo marca sobre todo **`IS_NULLABLE = NO`** en la columna; revisa ambos si quieres obligatoriedad estricta en cliente. |
+| **`uppercase`** | `uppercase` | El campo se edita y persiste **solo en mayusculas** (UTF-8: `mb_strtoupper` en servidor si existe la extension **mbstring**; si no, `strtoupper`). En el formulario: **`data-crud-uppercase="1"`** en `<input>` de texto, `<textarea>` y caja de busqueda del **catalogo** (`relmode` autocomplete/auto); **no** aplica a **`type:password`** ni al `<select>` de FK en modo lista. El JS (`initCrudUppercaseFields` en `public/js/crud.js`) fuerza mayusculas al escribir y al cargar fila. Valores vacios no se transforman. |
+| **`min:`** *n* / **`max:`** *n* | Dos trozos: `min:1` y `max:255` | Se añaden a **`data-rules`** del control (p. ej. `min:1|max:255`). La validacion al enviar en `public/js/crud.js` hoy solo comprueba campos con atributo **`required`**; `min`/`max` quedan para convencion o extensiones futuras salvo que se implemente otro chequeo. |
+
+**Ejemplo con solo mayusculas:**
+
+```sql
+COMMENT 'type:text|uppercase|order:15|placeholder:Numero de documento'
+```
+
+**Ejemplo combinado** (como en maestros / `tercero`):
+
+```sql
+COMMENT 'type:email|relmode:autocomplete|order:40|placeholder:Correo de contacto'
+```
+
+**Referencia de codigo:** `getConfigFromComment` en `app/views/crud/table.php`; `extractRelModeFromComment`, `extractRelFilterListFromColumnComment`, `columnCommentIsPasswordType`, `columnCommentIsUppercaseOnly` y uso de `relfilter` en `getRelationData` en `app/services/CrudService.php` (`save` aplica mayusculas antes de persistir); umbral `relmode:auto` en `ModuleService::CRUD_CATALOG_AUTO_THRESHOLD`; `initCrudUppercaseFields` / `crudNormalizeUppercaseField` en `public/js/crud.js`.
 
 ---
 
@@ -284,7 +344,7 @@ rg "data-accion|btn-accion|accion_codigo" public/js app/views
 - [ ] Permisos por ruta y por accion coherentes.
 - [ ] Contexto `empresa_id` / `sede_id` intacto.
 
-**Humo rapido CRUD:** nuevo, editar fila, select `*_id`, eliminar, boton especial si aplica.
+**Humo rapido CRUD:** nuevo, editar fila, select `*_id`, eliminar, boton especial si aplica. Si el item es **tercero** con `zona_id` y `zona.tipo`, comprobar que al cambiar de zona urbana a rural (y viceversa) se muestran u ocultan comuna/barrio frente a corregimiento/vereda.
 
 ---
 
@@ -293,6 +353,8 @@ rg "data-accion|btn-accion|accion_codigo" public/js app/views
 | Riesgo | Mitigacion |
 |--------|------------|
 | Regresion de selects en CRUD | Verificar que `relations` llegue a `crud/table.php`. |
+| Toggle tercero incoherente | Comprobar que `zona` tenga `tipo` y valores acordes (`rural` vs resto); revisar `data-zona-tipo` en grilla y catalogo. |
+| Migraciones duplicadas en territorio | No reejecutar `add_tercero_zona_ubicacion_comuna_corregimiento.sql` como ALTER legacy. |
 | Accion en BD sin JS | Checklist accion especial (punto 4 arriba). |
 | Logica repartida en controllers | Regla controller delgado; mover a Service. |
 

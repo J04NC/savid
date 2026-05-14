@@ -17,7 +17,9 @@ function getConfigFromComment($comment){
         'showForm' => true,
         'showTable' => true,
         'order' => 999,
-        'placeholder' => ''
+        'placeholder' => '',
+        'relmode' => 'select',
+        'uppercase' => false,
     ];
 
     if(empty($comment)) return $config;
@@ -27,6 +29,13 @@ function getConfigFromComment($comment){
     foreach($parts as $part){
 
         $part = trim($part);
+
+        if(str_starts_with(strtolower($part), 'relmode:')){
+            $rm = strtolower(trim(substr($part, strlen('relmode:'))));
+            if(in_array($rm, ['select', 'autocomplete', 'auto'], true)){
+                $config['relmode'] = $rm;
+            }
+        }
 
         if(str_starts_with($part,'type:')){
             $config['type'] = str_replace('type:','',$part);
@@ -60,6 +69,10 @@ function getConfigFromComment($comment){
         if(str_starts_with($part,'placeholder:')){
             $config['placeholder'] = str_replace('placeholder:','',$part);
         }
+
+        if ($part === 'uppercase') {
+            $config['uppercase'] = true;
+        }
     }
 
     return $config;
@@ -74,11 +87,38 @@ usort($columns, function($a,$b){
     $cb = getConfigFromComment($b['COLUMN_COMMENT'] ?? '');
     return $ca['order'] <=> $cb['order'];
 });
+
+$catalogRegistry = $catalogRegistry ?? [];
+$crudContextTable = $crudContextTable ?? '';
+
+$crudZonaFieldNames = array_column($columns, 'Field');
+$crudUrbanoRuralFields = ['comuna_id', 'barrio_id', 'corregimiento_id', 'vereda_id'];
+$crudHasUrbanoRural = count(array_intersect($crudUrbanoRuralFields, $crudZonaFieldNames)) > 0;
+$crudZonaUbicacionToggle = ($crudContextTable === 'tercero')
+    && in_array('zona_id', $crudZonaFieldNames, true)
+    && $crudHasUrbanoRural;
+
+$zonaTipoById = [];
+foreach ($relationData['zona_id'] ?? [] as $zopt) {
+    if (!isset($zopt['id'], $zopt['tipo']) || $zopt['tipo'] === '' || $zopt['tipo'] === null) {
+        continue;
+    }
+    $zonaTipoById[(string) $zopt['id']] = strtolower((string) $zopt['tipo']);
+}
+
+$relationMapsPreview = [];
+
+foreach ($relationData as $campoRel => $options) {
+    foreach ($options as $opt) {
+        $relationMapsPreview[$campoRel][$opt['id']] = $opt['nombre'];
+    }
+}
+
 ?>
 
 <div class="module-container">
 
-<form method="POST">
+<form method="POST" data-crud-context="<?= htmlspecialchars($crudContextTable, ENT_QUOTES, 'UTF-8') ?>"<?= !empty($crudZonaUbicacionToggle) ? ' data-crud-zona-ubicacion-toggle="1"' : '' ?>>
 
 <input type="hidden" name="id" id="crud_id" value="<?= $old['id'] ?? '' ?>">
 
@@ -156,13 +196,63 @@ $value = $old[$campo] ?? '';
 $error = $errors[$campo] ?? null;
 $required = ($col['IS_NULLABLE'] == 'NO') ? 'required' : '';
 $requiredAttr = ($config['type'] === 'password') ? '' : $required;
+$uppercaseDataAttr = (!empty($config['uppercase']) && $config['type'] !== 'password')
+    ? ' data-crud-uppercase="1"'
+    : '';
+
+$formGroupExtra = '';
+if (!empty($crudZonaUbicacionToggle)) {
+    if (in_array($campo, ['comuna_id', 'barrio_id'], true)) {
+        $formGroupExtra = ' crud-zona-urban';
+    } elseif (in_array($campo, ['corregimiento_id', 'vereda_id'], true)) {
+        $formGroupExtra = ' crud-zona-rural';
+    }
+}
 ?>
 
-<div class="form-group">
+<div class="form-group<?= htmlspecialchars($formGroupExtra, ENT_QUOTES, 'UTF-8') ?>">
 
 <label><?= formatLabel($campo) ?></label>
 
 <?php if(isset($relations[$campo])): ?>
+
+<?php if (!empty($catalogRegistry[$campo])): ?>
+<?php
+$selNombre = '';
+if ($value !== '' && $value !== null && isset($relationMapsPreview[$campo][$value])) {
+    $selNombre = $relationMapsPreview[$campo][$value];
+}
+$hidZonaTipoAttr = '';
+if ($campo === 'zona_id' && !empty($crudZonaUbicacionToggle) && $value !== '' && $value !== null) {
+    $hz = $zonaTipoById[(string) $value] ?? null;
+    if ($hz !== null && $hz !== '') {
+        $hidZonaTipoAttr = ' data-zona-tipo="' . htmlspecialchars($hz, ENT_QUOTES, 'UTF-8') . '"';
+    }
+}
+?>
+<div class="crud-catalog-wrap"
+     data-catalog-field="<?= htmlspecialchars($campo, ENT_QUOTES, 'UTF-8') ?>"
+     data-parent-fields="<?= htmlspecialchars(json_encode($catalogRegistry[$campo]['parent_fields'], JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8') ?>"
+     <?= ($campo === 'zona_id' && !empty($crudZonaUbicacionToggle)) ? 'data-crud-zona-master="1"' : '' ?>>
+<input type="hidden" name="<?= $campo ?>"
+value="<?= htmlspecialchars((string)$value) ?>"
+<?= $requiredAttr ?>
+data-label="<?= formatLabel($campo) ?>"
+data-rules="<?= $config['rules'] ?>"
+class="form-input crud-catalog-id <?= $error ? 'input-error' : '' ?>"
+<?= $hidZonaTipoAttr ?>>
+<input type="search"
+value="<?= htmlspecialchars($selNombre) ?>"
+placeholder="<?= htmlspecialchars($config['placeholder'] ?: 'Buscar…') ?>"
+autocomplete="off"
+data-label="<?= formatLabel($campo) ?>"
+data-rules=""
+class="form-input crud-catalog-search <?= $error ? 'input-error' : '' ?>"
+<?= $uppercaseDataAttr ?>>
+<ul class="crud-catalog-dropdown" hidden></ul>
+</div>
+
+<?php else: ?>
 
 <select name="<?= $campo ?>"
 <?= $requiredAttr ?>
@@ -173,12 +263,17 @@ class="form-input <?= $error ? 'input-error' : '' ?>">
 <option value=""><?= $config['placeholder'] ?: 'Seleccione' ?></option>
 
 <?php foreach($relationData[$campo] as $opt): ?>
-<option value="<?= $opt['id'] ?>" <?= ($value == $opt['id']) ? 'selected' : '' ?>>
+<option value="<?= $opt['id'] ?>" <?= ($value == $opt['id']) ? 'selected' : '' ?>
+<?php if ($campo === 'zona_id' && isset($opt['tipo']) && $opt['tipo'] !== '' && $opt['tipo'] !== null): ?>
+data-zona-tipo="<?= htmlspecialchars(strtolower((string) $opt['tipo']), ENT_QUOTES, 'UTF-8') ?>"
+<?php endif; ?>>
 <?= $opt['nombre'] ?>
 </option>
 <?php endforeach; ?>
 
 </select>
+
+<?php endif; ?>
 
 <?php else: ?>
 
@@ -203,7 +298,8 @@ name="<?= $campo ?>"
 placeholder="<?= $config['placeholder'] ?>"
 data-label="<?= formatLabel($campo) ?>"
 data-rules="<?= $config['rules'] ?>"
-class="form-input <?= $error ? 'input-error' : '' ?>"><?= htmlspecialchars($value) ?></textarea>
+class="form-input <?= $error ? 'input-error' : '' ?>"
+<?= $uppercaseDataAttr ?>><?= htmlspecialchars($value) ?></textarea>
 
 <?php else: ?>
 
@@ -215,7 +311,8 @@ value="<?= htmlspecialchars($value) ?>"
 placeholder="<?= $config['placeholder'] ?>"
 data-label="<?= formatLabel($campo) ?>"
 data-rules="<?= $config['rules'] ?>"
-class="form-input <?= $error ? 'input-error' : '' ?>">
+class="form-input <?= $error ? 'input-error' : '' ?>"
+<?= $uppercaseDataAttr ?>>
 
 <?php endif; ?>
 
@@ -293,9 +390,17 @@ if(isset($relationMaps[$campo])){
 if ($config['type'] === 'password') {
     $valor = $row[$campo] !== null && $row[$campo] !== '' ? '••••••••' : '';
 }
+
+$tdZonaTipo = '';
+if ($campo === 'zona_id' && !empty($crudZonaUbicacionToggle) && $row[$campo] !== null && $row[$campo] !== '') {
+    $ztRow = $zonaTipoById[(string) $row[$campo]] ?? null;
+    if ($ztRow !== null && $ztRow !== '') {
+        $tdZonaTipo = ' data-zona-tipo="' . htmlspecialchars($ztRow, ENT_QUOTES, 'UTF-8') . '"';
+    }
+}
 ?>
 
-<td data-field="<?= $campo ?>" data-value="<?= ($config['type'] === 'password') ? '' : htmlspecialchars((string)$row[$campo]) ?>">
+<td data-field="<?= $campo ?>" data-value="<?= ($config['type'] === 'password') ? '' : htmlspecialchars((string)$row[$campo]) ?>"<?= $tdZonaTipo ?>>
 <?= htmlspecialchars((string)$valor) ?>
 </td>
 

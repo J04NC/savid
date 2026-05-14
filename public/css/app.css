@@ -586,6 +586,7 @@ button:hover{
     grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
     gap:15px;
     margin-bottom:30px;
+    overflow:visible;
 }
 
 .dark-mode .form-input,
@@ -1628,7 +1629,81 @@ AGREGAR AL FINAL DE public/css/app.css
     border-radius:20px;
 }
 
-/* mobile */
+/* CRUD catálogo (FK autocomplete, INFORMATION_SCHEMA) */
+
+.crud-catalog-wrap{
+    position:relative;
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    width:100%;
+    z-index:1;
+}
+
+.crud-catalog-wrap:focus-within{
+    z-index:40;
+}
+
+.crud-catalog-wrap .crud-catalog-id{
+    display:none;
+}
+
+.crud-catalog-dropdown{
+    position:absolute;
+    left:0;
+    right:0;
+    top:100%;
+    z-index:2000;
+    margin:2px 0 0;
+    padding:0;
+    list-style:none;
+    max-height:220px;
+    overflow-y:auto;
+    border:1px solid var(--crud-td-border);
+    border-radius:6px;
+    background:#0f0f0f;
+    box-shadow:0 8px 24px rgba(0,0,0,.45);
+}
+
+.light-mode .crud-catalog-dropdown{
+    background:#fff;
+}
+
+.crud-catalog-dropdown li{
+    padding:8px 10px;
+    cursor:pointer;
+    font-size:14px;
+    color:var(--modal-form-text, #e5e5e5);
+}
+
+.crud-catalog-dropdown li:not(.crud-catalog-hint):hover{
+    background:var(--crud-row-hover);
+}
+
+.crud-catalog-dropdown li.crud-catalog-option-active{
+    background:var(--crud-row-selected);
+    outline:1px solid var(--savid-accent, #1dd1a1);
+    outline-offset:-1px;
+}
+
+.crud-catalog-dropdown li.crud-catalog-option-active:hover{
+    background:var(--crud-row-selected);
+}
+
+.form-group.crud-zona-hidden{
+    display:none !important;
+}
+
+.crud-catalog-dropdown li.crud-catalog-hint{
+    cursor:default;
+    color:var(--modal-form-muted, #a3a3a3);
+    font-size:13px;
+    white-space:normal;
+}
+
+.crud-catalog-dropdown li.crud-catalog-hint:hover{
+    background:transparent;
+}
 
 @media(max-width:768px){
 
