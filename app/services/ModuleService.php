@@ -143,6 +143,30 @@ class ModuleService
             ];
         }
 
+        if ($tabla === 'usuario') {
+            $existingFields = array_column($columns, 'Field');
+
+            foreach ($this->crudService->getUsuarioPersonaSyntheticColumns() as $syn) {
+                if (!in_array($syn['Field'], $existingFields, true)) {
+                    $columns[] = $syn;
+                }
+            }
+
+            $columns = $this->crudService->applyUsuarioCrudColumnPresentation($columns);
+            $columns = $this->crudService->applyUsuarioFotoFirmaUploadPresentation($columns);
+            $columns = $this->crudService->applyUsuarioCrudTableVisibility($columns);
+
+            $fieldNames = array_column($columns, 'Field');
+            if (in_array('tipodocumento_id', $fieldNames, true)) {
+                $relations['tipodocumento_id'] = 'tipodocumento';
+                $relationData['tipodocumento_id'] = $this->crudService->getRelationData(
+                    'tipodocumento',
+                    'tipodocumento_id',
+                    null
+                );
+            }
+        }
+
         return [
             'data' => $data,
             'columns' => $columns,
@@ -150,6 +174,7 @@ class ModuleService
             'relations' => $relations,
             'relationData' => $relationData,
             'catalogRegistry' => $catalogRegistry,
+            'tipodocumentoMetaById' => $tabla === 'usuario' ? $this->crudService->getTipodocumentoMetaById() : [],
         ];
     }
 

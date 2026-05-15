@@ -49,13 +49,15 @@ class CrudService
      */
     private function getTableDataUsuario(): array
     {
-        if ((int)($_SESSION['rol_id'] ?? 0) === 1 || !empty($_SESSION['es_super_admin'])) {
-            $stmt = $this->pdo->query('SELECT * FROM usuario ORDER BY id DESC');
+        $fromSql = $this->buildUsuarioListFromSql();
 
-            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if ((int)($_SESSION['rol_id'] ?? 0) === 1 || !empty($_SESSION['es_super_admin'])) {
+            $stmt = $this->pdo->query('SELECT u.*' . $fromSql['selectSuffix'] . ' FROM usuario u' . $fromSql['joins'] . ' ORDER BY u.id DESC');
+
+            return $this->applyUsuarioListRowRemap($stmt->fetchAll(PDO::FETCH_ASSOC), $fromSql['rowRemap'] ?? []);
         }
 
-        $sql = 'SELECT DISTINCT u.* FROM usuario u WHERE 1=1';
+        $sql = 'SELECT DISTINCT u.*' . $fromSql['selectSuffix'] . ' FROM usuario u' . $fromSql['joins'] . ' WHERE 1=1';
         $params = [];
 
         $empresaSession = $_SESSION['empresa_id'] ?? null;
@@ -94,7 +96,372 @@ class CrudService
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
 
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return $this->applyUsuarioListRowRemap($stmt->fetchAll(PDO::FETCH_ASSOC), $fromSql['rowRemap'] ?? []);
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $rows
+     * @param array<string, string> $rowRemap temp alias => campo destino (evita colisión con columnas de u.*)
+     * @return array<int, array<string, mixed>>
+     */
+    private function applyUsuarioListRowRemap(array $rows, array $rowRemap): array
+    {
+        if ($rowRemap === []) {
+            return $rows;
+        }
+
+        foreach ($rows as &$row) {
+            foreach ($rowRemap as $tmp => $final) {
+                if (!array_key_exists($tmp, $row)) {
+                    continue;
+                }
+                $row[$final] = $row[$tmp];
+                unset($row[$tmp]);
+            }
+        }
+        unset($row);
+
+        return $rows;
+    }
+
+    /**
+     * LEFT JOIN tercero + identificación principal (alias alineados al formulario usuario).
+     *
+     * @return array{selectSuffix: string, joins: string, rowRemap: array<string, string>}
+     */
+    private function buildUsuarioListFromSql(): array
+    {
+        if (!$this->tableExists('tercero')) {
+            return ['selectSuffix' => '', 'joins' => '', 'rowRemap' => []];
+        }
+
+        $uCols = $this->getTableColumnNames('usuario');
+        $tCols = $this->getTableColumnNames('tercero');
+        $select = [];
+        $rowRemap = [];
+        $joins = ' LEFT JOIN `tercero` t ON t.id = u.tercero_id ';
+
+        $pushExpr = function (string $expr, string $logicalAlias) use (&$select, &$rowRemap, $uCols): void {
+            if (in_array($logicalAlias, $uCols, true)) {
+                $tmp = '__u_li_' . $logicalAlias;
+                $select[] = $expr . ' AS `' . str_replace('`', '', $tmp) . '`';
+                $rowRemap[$tmp] = $logicalAlias;
+            } else {
+                $select[] = $expr . ' AS `' . str_replace('`', '', $logicalAlias) . '`';
+            }
+        };
+
+        if (in_array('nombres', $tCols, true)) {
+            $pushExpr('t.nombres', 'nombres');
+        }
+        if (in_array('apellidos', $tCols, true)) {
+            $pushExpr('t.apellidos', 'apellidos');
+        }
+        if (in_array('email', $tCols, true)) {
+            $pushExpr('t.email', 'email');
+        }
+        if (in_array('foto_ruta', $tCols, true)) {
+            $pushExpr('t.foto_ruta', 'foto_ruta');
+        }
+        if (in_array('firma_ruta', $tCols, true)) {
+            $pushExpr('t.firma_ruta', 'firma_ruta');
+        }
+
+        if ($this->tableExists('terceroidentificacion')) {
+            $tiCols = $this->getTableColumnNames('terceroidentificacion');
+            $joins .= ' LEFT JOIN `terceroidentificacion` ti ON ti.tercero_id = t.id AND ti.principal = 1 ';
+            if (in_array('tipodocumento_id', $tiCols, true)) {
+                $pushExpr('ti.tipodocumento_id', 'tipodocumento_id');
+            }
+            if (in_array('numero', $tiCols, true)) {
+                $pushExpr('ti.numero', 'numero_documento');
+            }
+            if (in_array('dv', $tiCols, true)) {
+                $pushExpr('ti.dv', 'documento_dv');
+            }
+        }
+
+        $suffix = $select === [] ? '' : (', ' . implode(', ', $select));
+
+        return ['selectSuffix' => $suffix, 'joins' => $joins, 'rowRemap' => $rowRemap];
+    }
+
+    /**
+     * Definiciones de columnas solo-UI para el CRUD usuario (persona vía tercero / terceroidentificacion).
+     * Se fusionan en ModuleService si la tabla `usuario` no las tiene ya.
+     *
+     * @return list<array{Field: string, Type: string, IS_NULLABLE: string, COLUMN_COMMENT: string}>
+     */
+    public function getUsuarioPersonaSyntheticColumns(): array
+    {
+        return [
+            [
+                'Field' => 'tipodocumento_id',
+                'Type' => 'smallint',
+                'IS_NULLABLE' => 'YES',
+                'COLUMN_COMMENT' => 'type:text|order:10|relmode:select|placeholder:Tipo de documento|title:Catálogo de tipos de identificación',
+            ],
+            [
+                'Field' => 'numero_documento',
+                'Type' => 'varchar',
+                'IS_NULLABLE' => 'YES',
+                'COLUMN_COMMENT' => 'type:text|order:20|placeholder:Número de documento|title:Número sin puntos ni DV; para NIT el DV se calcula solo',
+            ],
+            [
+                'Field' => 'documento_dv',
+                'Type' => 'varchar',
+                'IS_NULLABLE' => 'YES',
+                'COLUMN_COMMENT' => 'type:text|order:25|label:DV|placeholder:DV|show:form,table|title:Dígito de verificación (NIT Colombia). Se calcula automáticamente cuando el tipo es NIT',
+            ],
+            [
+                'Field' => 'nombres',
+                'Type' => 'varchar',
+                'IS_NULLABLE' => 'YES',
+                'COLUMN_COMMENT' => 'type:text|order:40|placeholder:Nombres|title:Datos en tercero',
+            ],
+            [
+                'Field' => 'apellidos',
+                'Type' => 'varchar',
+                'IS_NULLABLE' => 'YES',
+                'COLUMN_COMMENT' => 'type:text|order:50|placeholder:Apellidos|title:Datos en tercero',
+            ],
+            [
+                'Field' => 'password_confirm',
+                'Type' => 'varchar',
+                'IS_NULLABLE' => 'YES',
+                'COLUMN_COMMENT' => 'type:password|order:80|show:form|placeholder:Confirmar contraseña|title:Debe coincidir con el campo contraseña',
+            ],
+            [
+                'Field' => 'email',
+                'Type' => 'varchar',
+                'IS_NULLABLE' => 'YES',
+                'COLUMN_COMMENT' => 'type:text|order:100|placeholder:correo@ejemplo.com|title:Correo de contacto (tercero), distinto del usuario de login',
+            ],
+            [
+                'Field' => 'foto_ruta',
+                'Type' => 'upload',
+                'IS_NULLABLE' => 'YES',
+                'COLUMN_COMMENT' => 'type:upload|subtype:image|order:1|span:full|label:Foto|show:form|title:Puede subir archivo o tomar foto con la cámara (PNG/JPG/WebP, máx. 3 MB)',
+            ],
+            [
+                'Field' => 'firma_ruta',
+                'Type' => 'upload',
+                'IS_NULLABLE' => 'YES',
+                'COLUMN_COMMENT' => 'type:upload|subtype:signature|order:2|span:full|label:Firma|show:form|title:Imagen de firma o escaneo (PNG/JPG/WebP, máx. 3 MB)',
+            ],
+        ];
+    }
+
+    /**
+     * Fuerza widget de subida en foto/firma del ítem usuario (p. ej. si la columna existe en BD con otro comentario).
+     *
+     * @param list<array<string, mixed>> $columns
+     * @return list<array<string, mixed>>
+     */
+    public function applyUsuarioFotoFirmaUploadPresentation(array $columns): array
+    {
+        $defs = [
+            'foto_ruta' => 'type:upload|subtype:image|order:1|span:full|label:Foto|show:form|title:Puede subir archivo o tomar foto con la cámara (PNG/JPG/WebP, máx. 3 MB)',
+            'firma_ruta' => 'type:upload|subtype:signature|order:2|span:full|label:Firma|show:form|title:Imagen de firma o escaneo (PNG/JPG/WebP, máx. 3 MB)',
+        ];
+
+        foreach ($columns as &$col) {
+            $f = $col['Field'] ?? '';
+
+            if (isset($defs[$f])) {
+                $col['Type'] = 'upload';
+                $col['COLUMN_COMMENT'] = $defs[$f];
+            }
+        }
+        unset($col);
+
+        return $columns;
+    }
+
+    /**
+     * Ajusta orden, títulos y visibilidad del formulario usuario (convive con comentarios en BD).
+     *
+     * @param list<array<string, mixed>> $columns
+     * @return list<array<string, mixed>>
+     */
+    public function applyUsuarioCrudColumnPresentation(array $columns): array
+    {
+        $inject = [
+            'tipodocumento_id' => 'label:Tipo de documento',
+            'numero_documento' => 'label:Número de documento',
+            'documento_dv' => 'label:DV|order:25|title:Solo aplica para NIT; se calcula automáticamente',
+            'nombres' => 'label:Nombres',
+            'apellidos' => 'label:Apellidos',
+            'email' => 'label:Email',
+            'username' => 'order:60|title:Código único para iniciar sesión.|placeholder:Usuario',
+            'password' => 'order:70|show:form|title:Al editar, deje vacío para no cambiar la contraseña.|placeholder:Contraseña',
+            'sesion_idle_minutos' => 'order:90|title:Minutos de inactividad sin usar el sistema antes de cerrar la sesión automáticamente. Vacío = sin cierre por inactividad en el navegador. Ejemplo: 30|placeholder:Ej. 30',
+            'estado_id' => 'order:130|title:Estado de la cuenta de acceso (activo/inactivo).',
+            'tercero_id' => 'show:none|order:9999',
+            'created_at' => 'show:none|order:9999',
+            'updated_at' => 'show:none|order:9999',
+        ];
+
+        foreach ($columns as &$col) {
+            $f = $col['Field'] ?? '';
+
+            if (isset($inject[$f])) {
+                $base = trim((string)($col['COLUMN_COMMENT'] ?? ''));
+                $col['COLUMN_COMMENT'] = trim($base . '|' . $inject[$f], '|');
+            }
+        }
+        unset($col);
+
+        return $columns;
+    }
+
+    /**
+     * Columnas visibles en la grilla del CRUD usuario (resto solo formulario).
+     *
+     * @param list<array<string, mixed>> $columns
+     * @return list<array<string, mixed>>
+     */
+    public function applyUsuarioCrudTableVisibility(array $columns): array
+    {
+        $tableFields = [
+            'tipodocumento_id' => 'label:Tipo de documento',
+            'numero_documento' => 'label:Número de documento',
+            'documento_dv' => 'label:DV|order:25',
+            'nombres' => 'label:Nombres',
+            'apellidos' => 'label:Apellidos',
+            'username' => 'label:Usuario',
+            'email' => 'label:Email',
+            'sesion_idle_minutos' => 'label:Tiempo sesión',
+            'estado_id' => 'label:Estado',
+        ];
+
+        foreach ($columns as &$col) {
+            $f = $col['Field'] ?? '';
+            $base = trim((string)($col['COLUMN_COMMENT'] ?? ''));
+
+            if ($f === 'id') {
+                continue;
+            }
+
+            if (isset($tableFields[$f])) {
+                $extra = $tableFields[$f];
+                $col['COLUMN_COMMENT'] = $this->mergeColumnCommentShow(
+                    trim($base . '|' . $extra, '|'),
+                    'form,table'
+                );
+            } else {
+                if (in_array($f, ['tercero_id', 'created_at', 'updated_at', 'deleted_at'], true)) {
+                    $col['COLUMN_COMMENT'] = $this->mergeColumnCommentShow($base, 'none');
+                } else {
+                    $col['COLUMN_COMMENT'] = $this->mergeColumnCommentShow($base, 'form');
+                }
+            }
+        }
+        unset($col);
+
+        return $columns;
+    }
+
+    private function mergeColumnCommentShow(string $comment, string $show): string
+    {
+        $parts = [];
+        foreach (explode('|', $comment) as $part) {
+            $part = trim($part);
+            if ($part === '' || str_starts_with(strtolower($part), 'show:')) {
+                continue;
+            }
+            $parts[] = $part;
+        }
+        $parts[] = 'show:' . $show;
+
+        return implode('|', $parts);
+    }
+
+    /**
+     * Metadatos de tipodocumento para el formulario usuario (DV NIT, visibilidad DV).
+     *
+     * @return array<int, array{codigo: string, nombre: string}>
+     */
+    public function getTipodocumentoMetaById(): array
+    {
+        if (!$this->tableExists('tipodocumento')) {
+            return [];
+        }
+
+        $stmt = $this->pdo->query('
+            SELECT id, UPPER(TRIM(codigo)) AS codigo, nombre
+            FROM tipodocumento
+            WHERE estado_id = 1
+        ');
+
+        $out = [];
+
+        while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $id = (int)($r['id'] ?? 0);
+            if ($id <= 0) {
+                continue;
+            }
+            $out[$id] = [
+                'codigo' => (string)($r['codigo'] ?? ''),
+                'nombre' => (string)($r['nombre'] ?? ''),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * DV NIT Colombia (algoritmo DIAN con factores 3,7,13,…).
+     */
+    public static function colombianNitDvFromNumber(string $rawNumero): int
+    {
+        $nit = preg_replace('/\D/', '', $rawNumero);
+
+        if ($nit === '') {
+            return 0;
+        }
+
+        $factors = [3, 7, 13, 17, 19, 23, 29, 37, 41, 43, 47, 53, 59, 67, 71];
+        $sum = 0;
+        $len = strlen($nit);
+
+        for ($i = 0; $i < $len; $i++) {
+            $sum += (int)$nit[$len - 1 - $i] * $factors[$i % count($factors)];
+        }
+
+        $r = $sum % 11;
+
+        return $r > 1 ? 11 - $r : $r;
+    }
+
+    private function tableExists(string $table): bool
+    {
+        $t = preg_replace('/[^A-Za-z0-9_]/', '', $table);
+
+        $stmt = $this->pdo->prepare('
+            SELECT 1 FROM INFORMATION_SCHEMA.TABLES
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+            LIMIT 1
+        ');
+        $stmt->execute([$t]);
+
+        return (bool) $stmt->fetchColumn();
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function getTableColumnNames(string $table): array
+    {
+        $t = $this->sqlIdentifierTable($table);
+        $stmt = $this->pdo->prepare('
+            SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+            ORDER BY ORDINAL_POSITION
+        ');
+        $stmt->execute([$t]);
+
+        return $stmt->fetchAll(PDO::FETCH_COLUMN) ?: [];
     }
 
     public function getColumns($tabla)
@@ -183,164 +550,426 @@ class CrudService
 
         $columnNames = array_column($columns, 'Field');
 
-        /*
-        =========================
-        USUARIO: username + tercero_id (vincular empresa si mismo tercero)
-        =========================
-        */
+        $usuarioTx = ($tabla === 'usuario');
 
-        if (!$id && $tabla === 'usuario') {
-            if ($this->usuarioDuplicateSameTerceroLinkOrThrow($data, $columnNames)) {
-                return true;
-            }
+        if ($usuarioTx) {
+            $this->validateUsuarioPasswordConfirm($data, $id);
+            $validator = new UsuarioFormValidationService($this->pdo);
+            $validator->validateBeforeSave($data, $id, $columnNames);
+            $this->pdo->beginTransaction();
         }
 
-        /*
-        =========================
-        AUTO EMPRESA / SEDE
-        =========================
-        */
+        try {
 
-
-        if (in_array('empresa_id', $columnNames) && empty($data['empresa_id'])) {
-            $data['empresa_id'] = $_SESSION['empresa_id'] ?? null;
-        }
-
-        if (in_array('sede_id', $columnNames) && empty($data['sede_id'])) {
-            $data['sede_id'] = $_SESSION['sede_id'] ?? null;
-        }
-
-        /*
-        =========================
-        ARMAR CAMPOS
-        =========================
-        */
-
-        foreach ($columns as $col) {
-
-            $name = $col['Field'];
-            $nullable = $col['IS_NULLABLE'];
-
-            if (in_array($name, ['id', 'created_at', 'updated_at', 'deleted_at'])) {
-                continue;
+            if ($usuarioTx && in_array('tercero_id', $columnNames, true) && $this->tableExists('tercero')) {
+                $this->ensureTerceroAndPersonaForUsuarioSave($data, $id, $columnNames);
+                $validator->validateAfterTerceroResolved($data, $id, $columnNames);
             }
 
-            if (array_key_exists($name, $data)) {
+            /*
+            =========================
+            USUARIO: username + tercero_id (vincular empresa si mismo tercero)
+            =========================
+            */
 
-                $value = trim((string)$data[$name]);
-                $isPassword = $this->columnCommentIsPasswordType($col['COLUMN_COMMENT'] ?? '');
+            if (!$id && $tabla === 'usuario') {
+                if ($this->usuarioDuplicateSameTerceroLinkOrThrow($data, $columnNames)) {
+                    if ($usuarioTx) {
+                        $this->pdo->commit();
+                    }
 
-                if ($isPassword) {
+                    return true;
+                }
+            }
 
-                    if ($id) {
+            /*
+            =========================
+            AUTO EMPRESA / SEDE
+            =========================
+            */
 
-                        if ($value === '') {
-                            continue;
-                        }
+            if (in_array('empresa_id', $columnNames) && empty($data['empresa_id'])) {
+                $data['empresa_id'] = $_SESSION['empresa_id'] ?? null;
+            }
 
-                        $value = password_hash($value, PASSWORD_DEFAULT);
+            if (in_array('sede_id', $columnNames) && empty($data['sede_id'])) {
+                $data['sede_id'] = $_SESSION['sede_id'] ?? null;
+            }
 
-                    } else {
+            /*
+            =========================
+            ARMAR CAMPOS
+            =========================
+            */
 
-                        if ($value === '') {
+            foreach ($columns as $col) {
 
-                            if ($nullable == 'NO') {
-                                $errors[$name] = "Este campo es obligatorio";
+                $name = $col['Field'];
+                $nullable = $col['IS_NULLABLE'];
+
+                if (in_array($name, ['id', 'created_at', 'updated_at', 'deleted_at'])) {
+                    continue;
+                }
+
+                if (array_key_exists($name, $data)) {
+
+                    $value = trim((string)$data[$name]);
+                    $isPassword = $this->columnCommentIsPasswordType($col['COLUMN_COMMENT'] ?? '');
+
+                    if ($isPassword) {
+
+                        if ($id) {
+
+                            if ($value === '') {
+                                continue;
                             }
-
-                            $value = null;
-
-                        } else {
 
                             $value = password_hash($value, PASSWORD_DEFAULT);
 
+                        } else {
+
+                            if ($value === '') {
+
+                                if ($nullable == 'NO') {
+                                    $errors[$name] = "Este campo es obligatorio";
+                                }
+
+                                $value = null;
+
+                            } else {
+
+                                $value = password_hash($value, PASSWORD_DEFAULT);
+
+                            }
+                        }
+                    } else {
+
+                        if ($this->columnCommentIsUppercaseOnly($col['COLUMN_COMMENT'] ?? '') && $value !== '') {
+                            $value = function_exists('mb_strtoupper')
+                                ? mb_strtoupper($value, 'UTF-8')
+                                : strtoupper($value);
+                        }
+
+                        if ($nullable == 'NO' && $value === '') {
+                            $errors[$name] = "Este campo es obligatorio";
+                        }
+
+                        if ($value === '') {
+                            $value = null;
                         }
                     }
 
-                } else {
-
-                    if ($this->columnCommentIsUppercaseOnly($col['COLUMN_COMMENT'] ?? '') && $value !== '') {
-                        $value = function_exists('mb_strtoupper')
-                            ? mb_strtoupper($value, 'UTF-8')
-                            : strtoupper($value);
-                    }
-
-                    if ($nullable == 'NO' && $value === '') {
-                        $errors[$name] = "Este campo es obligatorio";
-                    }
-
-                    if ($value === '') {
-                        $value = null;
-                    }
-
+                    $fields[] = $name;
+                    $values[] = $value;
+                    $placeholders[] = "$name=?";
                 }
+            }
 
-                $fields[] = $name;
-                $values[] = $value;
-                $placeholders[] = "$name=?";
+            if (!empty($errors)) {
+                throw new Exception(json_encode($errors));
+            }
+
+            /*
+            =========================
+            INSERT / UPDATE
+            =========================
+            */
+
+            if ($id) {
+
+                $sql = "UPDATE $tabla SET " . implode(',', $placeholders) . " WHERE id=?";
+                $values[] = $id;
+
+            } else {
+
+                $sql = "INSERT INTO $tabla (" . implode(',', $fields) . ")
+                        VALUES (" . implode(',', array_fill(0, count($fields), '?')) . ")";
+            }
+
+            $stmt = $this->pdo->prepare($sql);
+            $ok = $stmt->execute($values);
+
+            /*
+            =========================
+            SI CREA EMPRESA:
+            CREAR SEDE PRINCIPAL AUTOMÁTICA
+            =========================
+            */
+
+            if ($ok && !$id && $tabla === 'empresa') {
+
+                $empresaId = $this->pdo->lastInsertId();
+
+                $stmtSede = $this->pdo->prepare("
+                    INSERT INTO sede (
+                        empresa_id,
+                        nombre,
+                        direccion,
+                        estado_id
+                    ) VALUES (?, ?, ?, ?)
+                ");
+
+                $stmtSede->execute([
+                    $empresaId,
+                    'Sede Principal',
+                    $data['direccion'] ?? null,
+                    1
+                ]);
+            }
+
+            if ($ok && $tabla === 'usuario') {
+                $uidScope = $id ? (int)$id : (int)$this->pdo->lastInsertId();
+                if ($uidScope > 0) {
+                    $this->linkNewUsuarioToSessionScope($uidScope);
+                }
+            }
+
+            if ($usuarioTx) {
+                if ($ok) {
+                    $this->pdo->commit();
+                } elseif ($this->pdo->inTransaction()) {
+                    $this->pdo->rollBack();
+                }
+            }
+
+            return $ok;
+
+        } catch (Throwable $e) {
+            if ($usuarioTx && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+
+            throw $e;
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    private function validateUsuarioPasswordConfirm(array $data, $id): void
+    {
+        $pwd = trim((string)($data['password'] ?? ''));
+        $pwd2 = trim((string)($data['password_confirm'] ?? ''));
+
+        if ($pwd === '' && $id) {
+            return;
+        }
+
+        if ($pwd !== $pwd2) {
+            throw new Exception(json_encode([
+                'password_confirm' => 'No coincide con la contraseña.',
+            ], JSON_UNESCAPED_UNICODE));
+        }
+    }
+
+    /**
+     * Crea o actualiza `tercero` y la identificación principal en `terceroidentificacion`, y asigna `tercero_id` en $data.
+     *
+     * @param array<string, mixed> $data
+     * @param list<string> $columnNames
+     */
+    private function ensureTerceroAndPersonaForUsuarioSave(array &$data, $id, array $columnNames): void
+    {
+        $nombres = trim((string)($data['nombres'] ?? ''));
+        $apellidos = trim((string)($data['apellidos'] ?? ''));
+        $email = trim((string)($data['email'] ?? ''));
+        $foto = trim((string)($data['foto_ruta'] ?? ''));
+        $firma = trim((string)($data['firma_ruta'] ?? ''));
+        $tipoDoc = isset($data['tipodocumento_id']) && $data['tipodocumento_id'] !== ''
+            ? (int)$data['tipodocumento_id']
+            : null;
+        $numero = trim((string)($data['numero_documento'] ?? ''));
+        $dvRaw = trim((string)($data['documento_dv'] ?? ''));
+        $dv = $dvRaw === '' ? null : (int)$dvRaw;
+
+        $tipoCodigo = null;
+        $tipoNombre = null;
+
+        if ($tipoDoc !== null && $tipoDoc > 0 && $this->tableExists('tipodocumento')) {
+            $stc = $this->pdo->prepare('SELECT UPPER(TRIM(codigo)), nombre FROM tipodocumento WHERE id = ? LIMIT 1');
+            $stc->execute([$tipoDoc]);
+            $rowTipo = $stc->fetch(PDO::FETCH_NUM);
+            if ($rowTipo) {
+                $tipoCodigo = $rowTipo[0] !== null && $rowTipo[0] !== '' ? (string)$rowTipo[0] : null;
+                $tipoNombre = isset($rowTipo[1]) ? (string)$rowTipo[1] : null;
             }
         }
 
-        if (!empty($errors)) {
-            throw new Exception(json_encode($errors));
+        $esNit = ($tipoCodigo === 'NIT')
+            || ($tipoNombre !== null && stripos($tipoNombre, 'NIT') !== false);
+
+        if ($esNit && $numero !== '') {
+            $dvCalc = self::colombianNitDvFromNumber($numero);
+            $data['documento_dv'] = (string)$dvCalc;
+            $dv = $dvCalc;
+        } elseif ($tipoDoc !== null && $tipoDoc > 0 && !$esNit) {
+            $data['documento_dv'] = '';
+            $dv = null;
         }
 
-        /*
-        =========================
-        INSERT / UPDATE
-        =========================
-        */
+        $tid = isset($data['tercero_id']) && $data['tercero_id'] !== '' && $data['tercero_id'] !== null
+            ? (int)$data['tercero_id']
+            : 0;
 
-        if ($id) {
+        $tCols = $this->getTableColumnNames('tercero');
 
-            $sql = "UPDATE $tabla SET " . implode(',', $placeholders) . " WHERE id=?";
-            $values[] = $id;
+        if ($tid <= 0) {
+            $nombreFallback = trim((string)($data['username'] ?? ''));
+            if ($nombreFallback === '') {
+                $nombreFallback = 'Usuario';
+            }
+            if ($nombres === '') {
+                $nombres = $nombreFallback;
+            }
 
+            $insertCols = ['tipopersona_id', 'estado_id'];
+            $insertVals = [1, 1];
+
+            if (in_array('nombres', $tCols, true)) {
+                $insertCols[] = 'nombres';
+                $insertVals[] = $nombres !== '' ? $nombres : null;
+            }
+            if (in_array('apellidos', $tCols, true)) {
+                $insertCols[] = 'apellidos';
+                $insertVals[] = $apellidos !== '' ? $apellidos : null;
+            }
+            if (in_array('email', $tCols, true)) {
+                $insertCols[] = 'email';
+                $insertVals[] = $email !== '' ? $email : null;
+            }
+            if (in_array('foto_ruta', $tCols, true)) {
+                $insertCols[] = 'foto_ruta';
+                $insertVals[] = $foto !== '' ? $foto : null;
+            }
+            if (in_array('firma_ruta', $tCols, true)) {
+                $insertCols[] = 'firma_ruta';
+                $insertVals[] = $firma !== '' ? $firma : null;
+            }
+
+            $quoted = array_map(fn ($c) => '`' . str_replace('`', '', $c) . '`', $insertCols);
+            $sqlIns = 'INSERT INTO `tercero` (' . implode(',', $quoted) . ') VALUES (' . implode(',', array_fill(0, count($insertVals), '?')) . ')';
+            $st = $this->pdo->prepare($sqlIns);
+            $st->execute($insertVals);
+            $tid = (int)$this->pdo->lastInsertId();
+            $data['tercero_id'] = $tid;
         } else {
+            $sets = [];
+            $updParams = [];
 
-            $sql = "INSERT INTO $tabla (" . implode(',', $fields) . ")
-                    VALUES (" . implode(',', array_fill(0, count($fields), '?')) . ")";
-        }
+            if (in_array('nombres', $tCols, true)) {
+                $sets[] = '`nombres`=?';
+                $updParams[] = $nombres !== '' ? $nombres : null;
+            }
+            if (in_array('apellidos', $tCols, true)) {
+                $sets[] = '`apellidos`=?';
+                $updParams[] = $apellidos !== '' ? $apellidos : null;
+            }
+            if (in_array('email', $tCols, true)) {
+                $overwriteOk = trim((string)($data['usuario_email_overwrite_ok'] ?? '')) === '1';
+                $currentEmail = null;
+                if ($this->tableExists('tercero')) {
+                    $stEm = $this->pdo->prepare('SELECT email FROM tercero WHERE id = ? LIMIT 1');
+                    $stEm->execute([$tid]);
+                    $currentEmail = $stEm->fetchColumn();
+                    $currentEmail = $currentEmail !== false && $currentEmail !== null ? trim((string)$currentEmail) : '';
+                }
+                $maySetEmail = $email === ''
+                    || $currentEmail === ''
+                    || strcasecmp($currentEmail, $email) === 0
+                    || $overwriteOk;
+                if ($maySetEmail) {
+                    $sets[] = '`email`=?';
+                    $updParams[] = $email !== '' ? $email : null;
+                }
+            }
+            if (in_array('foto_ruta', $tCols, true)) {
+                $sets[] = '`foto_ruta`=?';
+                $updParams[] = $foto !== '' ? $foto : null;
+            }
+            if (in_array('firma_ruta', $tCols, true)) {
+                $sets[] = '`firma_ruta`=?';
+                $updParams[] = $firma !== '' ? $firma : null;
+            }
 
-        $stmt = $this->pdo->prepare($sql);
-        $ok = $stmt->execute($values);
-
-        /*
-        =========================
-        SI CREA EMPRESA:
-        CREAR SEDE PRINCIPAL AUTOMÁTICA
-        =========================
-        */
-
-        if ($ok && !$id && $tabla === 'empresa') {
-
-            $empresaId = $this->pdo->lastInsertId();
-
-            $stmtSede = $this->pdo->prepare("
-                INSERT INTO sede (
-                    empresa_id,
-                    nombre,
-                    direccion,
-                    estado_id
-                ) VALUES (?, ?, ?, ?)
-            ");
-
-            $stmtSede->execute([
-                $empresaId,
-                'Sede Principal',
-                $data['direccion'] ?? null,
-                1
-            ]);
-        }
-
-        if ($ok && !$id && $tabla === 'usuario') {
-            $newId = (int)$this->pdo->lastInsertId();
-            if ($newId > 0) {
-                $this->linkNewUsuarioToSessionScope($newId);
+            if ($sets !== []) {
+                $updParams[] = $tid;
+                $this->pdo->prepare('UPDATE `tercero` SET ' . implode(',', $sets) . ' WHERE `id`=?')->execute($updParams);
             }
         }
 
-        return $ok;
+        if (!$this->tableExists('terceroidentificacion')) {
+            return;
+        }
+
+        $tiCols = $this->getTableColumnNames('terceroidentificacion');
+        if (!in_array('tercero_id', $tiCols, true) || !in_array('tipodocumento_id', $tiCols, true) || !in_array('numero', $tiCols, true)) {
+            return;
+        }
+
+        if ($tipoDoc === null || $tipoDoc <= 0) {
+            if ($numero !== '') {
+                throw new Exception(json_encode([
+                    'tipodocumento_id' => 'Indique el tipo de documento si informa el número.',
+                ], JSON_UNESCAPED_UNICODE));
+            }
+
+            return;
+        }
+
+        $stFind = $this->pdo->prepare('SELECT `id` FROM `terceroidentificacion` WHERE `tercero_id`=? AND `principal`=1 LIMIT 1');
+        $stFind->execute([$tid]);
+        $identId = $stFind->fetchColumn();
+
+        $tipoVal = ($tipoDoc !== null && $tipoDoc > 0) ? $tipoDoc : null;
+        $numVal = $numero !== '' ? $numero : null;
+
+        $identAccion = trim((string)($data['usuario_identificacion_accion'] ?? 'update_principal'));
+
+        if ($identId && $identAccion === 'new_row') {
+            if (in_array('principal', $tiCols, true)) {
+                $this->pdo->prepare('UPDATE `terceroidentificacion` SET `principal`=0 WHERE `tercero_id`=?')->execute([$tid]);
+            }
+            $insC = ['tercero_id', 'tipodocumento_id', 'numero', 'principal', 'estado_id'];
+            $insV = [$tid, $tipoVal, $numVal, 1, 1];
+            if (in_array('dv', $tiCols, true)) {
+                $insC[] = 'dv';
+                $insV[] = $dv;
+            }
+            $qc = array_map(fn ($c) => '`' . str_replace('`', '', $c) . '`', $insC);
+            $this->pdo->prepare(
+                'INSERT INTO `terceroidentificacion` (' . implode(',', $qc) . ') VALUES (' . implode(',', array_fill(0, count($insV), '?')) . ')'
+            )->execute($insV);
+
+            return;
+        }
+
+        if ($identId) {
+            $uSets = ['`tipodocumento_id`=?', '`numero`=?'];
+            $uPar = [$tipoVal, $numVal];
+            if (in_array('dv', $tiCols, true)) {
+                $uSets[] = '`dv`=?';
+                $uPar[] = $dv;
+            }
+            $uPar[] = (int)$identId;
+            $this->pdo->prepare('UPDATE `terceroidentificacion` SET ' . implode(',', $uSets) . ' WHERE `id`=?')->execute($uPar);
+
+            return;
+        }
+
+        if ($tipoVal === null || $numVal === null) {
+            return;
+        }
+
+        $insC = ['tercero_id', 'tipodocumento_id', 'numero', 'principal', 'estado_id'];
+        $insV = [$tid, $tipoVal, $numVal, 1, 1];
+        if (in_array('dv', $tiCols, true)) {
+            $insC[] = 'dv';
+            $insV[] = $dv;
+        }
+        $qc = array_map(fn ($c) => '`' . str_replace('`', '', $c) . '`', $insC);
+        $this->pdo->prepare(
+            'INSERT INTO `terceroidentificacion` (' . implode(',', $qc) . ') VALUES (' . implode(',', array_fill(0, count($insV), '?')) . ')'
+        )->execute($insV);
     }
 
     public function getRelations($tabla)
@@ -747,7 +1376,11 @@ class CrudService
             && in_array('tipo', array_column($columns, 'Field'), true);
         $tipoSql = $includeTipo ? ', `tipo`' : '';
 
-        $sql = "SELECT `id`{$tipoSql}, ($displayExpr) AS nombre FROM $tablaSql";
+        $includeCodigoTipodoc = ($this->sqlIdentifierTable($tabla) === 'tipodocumento')
+            && in_array('codigo', array_column($columns, 'Field'), true);
+        $codigoSql = $includeCodigoTipodoc ? ', `codigo`' : '';
+
+        $sql = "SELECT `id`{$tipoSql}{$codigoSql}, ($displayExpr) AS nombre FROM $tablaSql";
         $params = [];
 
         $filterList = $this->extractRelFilterListFromColumnComment($comment);
@@ -885,18 +1518,17 @@ class CrudService
             ? (int)$data['tercero_id']
             : null;
 
-        $stmt = $this->pdo->prepare('
-            SELECT id, tercero_id
-            FROM usuario
-            WHERE LOWER(TRIM(username)) = LOWER(TRIM(?))
-            AND estado_id = 1
-            LIMIT 1
-        ');
-        $stmt->execute([$username]);
-        $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+        $validator = new UsuarioFormValidationService($this->pdo);
+        $existing = $validator->findUsuarioByUsername($username);
 
         if (!$existing) {
             return false;
+        }
+
+        if ((int)($existing['estado_id'] ?? 1) !== 1) {
+            throw new Exception(json_encode([
+                'username' => 'Existe una cuenta inactiva con este usuario. Reactive esa cuenta en lugar de crear otra.',
+            ], JSON_UNESCAPED_UNICODE));
         }
 
         $terceroOld = isset($existing['tercero_id']) && $existing['tercero_id'] !== '' && $existing['tercero_id'] !== null
@@ -909,7 +1541,14 @@ class CrudService
             ], JSON_UNESCAPED_UNICODE));
         }
 
-        $this->linkNewUsuarioToSessionScope((int)$existing['id']);
+        $existingId = (int)$existing['id'];
+        if (!$validator->isSuperAdmin() && !$validator->usuarioVisibleInSessionScope($existingId)) {
+            throw new Exception(json_encode([
+                'username' => 'Este usuario existe fuera de su empresa/sede. No puede vincularlo desde aquí.',
+            ], JSON_UNESCAPED_UNICODE));
+        }
+
+        $this->linkNewUsuarioToSessionScope($existingId);
 
         return true;
     }

@@ -82,7 +82,8 @@ class AuthService
             $_SESSION['es_super_admin'],
             $_SESSION['plan_id'],
             $_SESSION['plan_nombre'],
-            $_SESSION['fecha_fin']
+            $_SESSION['fecha_fin'],
+            $_SESSION['sesion_idle_minutos']
         );
     }
 
@@ -100,6 +101,7 @@ class AuthService
             $_SESSION['sede_id'],
             $_SESSION['sede'],
             $_SESSION['sedes'],
+            $_SESSION['sesion_idle_minutos'],
             $_SESSION['plan_id'],
             $_SESSION['plan_nombre'],
             $_SESSION['fecha_fin']
@@ -183,6 +185,13 @@ class AuthService
         $_SESSION['nombre'] = $user['nombre'];
         $_SESSION['rol_id'] = $user['rol_id'];
         $_SESSION['rol_nombre'] = $user['rol_nombre'] ?? '';
+
+        $idle = $user['sesion_idle_minutos'] ?? null;
+        if ($idle !== null && $idle !== '' && (int)$idle > 0) {
+            $_SESSION['sesion_idle_minutos'] = (int)$idle;
+        } else {
+            unset($_SESSION['sesion_idle_minutos']);
+        }
     }
 
     /**

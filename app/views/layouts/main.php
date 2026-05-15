@@ -35,7 +35,14 @@ $assetsV = max(
 
 </head>
 
-<body class="dark-mode">
+<?php
+$sessionIdleMin = isset($_SESSION['sesion_idle_minutos']) ? (int)$_SESSION['sesion_idle_minutos'] : 0;
+if ($sessionIdleMin < 0) {
+    $sessionIdleMin = 0;
+}
+?>
+
+<body class="dark-mode" data-session-idle-minutes="<?= (int)$sessionIdleMin ?>">
 
 <div class="app-container">
 
@@ -173,6 +180,13 @@ url:"?url=<?php echo $item['ruta']; ?>"
 <script src="/js/theme.js?v=<?= (int)$assetsV ?>"></script>
 <script src="/js/search.js?v=<?= (int)$assetsV ?>"></script>
 <script src="/js/crud.js?v=<?= (int)$assetsV ?>"></script>
+<?php
+if (!empty($_SESSION['sesion_idle_minutos']) && (int)$_SESSION['sesion_idle_minutos'] > 0) {
+    $sidPath = BASE_PATH . '/public/js/session_idle.js';
+    $sidV = is_readable($sidPath) ? (int)filemtime($sidPath) : (int)$assetsV;
+    echo '<script src="/js/session_idle.js?v=' . (int)$sidV . '"></script>';
+}
+?>
 
 </body>
 </html>

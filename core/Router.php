@@ -56,9 +56,31 @@ class Router
          * Dashboard y CRUD dinámico se validan dentro de cada controlador con PermisoService::can(ruta).
          */
         $rutaCompleta = $_GET['url'] ?? '';
+        $usuarioJsonLookupMethods = [
+            'uploadAsset',
+            'lookupDocumento',
+            'lookupDocumentoNumero',
+            'lookupEmail',
+            'lookupUsername',
+            'lookupEmailTercero',
+            'lookupIdentificacion',
+        ];
+
+        if (SessionManager::userLogged()
+            && $controllerName === 'UsuarioController'
+            && in_array($method, $usuarioJsonLookupMethods, true)
+            && class_exists('PermisoService')
+            && !PermisoService::canUsuarioFormApi()) {
+            http_response_code(403);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['ok' => false, 'error' => 'Sin permiso'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
         if (SessionManager::userLogged()
             && !in_array($controllerName, ['LoginController', 'DashboardController', 'ModuleController'], true)
             && class_exists('PermisoService')
+            && !($controllerName === 'UsuarioController' && in_array($method, $usuarioJsonLookupMethods, true))
             && !PermisoService::can($rutaCompleta, 'ver')) {
             http_response_code(403);
             exit('Acceso denegado.');

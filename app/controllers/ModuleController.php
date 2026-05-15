@@ -135,6 +135,7 @@ class ModuleController
             $relationData = $crud['relationData'];
             $catalogRegistry = $crud['catalogRegistry'] ?? [];
             $crudContextTable = $currentItem['ruta'];
+            $tipodocumentoMetaById = $crud['tipodocumentoMetaById'] ?? [];
 
             $view = BASE_PATH . "/app/views/crud/table.php";
             require BASE_PATH . '/app/views/layouts/main.php';

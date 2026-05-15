@@ -130,6 +130,14 @@ class PermisoService
         return $ok;
     }
 
+    /**
+     * APIs JSON del formulario usuario (subida foto/firma, búsquedas): ver o guardar.
+     */
+    public static function canUsuarioFormApi(): bool
+    {
+        return self::can('usuario', 'ver') || self::can('usuario', 'guardar');
+    }
+
     private static function resolveItemAccionId(PDO $pdo, $ruta, $accion): ?int
     {
         $rutasBuscar = [$ruta];

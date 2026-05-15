@@ -589,6 +589,302 @@ button:hover{
     overflow:visible;
 }
 
+/* Usuario CRUD: opción B — campos a la izquierda, foto/firma en columna lateral */
+.crud-form-usuario{
+    display:block;
+    margin-bottom:30px;
+}
+
+.crud-usuario-layout{
+    display:flex;
+    flex-direction:row-reverse;
+    align-items:flex-start;
+    gap:24px;
+}
+
+.crud-usuario-media-aside{
+    flex:0 0 280px;
+    width:280px;
+    max-width:100%;
+    position:sticky;
+    top:12px;
+    padding:16px;
+    border:1px solid var(--border-subtle,#444);
+    border-radius:12px;
+    background:var(--surface-1,#1e1e1e);
+    box-shadow:0 4px 16px rgba(0,0,0,.12);
+}
+
+.crud-usuario-accordion{
+    border:1px solid var(--border-subtle,#3a3a3a);
+    border-radius:8px;
+    margin-bottom:10px;
+    background:var(--surface-2,#252525);
+    overflow:hidden;
+}
+
+.crud-usuario-accordion:last-child{
+    margin-bottom:0;
+}
+
+.crud-usuario-accordion-summary{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+    padding:10px 12px;
+    font-size:13px;
+    font-weight:600;
+    color:var(--modal-form-text,#e8e8e8);
+    cursor:pointer;
+    list-style:none;
+    user-select:none;
+}
+
+.crud-usuario-accordion-summary::-webkit-details-marker{
+    display:none;
+}
+
+.crud-usuario-accordion-summary::after{
+    content:"";
+    flex-shrink:0;
+    width:8px;
+    height:8px;
+    border-right:2px solid var(--modal-form-muted,#999);
+    border-bottom:2px solid var(--modal-form-muted,#999);
+    transform:rotate(45deg);
+    transition:transform .2s ease;
+    margin-top:-4px;
+}
+
+.crud-usuario-accordion[open] .crud-usuario-accordion-summary::after{
+    transform:rotate(-135deg);
+    margin-top:2px;
+}
+
+.crud-usuario-accordion-summary:hover{
+    background:rgba(26,188,156,.08);
+}
+
+.crud-usuario-accordion-body{
+    padding:0 10px 12px;
+    border-top:1px solid var(--border-subtle,#333);
+}
+
+.crud-usuario-accordion-body .form-group.crud-usuario-media-field{
+    margin-bottom:0;
+}
+
+.crud-usuario-media-aside .crud-upload-wrap{
+    max-width:none;
+}
+
+.crud-usuario-media-aside .crud-upload-card{
+    flex-direction:column;
+    padding:10px;
+}
+
+.crud-usuario-media-aside .crud-upload-preview{
+    flex:0 0 auto;
+    width:100%;
+    min-height:120px;
+}
+
+.crud-usuario-fields{
+    flex:1 1 auto;
+    min-width:0;
+    display:grid;
+    grid-template-columns:repeat(3,minmax(0,1fr));
+    gap:16px 14px;
+    align-content:start;
+}
+
+.crud-usuario-fields .crud-form-field-full,
+.crud-usuario-fields .crud-usuario-section-head{
+    grid-column:1 / -1;
+}
+
+.crud-usuario-fields .crud-usuario-section-head{
+    margin:4px 0 0;
+    padding-top:10px;
+    border-top:1px solid var(--border-subtle,#333);
+}
+
+.crud-usuario-fields .crud-usuario-section-head:first-child{
+    border-top:none;
+    padding-top:0;
+    margin-top:0;
+}
+
+.crud-usuario-fields .crud-usuario-section-title{
+    margin:0;
+    font-size:14px;
+    font-weight:600;
+    color:var(--modal-form-text,#e8e8e8);
+    letter-spacing:.02em;
+}
+
+.crud-usuario-doc-fields{
+    grid-column:1 / -1;
+    display:grid;
+    grid-template-columns:minmax(0,1.2fr) minmax(0,1.4fr) minmax(72px,0.6fr);
+    gap:14px;
+    align-items:end;
+}
+
+.crud-usuario-doc-fields .crud-usuario-doc-field{
+    margin-bottom:0;
+}
+
+.crud-usuario-doc-fields .crud-usuario-dv-wrap .form-input{
+    text-align:center;
+    max-width:80px;
+}
+
+@media(max-width:1100px){
+    .crud-usuario-fields{
+        grid-template-columns:repeat(2,minmax(0,1fr));
+    }
+}
+
+@media(max-width:900px){
+    .crud-usuario-layout{
+        flex-direction:column-reverse;
+    }
+
+    .crud-usuario-media-aside{
+        flex:1 1 auto;
+        width:100%;
+        position:static;
+        display:grid;
+        grid-template-columns:1fr 1fr;
+        gap:16px;
+    }
+
+    .crud-usuario-media-aside .crud-usuario-accordion{
+        margin-bottom:10px;
+    }
+}
+
+@media(max-width:640px){
+    .crud-usuario-fields{
+        grid-template-columns:1fr;
+    }
+
+    .crud-usuario-doc-fields{
+        grid-template-columns:1fr;
+    }
+
+    .crud-usuario-doc-fields .crud-usuario-dv-wrap .form-input{
+        max-width:none;
+    }
+
+    .crud-usuario-media-aside{
+        grid-template-columns:1fr;
+    }
+}
+
+.crud-usuario-toast{
+    position:fixed;
+    right:20px;
+    bottom:20px;
+    z-index:12000;
+    max-width:min(420px,calc(100vw - 40px));
+    padding:12px 16px;
+    border-radius:10px;
+    background:#1a4d3a;
+    color:#e8fff4;
+    border:1px solid #2d8f5f;
+    box-shadow:0 8px 24px rgba(0,0,0,.35);
+    font-size:14px;
+    line-height:1.45;
+}
+
+.crud-usuario-toast.crud-usuario-toast-warn{
+    background:#4a3a12;
+    border-color:#b8860b;
+    color:#fff8e6;
+}
+
+.crud-usuario-pick-overlay{
+    position:fixed;
+    inset:0;
+    z-index:11900;
+    background:rgba(0,0,0,.55);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:16px;
+}
+
+.crud-usuario-pick-dialog{
+    width:min(560px,100%);
+    max-height:min(80vh,640px);
+    overflow:auto;
+    background:var(--surface-1,#1e1e1e);
+    border:1px solid var(--border-subtle,#444);
+    border-radius:12px;
+    padding:20px;
+}
+
+.crud-usuario-pick-dialog h3{
+    margin:0 0 8px;
+    font-size:17px;
+}
+
+.crud-usuario-pick-dialog p{
+    margin:0 0 14px;
+    color:var(--modal-form-muted,#aaa);
+    font-size:14px;
+}
+
+.crud-usuario-pick-list{
+    list-style:none;
+    margin:0 0 16px;
+    padding:0;
+}
+
+.crud-usuario-pick-list li{
+    margin-bottom:8px;
+}
+
+.crud-usuario-pick-list button{
+    width:100%;
+    text-align:left;
+    padding:10px 12px;
+    border-radius:8px;
+    border:1px solid var(--border-subtle,#444);
+    background:var(--surface-2,#2a2a2a);
+    color:inherit;
+    cursor:pointer;
+}
+
+.crud-usuario-pick-list button:hover{
+    border-color:#1abc9c;
+}
+
+.crud-usuario-pick-actions{
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px;
+    justify-content:flex-end;
+}
+
+.crud-usuario-pick-actions button{
+    padding:8px 14px;
+    border-radius:8px;
+    border:1px solid var(--border-subtle,#444);
+    background:var(--surface-2,#2a2a2a);
+    color:inherit;
+    cursor:pointer;
+}
+
+.crud-usuario-pick-actions .btn-primary-pick{
+    background:#1abc9c;
+    border-color:#1abc9c;
+    color:#fff;
+}
+
 .dark-mode .form-input,
 .dark-mode select{
     background:#121212;
@@ -1703,6 +1999,122 @@ AGREGAR AL FINAL DE public/css/app.css
 
 .crud-catalog-dropdown li.crud-catalog-hint:hover{
     background:transparent;
+}
+
+.crud-upload-wrap{
+    width:100%;
+    max-width:420px;
+}
+
+.crud-upload-card{
+    display:flex;
+    flex-wrap:wrap;
+    gap:14px;
+    align-items:stretch;
+    padding:12px;
+    border:1px dashed var(--border-subtle, #555);
+    border-radius:10px;
+    background:var(--surface-1, #1e1e1e);
+}
+
+.crud-upload-preview{
+    flex:0 0 120px;
+    width:120px;
+    min-height:100px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:8px;
+    background:var(--surface-2, #2a2a2a);
+    border:1px solid var(--border-subtle, #444);
+    overflow:hidden;
+}
+
+.crud-upload-preview .crud-upload-thumb{
+    max-width:100%;
+    max-height:120px;
+    width:auto;
+    height:auto;
+    object-fit:contain;
+    display:block;
+}
+
+.crud-upload-placeholder{
+    color:var(--modal-form-muted, #888);
+    font-size:13px;
+    text-align:center;
+    padding:8px;
+}
+
+.crud-upload-side{
+    flex:1 1 180px;
+    min-width:0;
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    justify-content:center;
+}
+
+.crud-upload-hint{
+    margin:0;
+    font-size:12px;
+    line-height:1.45;
+    color:var(--modal-form-muted, #a3a3a3);
+}
+
+.crud-upload-btnrow{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    align-items:center;
+}
+
+.crud-upload-btnrow .btn-crud-upload-file,
+.crud-upload-btnrow .btn-crud-upload-camera,
+.crud-upload-btnrow .btn-crud-upload-clear{
+    font-size:13px;
+    padding:8px 12px;
+    border-radius:6px;
+    border:1px solid var(--border-subtle, #444);
+    background:var(--surface-2, #2a2a2a);
+    color:inherit;
+    cursor:pointer;
+}
+
+.crud-upload-btnrow .btn-crud-upload-clear{
+    border-color:#6b3030;
+    color:#f0a0a0;
+}
+
+.crud-upload-cell-thumb-wrap{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    vertical-align:middle;
+}
+
+.crud-upload-cell-thumb{
+    max-width:40px;
+    max-height:40px;
+    width:auto;
+    height:auto;
+    object-fit:contain;
+    border-radius:4px;
+    vertical-align:middle;
+}
+
+.crud-upload-cell-empty,
+.crud-upload-cell-text{
+    color:var(--modal-form-muted, #888);
+    font-size:13px;
+}
+
+.crud-upload-input-hidden{
+    position:absolute;
+    width:1px;
+    height:1px;
+    opacity:0;
+    pointer-events:none;
 }
 
 @media(max-width:768px){

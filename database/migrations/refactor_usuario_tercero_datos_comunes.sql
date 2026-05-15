@@ -42,16 +42,16 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- 0) Columnas sugeridas en `tercero` para foto/firma (rutas a archivo o URL)
 --    Omita si prefiere guardar foto/firma solo en `usuario`.
 -- ---------------------------------------------------------------------------
--- ALTER TABLE `tercero`
---     ADD COLUMN `foto_ruta` VARCHAR(512) NULL DEFAULT NULL COMMENT 'Ruta o URL foto persona' AFTER `email`,
---     ADD COLUMN `firma_ruta` VARCHAR(512) NULL DEFAULT NULL COMMENT 'Ruta o URL firma' AFTER `foto_ruta`;
+ALTER TABLE `tercero`
+     ADD COLUMN `foto_ruta` VARCHAR(512) NULL DEFAULT NULL COMMENT 'Ruta o URL foto persona' AFTER `email`,
+     ADD COLUMN `firma_ruta` VARCHAR(512) NULL DEFAULT NULL COMMENT 'Ruta o URL firma' AFTER `foto_ruta`;
 
 -- ---------------------------------------------------------------------------
 -- 1) Columna en `usuario` para tiempo de sesión (ejemplo: minutos de inactividad hasta cierre)
 -- ---------------------------------------------------------------------------
--- ALTER TABLE `usuario`
---     ADD COLUMN `sesion_idle_minutos` SMALLINT UNSIGNED NULL DEFAULT NULL
---         COMMENT 'Tiempo máx. inactividad sesión (minutos); NULL = usar política por defecto' AFTER `password`;
+ ALTER TABLE `usuario`
+     ADD COLUMN `sesion_idle_minutos` SMALLINT UNSIGNED NULL DEFAULT NULL
+         COMMENT 'Tiempo máx. inactividad sesión (minutos); NULL = usar política por defecto' AFTER `password`;
 
 -- ---------------------------------------------------------------------------
 -- 2) Asegurar `usuario.tercero_id` (FK ya puede existir vía add_usuario_tercero_id.sql)

@@ -12,10 +12,15 @@ class UserAccessRepository
     public function findActiveUserById($usuarioId)
     {
         $stmt = $this->pdo->prepare("
-            SELECT *
-            FROM usuario
-            WHERE id = ?
-            AND estado_id = 1
+            SELECT u.*,
+                COALESCE(
+                    NULLIF(TRIM(CONCAT_WS(' ', t.nombres, t.apellidos)), ''),
+                    u.username
+                ) AS nombre
+            FROM usuario u
+            LEFT JOIN tercero t ON t.id = u.tercero_id
+            WHERE u.id = ?
+            AND u.estado_id = 1
             LIMIT 1
         ");
         $stmt->execute([$usuarioId]);
