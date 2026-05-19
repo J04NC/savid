@@ -529,17 +529,42 @@ class CrudService
 
         $usuarioTx = ($tabla === 'usuario');
 
+        $usuarioLinkOnlyExisting = false;
+
         if ($usuarioTx) {
             $this->validateUsuarioPasswordConfirm($data, $id);
             $validator = new UsuarioFormValidationService($this->pdo);
             if ($id) {
-                $validator->assertUsuarioGestionableEnSesion((int)$id);
+                /*
+                 * Si el usuario destino existe pero está fuera del ámbito del operador
+                 * (no comparte empresa con la sesión y no es super admin) NO bloqueamos
+                 * el guardado. En su lugar entramos en modo "link-only": no se actualizan
+                 * sus datos, solo se crea la relación con la empresa/sede en sesión.
+                 */
+                if (!$validator->isSuperAdminViewer()
+                    && !$validator->isSuperAdminUsuario((int)$id)
+                    && !$validator->usuarioVisibleInSessionScope((int)$id)
+                ) {
+                    $usuarioLinkOnlyExisting = true;
+                } else {
+                    $validator->assertUsuarioGestionableEnSesion((int)$id);
+                }
             }
-            $validator->validateBeforeSave($data, $id, $columnNames);
+            if (!$usuarioLinkOnlyExisting) {
+                $validator->validateBeforeSave($data, $id, $columnNames);
+            }
             $this->pdo->beginTransaction();
         }
 
         try {
+
+            if ($usuarioLinkOnlyExisting && $id) {
+                $this->linkNewUsuarioToSessionScope((int)$id);
+                if ($usuarioTx) {
+                    $this->pdo->commit();
+                }
+                return true;
+            }
 
             if ($usuarioTx && $this->usuarioRequiresTerceroPersonaSave($columnNames) && $this->tableExists('tercero')) {
                 $this->ensureTerceroAndPersonaForUsuarioSave($data, $id, $columnNames);

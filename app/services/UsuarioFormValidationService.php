@@ -68,25 +68,24 @@ class UsuarioFormValidationService
             ];
         }
 
-        if (!$this->isSuperAdmin() && !$this->usuarioVisibleInSessionScope($existingId)) {
-            return [
-                'status' => 'out_of_scope',
-                'blocked' => true,
-                'message' => 'Este usuario existe pero no pertenece a su empresa/sede. No tiene permiso para vincularlo desde aquí.',
-                'usuario' => $this->publicUsuarioRow($existing, $uCols),
-            ];
-        }
-
+        $inScope = $this->isSuperAdmin() || $this->usuarioVisibleInSessionScope($existingId);
         $linked = $this->usuarioLinkedToSessionEmpresa($existingId);
         $empresaSession = $_SESSION['empresa_id'] ?? null;
+        $hasEmpresaSession = $empresaSession !== null && $empresaSession !== '';
+
+        $msg = 'Ya hay cuenta con este usuario para la misma identificación. Al guardar solo se vinculará a su empresa/sede (si aún no está asociada).';
+        if (!$inScope) {
+            $msg = 'Ya existe un usuario con este nombre fuera de su empresa. Al guardar solo se asociará a la empresa y sede en sesión (no se modificarán sus datos).';
+        }
 
         return [
             'status' => 'same_tercero',
             'blocked' => false,
-            'message' => 'Ya hay cuenta con este usuario para la misma identificación. Al guardar solo se vinculará a su empresa/sede (si aún no está asociada).',
+            'message' => $msg,
             'usuario' => $this->publicUsuarioRow($existing, $uCols),
             'linked_empresa' => $linked,
-            'will_link_on_save' => !$linked && $empresaSession !== null && $empresaSession !== '',
+            'will_link_on_save' => !$linked && $hasEmpresaSession,
+            'link_only_existing' => !$inScope,
         ];
     }
 

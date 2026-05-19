@@ -373,6 +373,28 @@ class UsuarioController
 
         $this->requireUsuarioGestionableEnSesion((int)$usuarioId);
 
+        $currentUserId = (int)($_SESSION['user_id'] ?? 0);
+        $esSuperAdmin = !empty($_SESSION['es_super_admin'])
+            || (int)($_SESSION['rol_id'] ?? 0) === 1;
+        $isSelfEdit = ((int)$usuarioId === $currentUserId);
+
+        if ($isSelfEdit && !$esSuperAdmin) {
+            if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+                echo json_encode([
+                    'success' => false,
+                    'message' => 'No puede modificar sus propias empresas/sedes desde aquí. Solicite a otro administrador.',
+                ]);
+                exit;
+            }
+            echo '<div class="modal-content" style="padding:24px;">'
+                . '<h3 style="margin:0 0 12px;">Empresas y sedes del usuario</h3>'
+                . '<p style="color:#c00;">No puede modificar sus propias empresas/sedes desde aquí. Solicite a otro administrador.</p>'
+                . '<div style="text-align:right; margin-top:16px;">'
+                . '<button type="button" class="btn-cancel" onclick="closeModalGod()">Cerrar</button>'
+                . '</div></div>';
+            exit;
+        }
+
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $empresas = $_POST['empresas'] ?? [];
             $sedes = $_POST['sedes'] ?? [];

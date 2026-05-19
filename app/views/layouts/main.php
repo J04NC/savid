@@ -13,10 +13,12 @@ if ($moduloId) {
 $assetRef = BASE_PATH . '/public/js/app.js';
 $cssTokens = BASE_PATH . '/public/css/tokens.css';
 $cssApp = BASE_PATH . '/public/css/app.css';
+$jsCrud = BASE_PATH . '/public/js/crud.js';
 $assetsV = max(
     is_readable($assetRef) ? (int)filemtime($assetRef) : time(),
     is_readable($cssTokens) ? (int)filemtime($cssTokens) : 0,
     is_readable($cssApp) ? (int)filemtime($cssApp) : 0,
+    is_readable($jsCrud) ? (int)filemtime($jsCrud) : 0,
     (int)($_SESSION['asset_cache_bust'] ?? 0),
     1
 );

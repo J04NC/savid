@@ -479,7 +479,8 @@
             if (data.status === "both") {
                 applyTerceroPayload(form, data.tercero, data.usuario);
                 setSaveBlocked(!!data.blocked);
-                showToast(data.message || "Usuario existente.", !!data.blocked || !data.linked_empresa);
+                const isWarn = !!data.blocked;
+                showToast(data.message || "Usuario existente.", isWarn);
             }
         }).catch(function () { /* silencioso */ });
     }

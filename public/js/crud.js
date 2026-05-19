@@ -78,6 +78,20 @@ function initCrudRows() {
             const hiddenId = document.getElementById("crud_id");
             if (hiddenId) hiddenId.value = selectedId;
 
+            const usuarioForm = document.querySelector('form[data-crud-context="usuario"]');
+            if (usuarioForm) {
+                const trTerceroId = this.getAttribute("data-tercero-id");
+                if (trTerceroId !== null) {
+                    const tEl = usuarioForm.querySelector('[name="tercero_id"]');
+                    if (tEl) tEl.value = trTerceroId;
+                }
+                const trIdentId = this.getAttribute("data-terceroidentificacion-id");
+                if (trIdentId !== null) {
+                    const iEl = usuarioForm.querySelector('[name="terceroidentificacion_id"]');
+                    if (iEl) iEl.value = trIdentId;
+                }
+            }
+
             this.querySelectorAll("td[data-field]").forEach(cell => {
 
                 let field = cell.dataset.field;
@@ -181,6 +195,18 @@ function initCrudNuevo() {
 
         const hiddenId = document.getElementById("crud_id");
         if (hiddenId) hiddenId.value = "";
+
+        const usuarioForm = document.querySelector('form[data-crud-context="usuario"]');
+        if (usuarioForm) {
+            const tEl = usuarioForm.querySelector('[name="tercero_id"]');
+            if (tEl) tEl.value = "";
+            const iEl = usuarioForm.querySelector('[name="terceroidentificacion_id"]');
+            if (iEl) iEl.value = "";
+            const ovEl = usuarioForm.querySelector('#usuario_email_overwrite_ok');
+            if (ovEl) ovEl.value = "0";
+            const acEl = usuarioForm.querySelector('#usuario_identificacion_accion');
+            if (acEl) acEl.value = "update_principal";
+        }
 
         selectedRow = null;
         selectedId = null;
@@ -653,6 +679,41 @@ function initCrudDelete() {
 /* =====================================================
    ACCIONES ESPECIALES
 ===================================================== */
+
+function crudResetUsuarioForm() {
+    const btn = document.getElementById("btnNuevo");
+    if (btn) {
+        btn.click();
+        return;
+    }
+    document.querySelectorAll(".form-input").forEach(input => {
+        if (input.tagName === "SELECT") {
+            input.selectedIndex = 0;
+        } else {
+            input.value = "";
+        }
+        input.classList.remove("input-error");
+    });
+    const hiddenId = document.getElementById("crud_id");
+    if (hiddenId) hiddenId.value = "";
+    selectedRow = null;
+    selectedId = null;
+}
+
+function crudRemoveUsuarioRow(usuarioId) {
+    if (!usuarioId) return;
+    const row = document.querySelector('.crud-row[data-id="' + usuarioId + '"]');
+    if (row && row.parentNode) {
+        row.parentNode.removeChild(row);
+    }
+}
+
+window.usuarioEmpresaSedeOnSaved = function (usuarioId) {};
+
+window.usuarioEmpresaSedeOnLostVisibility = function (usuarioId) {
+    crudResetUsuarioForm();
+    crudRemoveUsuarioRow(usuarioId);
+};
 
 function initCrudAcciones() {
 

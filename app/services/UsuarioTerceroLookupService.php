@@ -83,7 +83,7 @@ class UsuarioTerceroLookupService
         if ($usuarios === []) {
             return [
                 'status' => 'tercero_only',
-                'message' => 'Ya existe esta identificación en un tercero. Se completaron los datos comunes.',
+                'message' => 'Ya existe esta identificación en un tercero. Se completaron los datos comunes. Al guardar se creará la cuenta y se asociará a la empresa y sede en sesión.',
                 'tercero' => $tercero,
                 'tercero_id' => $terceroId,
             ];
@@ -92,41 +92,38 @@ class UsuarioTerceroLookupService
         $usuario = $usuarios[0];
         $usuarioId = (int)($usuario['id'] ?? 0);
 
-        if (!$this->validation->isSuperAdmin() && !$this->validation->usuarioVisibleInSessionScope($usuarioId)) {
-            return [
-                'status' => 'out_of_scope',
-                'blocked' => true,
-                'message' => 'Ya existe un usuario con este documento en otra empresa/sede. No tiene permiso para vincularlo desde aquí.',
-                'tercero' => $tercero,
-                'tercero_id' => $terceroId,
-                'usuario' => $usuario,
-            ];
-        }
+        $inScope = $this->validation->isSuperAdmin()
+            || $this->validation->usuarioVisibleInSessionScope($usuarioId);
 
         $linkedEmpresa = $this->validation->usuarioLinkedToSessionEmpresa($usuarioId);
         $empresaSession = $_SESSION['empresa_id'] ?? null;
-        $isNewForm = $excludeUsuarioId === null || $excludeUsuarioId <= 0;
+        $hasEmpresaSession = $empresaSession !== null && $empresaSession !== '';
 
         $msg = count($usuarios) > 1
-            ? 'Documento con varias cuentas. Se cargó la primera.'
-            : 'Ya existe cuenta para este tercero. Use el mismo nombre de usuario (' . ($usuario['username'] ?? '') . ') para vincular su empresa al guardar.';
+            ? 'Ya existe esta identificación en un tercero y varios usuarios. Se completaron los datos comunes y se cargó la primera cuenta. Al guardar se asociará a la empresa y sede en sesión.'
+            : 'Ya existe esta identificación en un tercero y usuario. Se completaron los datos comunes. Al guardar se asociará a la empresa y sede en sesión.';
 
-        if ($isNewForm) {
-            $msg .= ' No puede crear una segunda cuenta para la misma persona.';
-        } elseif (!$linkedEmpresa && $empresaSession !== null && $empresaSession !== '') {
-            $msg .= ' Al guardar se vinculará a su empresa/sede.';
+        if ($linkedEmpresa) {
+            $msg = count($usuarios) > 1
+                ? 'Ya existe esta identificación en un tercero y varios usuarios. Se completaron los datos comunes y se cargó la primera cuenta (ya vinculada a su empresa).'
+                : 'Ya existe esta identificación en un tercero y usuario. Se completaron los datos comunes. La cuenta ya está vinculada a su empresa.';
+        } elseif (!$hasEmpresaSession) {
+            $msg = 'Ya existe esta identificación en un tercero y usuario. Se completaron los datos comunes.';
+        } elseif (!$inScope) {
+            $msg = 'Ya existe esta identificación en un tercero y usuario fuera de su empresa. Al guardar solo se asociará a la empresa y sede en sesión (no se modificarán sus datos).';
         }
 
         return [
             'status' => 'both',
-            'blocked' => $isNewForm,
+            'blocked' => false,
             'message' => $msg,
             'tercero' => $tercero,
             'tercero_id' => $terceroId,
             'usuario' => $usuario,
             'usuarios' => $usuarios,
             'linked_empresa' => $linkedEmpresa,
-            'will_link_empresa_on_save' => !$linkedEmpresa && $empresaSession !== null && $empresaSession !== '',
+            'will_link_empresa_on_save' => !$linkedEmpresa && $hasEmpresaSession,
+            'link_only_existing' => !$inScope,
         ];
     }
 
@@ -415,21 +412,38 @@ class UsuarioTerceroLookupService
 
         $linkSelect = in_array($linkColumn, $uCols, true) ? ', u.`' . $linkColumn . '`' : '';
 
-        if ($linkColumn === 'terceroidentificacion_id' && $identificacionId > 0) {
-            $sql = "
-                SELECT u.id, u.username, u.estado_id, u.sesion_idle_minutos$linkSelect
-                FROM usuario u
-                WHERE u.terceroidentificacion_id = ?
-            ";
-            $params = [$identificacionId];
-        } else {
-            $sql = "
-                SELECT u.id, u.username, u.estado_id, u.sesion_idle_minutos$linkSelect
-                FROM usuario u
-                WHERE u.tercero_id = ?
-            ";
-            $params = [$terceroId];
+        /*
+         * Buscamos cuentas de usuario que pertenezcan al mismo tercero, considerando:
+         *   - usuarios enlazados por `terceroidentificacion_id` a cualquier identificación
+         *     del tercero (no solo la exacta del documento ingresado),
+         *   - usuarios enlazados por `tercero_id` (esquema legado o columna aún presente).
+         * Esto evita falsos negativos cuando el usuario existe pero está ligado a otra
+         * identificación del mismo tercero o aún por tercero_id.
+         */
+        $conditions = [];
+        $params = [];
+
+        if (in_array('terceroidentificacion_id', $uCols, true)) {
+            $conditions[] = 'u.terceroidentificacion_id IN (
+                SELECT id FROM terceroidentificacion WHERE tercero_id = ?
+            )';
+            $params[] = $terceroId;
         }
+
+        if (in_array('tercero_id', $uCols, true)) {
+            $conditions[] = 'u.tercero_id = ?';
+            $params[] = $terceroId;
+        }
+
+        if ($conditions === []) {
+            return [];
+        }
+
+        $sql = "
+            SELECT u.id, u.username, u.estado_id, u.sesion_idle_minutos$linkSelect
+            FROM usuario u
+            WHERE (" . implode(' OR ', $conditions) . ")
+        ";
 
         if ($activeOnly) {
             $sql .= ' AND (u.estado_id IS NULL OR u.estado_id = 1)';

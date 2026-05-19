@@ -145,6 +145,8 @@ foreach ($relationData as $campoRel => $options) {
 <?php if ($crudContextTable === 'usuario'): ?>
 <input type="hidden" name="usuario_email_overwrite_ok" id="usuario_email_overwrite_ok" value="0">
 <input type="hidden" name="usuario_identificacion_accion" id="usuario_identificacion_accion" value="update_principal">
+<input type="hidden" name="tercero_id" id="usuario_tercero_id" value="<?= htmlspecialchars((string)($old['tercero_id'] ?? ''), ENT_QUOTES, 'UTF-8') ?>">
+<input type="hidden" name="terceroidentificacion_id" id="usuario_terceroidentificacion_id" value="<?= htmlspecialchars((string)($old['terceroidentificacion_id'] ?? ''), ENT_QUOTES, 'UTF-8') ?>">
 <?php endif; ?>
 
 <div class="crud-toolbar">
@@ -542,7 +544,10 @@ $thLabel = ($thCfg['label'] ?? '') !== '' ? (string)$thCfg['label'] : formatLabe
 
 <?php foreach($data as $row): ?>
 
-<tr class="crud-row" data-id="<?= $row['id'] ?>">
+<tr class="crud-row" data-id="<?= $row['id'] ?>"<?php if ($crudContextTable === 'usuario'): ?>
+    <?php if (array_key_exists('tercero_id', $row)): ?> data-tercero-id="<?= htmlspecialchars((string)($row['tercero_id'] ?? ''), ENT_QUOTES, 'UTF-8') ?>"<?php endif; ?>
+    <?php if (array_key_exists('terceroidentificacion_id', $row)): ?> data-terceroidentificacion-id="<?= htmlspecialchars((string)($row['terceroidentificacion_id'] ?? ''), ENT_QUOTES, 'UTF-8') ?>"<?php endif; ?>
+<?php endif; ?>>
 
 <?php foreach($columns as $col): ?>
 
