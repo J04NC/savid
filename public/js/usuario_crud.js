@@ -56,6 +56,31 @@
         return v === "" ? null : parseInt(v, 10);
     }
 
+    function getTerceroIdentificacionId(form) {
+        const el = form.querySelector('[name="terceroidentificacion_id"]');
+        const v = el ? String(el.value || "").trim() : "";
+        return v === "" ? null : parseInt(v, 10);
+    }
+
+    /** Id del vínculo persona para APIs (identificación o tercero legado). */
+    function getPersonaLinkId(form) {
+        const identId = getTerceroIdentificacionId(form);
+        if (identId) return identId;
+        return getTerceroId(form);
+    }
+
+    function personaLinkQueryParam(form) {
+        const identId = getTerceroIdentificacionId(form);
+        if (identId) {
+            return ["terceroidentificacion_id", String(identId)];
+        }
+        const tid = getTerceroId(form);
+        if (tid) {
+            return ["tercero_id", String(tid)];
+        }
+        return null;
+    }
+
     function setSaveBlocked(blocked) {
         formSaveBlocked = !!blocked;
     }
@@ -164,6 +189,9 @@
             if (payload.tercero_id) {
                 setField(form, "tercero_id", payload.tercero_id);
             }
+            if (payload.terceroidentificacion_id) {
+                setField(form, "terceroidentificacion_id", payload.terceroidentificacion_id);
+            }
             if (payload.tipodocumento_id != null && payload.tipodocumento_id !== "") {
                 setField(form, "tipodocumento_id", payload.tipodocumento_id);
             }
@@ -213,6 +241,7 @@
 
     function clearTerceroLink(form) {
         setField(form, "tercero_id", "");
+        setField(form, "terceroidentificacion_id", "");
     }
 
     function resolveAppUrl(relative) {
@@ -469,9 +498,9 @@
         }
 
         const uid = getUsuarioId(form);
-        const tid = getTerceroId(form);
         const q = new URLSearchParams({ username: username });
-        if (tid) q.set("tercero_id", String(tid));
+        const linkParam = personaLinkQueryParam(form);
+        if (linkParam) q.set(linkParam[0], linkParam[1]);
         if (uid) q.set("usuario_id", String(uid));
 
         fetchJson("?url=usuario/lookupUsername&" + q.toString()).then(function (data) {
@@ -485,7 +514,12 @@
 
             if (data.status === "same_tercero" && !data.blocked) {
                 if (data.usuario) {
-                    applyTerceroPayload(form, { tercero_id: tid }, data.usuario);
+                    const linkPayload = {};
+                    const tid = getTerceroId(form);
+                    const identId = getTerceroIdentificacionId(form);
+                    if (tid) linkPayload.tercero_id = tid;
+                    if (identId) linkPayload.terceroidentificacion_id = identId;
+                    applyTerceroPayload(form, linkPayload, data.usuario);
                 }
                 showToast(data.message || "Al guardar se vinculará a su empresa.", false);
                 setSaveBlocked(false);
@@ -494,7 +528,12 @@
 
             if (handleLookupBlocked(data)) {
                 if (data.status === "same_tercero" && data.usuario) {
-                    applyTerceroPayload(form, { tercero_id: tid }, data.usuario);
+                    const linkPayload = {};
+                    const tid = getTerceroId(form);
+                    const identId = getTerceroIdentificacionId(form);
+                    if (tid) linkPayload.tercero_id = tid;
+                    if (identId) linkPayload.terceroidentificacion_id = identId;
+                    applyTerceroPayload(form, linkPayload, data.usuario);
                 }
             }
         }).catch(function () { /* silencioso */ });
@@ -511,7 +550,7 @@
         const email = String(emailEl.value || "").trim();
         if (!email || email.indexOf("@") < 1) return;
 
-        const q = new URLSearchParams({ tercero_id: String(tid), email: email });
+        const q = new URLSearchParams({ email: email, tercero_id: String(tid) });
 
         fetchJson("?url=usuario/lookupEmailTercero&" + q.toString()).then(function (data) {
             if (!data || data.status !== "confirm_overwrite") {

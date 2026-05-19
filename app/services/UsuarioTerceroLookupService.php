@@ -7,6 +7,7 @@ class UsuarioTerceroLookupService
 {
     private PDO $pdo;
     private UsuarioFormValidationService $validation;
+    private UsuarioPersonaLinkService $personaLink;
 
     public function __construct(?PDO $pdo = null)
     {
@@ -18,6 +19,7 @@ class UsuarioTerceroLookupService
         }
 
         $this->validation = new UsuarioFormValidationService($this->pdo);
+        $this->personaLink = new UsuarioPersonaLinkService($this->pdo);
     }
 
     /**
@@ -42,9 +44,12 @@ class UsuarioTerceroLookupService
         }
 
         $terceroId = (int)($row['tercero_id'] ?? 0);
+        $identificacionId = (int)($row['identificacion_id'] ?? 0);
         if ($terceroId <= 0) {
             return ['status' => 'none'];
         }
+
+        $uCols = $this->getTableColumnNames('usuario');
 
         $estadoTercero = $this->validation->getTerceroEstadoId($terceroId);
         if ($estadoTercero !== null && $estadoTercero !== 1) {
@@ -53,24 +58,27 @@ class UsuarioTerceroLookupService
                 'blocked' => true,
                 'message' => 'El tercero con este documento está inactivo. Reactive el tercero antes de continuar.',
                 'tercero_id' => $terceroId,
+                'terceroidentificacion_id' => $identificacionId > 0 ? $identificacionId : null,
             ];
         }
 
-        $tercero = $this->buildTerceroPayload($terceroId, $row);
+        $tercero = $this->buildTerceroPayload($terceroId, $row, $identificacionId > 0 ? $identificacionId : null);
 
-        $inactiveUser = $this->validation->findInactiveUsuarioByTercero($terceroId, $excludeUsuarioId);
+        $inactiveUser = $this->personaLink->usesIdentificacionLink($uCols) && $identificacionId > 0
+            ? $this->validation->findInactiveUsuarioByPersonaLink($identificacionId, $uCols, $excludeUsuarioId)
+            : $this->validation->findInactiveUsuarioByTercero($terceroId, $excludeUsuarioId);
         if ($inactiveUser !== null && ($excludeUsuarioId === null || $excludeUsuarioId <= 0)) {
             return [
                 'status' => 'inactive_usuario',
                 'blocked' => true,
                 'message' => 'Existe una cuenta de usuario inactiva para este tercero. Reactive esa cuenta; no se permite crear otra.',
-                'usuario' => $this->validation->publicUsuarioRow($inactiveUser),
+                'usuario' => $this->validation->publicUsuarioRow($inactiveUser, $uCols),
                 'tercero' => $tercero,
                 'tercero_id' => $terceroId,
             ];
         }
 
-        $usuarios = $this->findUsuariosByTerceroId($terceroId, $excludeUsuarioId, true);
+        $usuarios = $this->findUsuariosForIdentificacion($terceroId, $identificacionId, $excludeUsuarioId, true);
 
         if ($usuarios === []) {
             return [
@@ -254,7 +262,7 @@ class UsuarioTerceroLookupService
     private function fetchIdentificacionRow(int $tipodocumentoId, string $numero): ?array
     {
         $sql = '
-            SELECT ti.tercero_id, ti.tipodocumento_id, ti.numero, ti.dv
+            SELECT ti.id AS identificacion_id, ti.tercero_id, ti.tipodocumento_id, ti.numero, ti.dv
             FROM terceroidentificacion ti
             WHERE ti.tipodocumento_id = ?
             AND TRIM(ti.numero) = TRIM(?)
@@ -321,7 +329,7 @@ class UsuarioTerceroLookupService
      * @param array<string, mixed>|null $ident
      * @return array<string, mixed>
      */
-    private function buildTerceroPayload(int $terceroId, ?array $ident): array
+    private function buildTerceroPayload(int $terceroId, ?array $ident, ?int $identificacionId = null): array
     {
         $tCols = $this->getTableColumnNames('tercero');
         $fields = ['nombres', 'apellidos', 'email', 'foto_ruta', 'firma_ruta'];
@@ -340,7 +348,7 @@ class UsuarioTerceroLookupService
             $ident = $this->fetchPrincipalIdentificacion($terceroId);
         }
 
-        return [
+        $payload = [
             'tercero_id' => $terceroId,
             'nombres' => $t['nombres'] ?? '',
             'apellidos' => $t['apellidos'] ?? '',
@@ -353,6 +361,19 @@ class UsuarioTerceroLookupService
                 ? (string)$ident['dv']
                 : '',
         ];
+
+        $resolvedIdent = $identificacionId ?? 0;
+        if ($resolvedIdent <= 0 && isset($ident['identificacion_id'])) {
+            $resolvedIdent = (int)$ident['identificacion_id'];
+        }
+        if ($resolvedIdent <= 0 && isset($ident['id'])) {
+            $resolvedIdent = (int)$ident['id'];
+        }
+        if ($resolvedIdent > 0) {
+            $payload['terceroidentificacion_id'] = $resolvedIdent;
+        }
+
+        return $payload;
     }
 
     /**
@@ -376,24 +397,43 @@ class UsuarioTerceroLookupService
     /**
      * @return list<array<string, mixed>>
      */
-    /**
-     * @return list<array<string, mixed>>
-     */
-    private function findUsuariosByTerceroId(int $terceroId, ?int $excludeUsuarioId, bool $activeOnly = true): array
-    {
+    private function findUsuariosForIdentificacion(
+        int $terceroId,
+        int $identificacionId,
+        ?int $excludeUsuarioId,
+        bool $activeOnly = true
+    ): array {
         if (!$this->tableExists('usuario')) {
             return [];
         }
 
-        $sql = '
-            SELECT u.id, u.username, u.tercero_id, u.estado_id, u.sesion_idle_minutos
-            FROM usuario u
-            WHERE u.tercero_id = ?
-        ';
+        $uCols = $this->getTableColumnNames('usuario');
+        $linkColumn = $this->personaLink->personaLinkColumn($uCols);
+        if ($linkColumn === null) {
+            return [];
+        }
+
+        $linkSelect = in_array($linkColumn, $uCols, true) ? ', u.`' . $linkColumn . '`' : '';
+
+        if ($linkColumn === 'terceroidentificacion_id' && $identificacionId > 0) {
+            $sql = "
+                SELECT u.id, u.username, u.estado_id, u.sesion_idle_minutos$linkSelect
+                FROM usuario u
+                WHERE u.terceroidentificacion_id = ?
+            ";
+            $params = [$identificacionId];
+        } else {
+            $sql = "
+                SELECT u.id, u.username, u.estado_id, u.sesion_idle_minutos$linkSelect
+                FROM usuario u
+                WHERE u.tercero_id = ?
+            ";
+            $params = [$terceroId];
+        }
+
         if ($activeOnly) {
             $sql .= ' AND (u.estado_id IS NULL OR u.estado_id = 1)';
         }
-        $params = [$terceroId];
         if ($excludeUsuarioId !== null && $excludeUsuarioId > 0) {
             $sql .= ' AND u.id <> ?';
             $params[] = $excludeUsuarioId;
@@ -402,8 +442,23 @@ class UsuarioTerceroLookupService
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $uColsForPublic = $uCols;
 
-        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        return array_map(
+            fn (array $r) => $this->validation->publicUsuarioRow($r, $uColsForPublic),
+            $rows
+        );
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function findUsuariosByTerceroId(int $terceroId, ?int $excludeUsuarioId, bool $activeOnly = true): array
+    {
+        $principalIdent = $this->personaLink->fetchPrincipalIdentificacionId($terceroId);
+
+        return $this->findUsuariosForIdentificacion($terceroId, $principalIdent, $excludeUsuarioId, $activeOnly);
     }
 
     /**

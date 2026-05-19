@@ -2,7 +2,7 @@
 -- Refactor: datos de persona en `tercero` + `terceroidentificacion`, no en `usuario`
 -- =============================================================================
 -- Objetivo (modelo limpio):
---   • `usuario` = cuenta de acceso: vínculo a persona (`tercero_id`), credenciales,
+--   • `usuario` = cuenta de acceso: vínculo a identificación (`terceroidentificacion_id`), credenciales,
 --     políticas de sesión, estado de la CUENTA, activos opcionales de cuenta.
 --   • `tercero` = persona / sujeto maestro: nombres, apellidos, email de contacto, etc.
 --   • `terceroidentificacion` = documentos (tipo, número, DV, principal, …).

@@ -6,9 +6,15 @@
         const hid = document.querySelector('input[name="tercero_id"].crud-catalog-id')
             || document.querySelector('input[name="tercero_id"]')
             || document.querySelector('select[name="tercero_id"]');
-        if (!hid) return "0";
-        const v = String(hid.value || "").trim();
-        return v === "" ? "0" : v;
+        if (hid) {
+            const v = String(hid.value || "").trim();
+            if (v !== "") return v;
+        }
+        const ident = document.querySelector('input[name="terceroidentificacion_id"]');
+        if (ident && String(ident.value || "").trim() !== "") {
+            return String(ident.value || "").trim();
+        }
+        return "0";
     }
 
     function syncResumenFromRow(row) {

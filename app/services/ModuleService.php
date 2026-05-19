@@ -75,6 +75,11 @@ class ModuleService
 
     public function deleteRecord($tabla, $id)
     {
+        if ($tabla === 'usuario') {
+            $validator = new UsuarioFormValidationService();
+            $validator->assertUsuarioGestionableEnSesion((int)$id);
+        }
+
         return $this->moduleRepository->deleteById($tabla, $id);
     }
 

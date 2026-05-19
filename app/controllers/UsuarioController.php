@@ -29,6 +29,41 @@ class UsuarioController
     }
 
     /**
+     * Impide gestionar usuarios fuera de la empresa en sesión o cuentas superadmin.
+     */
+    private function requireUsuarioGestionableEnSesion(int $usuarioId): void
+    {
+        if ($usuarioId <= 0) {
+            return;
+        }
+
+        $validator = new UsuarioFormValidationService();
+
+        try {
+            $validator->assertUsuarioGestionableEnSesion($usuarioId);
+        } catch (Exception $e) {
+            $decoded = json_decode($e->getMessage(), true);
+            $msg = is_array($decoded)
+                ? (string)(reset($decoded) ?: 'No tiene permiso para gestionar este usuario.')
+                : $e->getMessage();
+
+            if (
+                !empty($_SERVER['HTTP_X_REQUESTED_WITH'])
+                && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest'
+            ) {
+                header('Content-Type: application/json; charset=utf-8');
+                http_response_code(403);
+                echo json_encode(['success' => false, 'message' => $msg], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+
+            $_SESSION['error'] = $msg;
+            header('Location: ?url=usuario');
+            exit;
+        }
+    }
+
+    /**
      * GET ?url=usuario/lookupDocumento&tipodocumento_id=&numero_documento=&usuario_id=
      */
     public function lookupDocumento(): void
@@ -87,22 +122,20 @@ class UsuarioController
     }
 
     /**
-     * GET ?url=usuario/lookupUsername&username=&tercero_id=&usuario_id=
+     * GET ?url=usuario/lookupUsername&username=&terceroidentificacion_id=&tercero_id=&usuario_id=
      */
     public function lookupUsername(): void
     {
         $this->requireUsuarioFormApiJson();
 
         $username = trim((string)($_GET['username'] ?? ''));
-        $terceroId = isset($_GET['tercero_id']) && $_GET['tercero_id'] !== ''
-            ? (int)$_GET['tercero_id']
-            : null;
+        $personaLinkId = $this->resolvePersonaLinkIdFromRequest();
         $excludeId = isset($_GET['usuario_id']) && $_GET['usuario_id'] !== ''
             ? (int)$_GET['usuario_id']
             : null;
 
         echo json_encode(
-            $this->usuarioValidation->lookupUsername($username, $terceroId, $excludeId),
+            $this->usuarioValidation->lookupUsername($username, $personaLinkId, $excludeId),
             JSON_UNESCAPED_UNICODE
         );
         exit;
@@ -161,6 +194,8 @@ class UsuarioController
             exit;
         }
 
+        $this->requireUsuarioGestionableEnSesion((int)$usuarioId);
+
         $context = $this->userAccessService->getRolesContext((int)$usuarioId);
 
         if (!$context) {
@@ -188,6 +223,8 @@ class UsuarioController
             echo json_encode(['success' => false, 'message' => 'Usuario no encontrado']);
             exit;
         }
+
+        $this->requireUsuarioGestionableEnSesion((int)$usuarioId);
 
         $assignments = $_POST['assignments'] ?? [];
         if (!is_array($assignments)) {
@@ -218,7 +255,9 @@ class UsuarioController
             exit;
         }
 
-        $esSuperAdmin = (int)($_SESSION['rol_id'] ?? 0) === 1 || !empty($_SESSION['es_super_admin']);
+        $this->requireUsuarioGestionableEnSesion((int)$usuarioId);
+
+        $esSuperAdmin = !empty($_SESSION['es_super_admin']);
 
         if (isset($_GET['ajax']) && $_GET['ajax'] === 'sedes') {
             $empresaId = $_GET['empresa_id'] ?? null;
@@ -331,6 +370,8 @@ class UsuarioController
             echo '<div class="modal-content"><p>Usuario no especificado</p></div>';
             exit;
         }
+
+        $this->requireUsuarioGestionableEnSesion((int)$usuarioId);
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $empresas = $_POST['empresas'] ?? [];
@@ -449,5 +490,38 @@ class UsuarioController
                 ini_set('display_errors', (string)$prevDisplayErrors);
             }
         }
+    }
+
+    /**
+     * Id del vínculo persona en el formulario (terceroidentificacion_id o tercero_id legado).
+     */
+    private function resolvePersonaLinkIdFromRequest(): ?int
+    {
+        if (isset($_GET['terceroidentificacion_id']) && $_GET['terceroidentificacion_id'] !== '') {
+            $v = (int)$_GET['terceroidentificacion_id'];
+
+            return $v > 0 ? $v : null;
+        }
+
+        if (!isset($_GET['tercero_id']) || $_GET['tercero_id'] === '') {
+            return null;
+        }
+
+        $terceroId = (int)$_GET['tercero_id'];
+        if ($terceroId <= 0) {
+            return null;
+        }
+
+        $pdo = (new Database())->connect();
+        $link = new UsuarioPersonaLinkService($pdo);
+        $linkColumn = $link->personaLinkColumn($link->getUsuarioColumnNames());
+
+        if ($linkColumn === 'terceroidentificacion_id') {
+            $principal = $link->fetchPrincipalIdentificacionId($terceroId);
+
+            return $principal > 0 ? $principal : null;
+        }
+
+        return $terceroId;
     }
 }

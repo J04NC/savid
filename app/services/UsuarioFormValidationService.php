@@ -7,21 +7,25 @@ class UsuarioFormValidationService
 {
     private const PASSWORD_MIN_LENGTH = 8;
 
+    /** Rol Super Admin (global). */
+    public const SUPER_ADMIN_ROL_ID = 1;
+
     private PDO $pdo;
+    private UsuarioPersonaLinkService $personaLink;
 
     public function __construct(?PDO $pdo = null)
     {
         if ($pdo !== null) {
             $this->pdo = $pdo;
-
-            return;
+        } else {
+            $database = new Database();
+            $this->pdo = $database->connect();
         }
 
-        $database = new Database();
-        $this->pdo = $database->connect();
+        $this->personaLink = new UsuarioPersonaLinkService($this->pdo);
     }
 
-    public function lookupUsername(string $username, ?int $terceroId, ?int $excludeUsuarioId = null): array
+    public function lookupUsername(string $username, ?int $personaLinkId, ?int $excludeUsuarioId = null): array
     {
         $username = trim($username);
         if ($username === '') {
@@ -38,17 +42,19 @@ class UsuarioFormValidationService
             return ['status' => 'none'];
         }
 
-        $tidExisting = isset($existing['tercero_id']) && $existing['tercero_id'] !== '' && $existing['tercero_id'] !== null
-            ? (int)$existing['tercero_id']
-            : null;
-        $tidForm = $terceroId !== null && $terceroId > 0 ? $terceroId : null;
+        $uCols = $this->getTableColumnNames('usuario');
+        $linkColumn = $this->personaLink->personaLinkColumn($uCols);
+        $linkExisting = $this->personaLink->linkValueFromRow($existing, $linkColumn);
+        $linkForm = $personaLinkId !== null && $personaLinkId > 0 ? $personaLinkId : null;
 
-        if ($tidExisting !== $tidForm) {
+        if ($linkExisting !== $linkForm) {
             return [
                 'status' => 'other_tercero',
                 'blocked' => true,
-                'message' => 'Este nombre de usuario ya está en uso por otra persona (tercero distinto).',
-                'usuario' => $this->publicUsuarioRow($existing),
+                'message' => $linkColumn === 'terceroidentificacion_id'
+                    ? 'Este nombre de usuario ya está en uso con otra identificación (documento distinto).'
+                    : 'Este nombre de usuario ya está en uso por otra persona (tercero distinto).',
+                'usuario' => $this->publicUsuarioRow($existing, $uCols),
             ];
         }
 
@@ -57,8 +63,8 @@ class UsuarioFormValidationService
             return [
                 'status' => 'inactive',
                 'blocked' => true,
-                'message' => 'Existe una cuenta inactiva con este usuario para el mismo tercero. Reactive esa cuenta; no se permite crear otra.',
-                'usuario' => $this->publicUsuarioRow($existing),
+                'message' => 'Existe una cuenta inactiva con este usuario para la misma identificación. Reactive esa cuenta; no se permite crear otra.',
+                'usuario' => $this->publicUsuarioRow($existing, $uCols),
             ];
         }
 
@@ -67,7 +73,7 @@ class UsuarioFormValidationService
                 'status' => 'out_of_scope',
                 'blocked' => true,
                 'message' => 'Este usuario existe pero no pertenece a su empresa/sede. No tiene permiso para vincularlo desde aquí.',
-                'usuario' => $this->publicUsuarioRow($existing),
+                'usuario' => $this->publicUsuarioRow($existing, $uCols),
             ];
         }
 
@@ -77,8 +83,8 @@ class UsuarioFormValidationService
         return [
             'status' => 'same_tercero',
             'blocked' => false,
-            'message' => 'Ya hay cuenta con este usuario para el mismo tercero. Al guardar solo se vinculará a su empresa/sede (si aún no está asociada).',
-            'usuario' => $this->publicUsuarioRow($existing),
+            'message' => 'Ya hay cuenta con este usuario para la misma identificación. Al guardar solo se vinculará a su empresa/sede (si aún no está asociada).',
+            'usuario' => $this->publicUsuarioRow($existing, $uCols),
             'linked_empresa' => $linked,
             'will_link_on_save' => !$linked && $empresaSession !== null && $empresaSession !== '',
         ];
@@ -158,23 +164,21 @@ class UsuarioFormValidationService
     }
 
     /**
-     * Tras resolver/crear tercero_id (ensureTercero).
+     * Tras resolver/crear tercero e identificación (ensureTercero).
      *
      * @param array<string, mixed> $data
      * @param list<string> $columnNames
      */
     public function validateAfterTerceroResolved(array &$data, $id, array $columnNames): void
     {
-        $tid = isset($data['tercero_id']) && $data['tercero_id'] !== '' && $data['tercero_id'] !== null
-            ? (int)$data['tercero_id']
-            : 0;
+        $tid = $this->personaLink->resolveTerceroIdFromData($data, $columnNames) ?? 0;
 
         if ($tid <= 0) {
             return;
         }
 
         $this->validateTerceroActivo($tid);
-        $this->validateOneUsuarioPerTercero($data, $id, $tid);
+        $this->validateOneUsuarioPerPersonaLink($data, $id, $columnNames);
         $this->validateEmailOverwriteOnSave($data, $tid);
         $this->validateIdentificacionActionOnSave($data, $tid);
     }
@@ -247,8 +251,50 @@ class UsuarioFormValidationService
             return 0;
         }
 
-        $sql = 'SELECT COUNT(*) FROM usuario WHERE tercero_id = ? AND estado_id = 1';
-        $params = [$terceroId];
+        $uCols = $this->getTableColumnNames('usuario');
+        $linkColumn = $this->personaLink->personaLinkColumn($uCols);
+        if ($linkColumn === null) {
+            return 0;
+        }
+
+        if ($linkColumn === 'terceroidentificacion_id') {
+            $identIds = $this->fetchIdentificacionIdsByTercero($terceroId);
+            if ($identIds === []) {
+                return 0;
+            }
+
+            $placeholders = implode(',', array_fill(0, count($identIds), '?'));
+            $sql = "SELECT COUNT(*) FROM usuario WHERE terceroidentificacion_id IN ($placeholders) AND estado_id = 1";
+            $params = $identIds;
+        } else {
+            $sql = 'SELECT COUNT(*) FROM usuario WHERE tercero_id = ? AND estado_id = 1';
+            $params = [$terceroId];
+        }
+
+        if ($excludeUsuarioId !== null && $excludeUsuarioId > 0) {
+            $sql .= ' AND id <> ?';
+            $params[] = $excludeUsuarioId;
+        }
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+
+        return (int)$stmt->fetchColumn();
+    }
+
+    public function countActiveUsuariosByPersonaLink(int $personaLinkId, array $usuarioColumnNames, ?int $excludeUsuarioId = null): int
+    {
+        if (!$this->tableExists('usuario') || $personaLinkId <= 0) {
+            return 0;
+        }
+
+        $linkColumn = $this->personaLink->personaLinkColumn($usuarioColumnNames);
+        if ($linkColumn === null) {
+            return 0;
+        }
+
+        $sql = "SELECT COUNT(*) FROM usuario WHERE `$linkColumn` = ? AND estado_id = 1";
+        $params = [$personaLinkId];
         if ($excludeUsuarioId !== null && $excludeUsuarioId > 0) {
             $sql .= ' AND id <> ?';
             $params[] = $excludeUsuarioId;
@@ -266,8 +312,61 @@ class UsuarioFormValidationService
             return null;
         }
 
-        $sql = 'SELECT id, username, tercero_id, estado_id FROM usuario WHERE tercero_id = ? AND estado_id <> 1';
-        $params = [$terceroId];
+        $uCols = $this->getTableColumnNames('usuario');
+        $linkColumn = $this->personaLink->personaLinkColumn($uCols);
+        if ($linkColumn === null) {
+            return null;
+        }
+
+        $select = 'id, username, estado_id';
+        if (in_array($linkColumn, $uCols, true)) {
+            $select .= ', `' . $linkColumn . '`';
+        }
+
+        if ($linkColumn === 'terceroidentificacion_id') {
+            $identIds = $this->fetchIdentificacionIdsByTercero($terceroId);
+            if ($identIds === []) {
+                return null;
+            }
+            $placeholders = implode(',', array_fill(0, count($identIds), '?'));
+            $sql = "SELECT $select FROM usuario WHERE terceroidentificacion_id IN ($placeholders) AND estado_id <> 1";
+            $params = $identIds;
+        } else {
+            $sql = "SELECT $select FROM usuario WHERE tercero_id = ? AND estado_id <> 1";
+            $params = [$terceroId];
+        }
+
+        if ($excludeUsuarioId !== null && $excludeUsuarioId > 0) {
+            $sql .= ' AND id <> ?';
+            $params[] = $excludeUsuarioId;
+        }
+        $sql .= ' ORDER BY id ASC LIMIT 1';
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row ?: null;
+    }
+
+    public function findInactiveUsuarioByPersonaLink(int $personaLinkId, array $usuarioColumnNames, ?int $excludeUsuarioId = null): ?array
+    {
+        if (!$this->tableExists('usuario') || $personaLinkId <= 0) {
+            return null;
+        }
+
+        $linkColumn = $this->personaLink->personaLinkColumn($usuarioColumnNames);
+        if ($linkColumn === null) {
+            return null;
+        }
+
+        $select = 'id, username, estado_id';
+        if (in_array($linkColumn, $usuarioColumnNames, true)) {
+            $select .= ', `' . $linkColumn . '`';
+        }
+
+        $sql = "SELECT $select FROM usuario WHERE `$linkColumn` = ? AND estado_id <> 1";
+        $params = [$personaLinkId];
         if ($excludeUsuarioId !== null && $excludeUsuarioId > 0) {
             $sql .= ' AND id <> ?';
             $params[] = $excludeUsuarioId;
@@ -374,16 +473,16 @@ class UsuarioFormValidationService
             return;
         }
 
-        $tidExisting = isset($existing['tercero_id']) && $existing['tercero_id'] !== '' && $existing['tercero_id'] !== null
-            ? (int)$existing['tercero_id']
-            : null;
-        $tidForm = isset($data['tercero_id']) && $data['tercero_id'] !== '' && $data['tercero_id'] !== null
-            ? (int)$data['tercero_id']
-            : null;
+        $uCols = $this->getTableColumnNames('usuario');
+        $linkColumn = $this->personaLink->personaLinkColumn($uCols);
+        $linkExisting = $this->personaLink->linkValueFromRow($existing, $linkColumn);
+        $linkForm = $this->personaLink->linkValueFromData($data, $linkColumn);
 
-        if ($tidExisting !== $tidForm) {
+        if ($linkExisting !== $linkForm) {
             throw new Exception(json_encode([
-                'username' => 'Este nombre de usuario ya está en uso por otra persona (tercero distinto).',
+                'username' => $linkColumn === 'terceroidentificacion_id'
+                    ? 'Este nombre de usuario ya está en uso con otra identificación (documento distinto).'
+                    : 'Este nombre de usuario ya está en uso por otra persona (tercero distinto).',
             ], JSON_UNESCAPED_UNICODE));
         }
 
@@ -402,32 +501,39 @@ class UsuarioFormValidationService
 
     /**
      * @param array<string, mixed> $data
+     * @param list<string> $columnNames
      */
-    private function validateOneUsuarioPerTercero(array $data, $id, int $terceroId): void
+    private function validateOneUsuarioPerPersonaLink(array $data, $id, array $columnNames): void
     {
         if ($id) {
+            return;
+        }
+
+        $linkColumn = $this->personaLink->personaLinkColumn($columnNames);
+        $linkValue = $this->personaLink->linkValueFromData($data, $linkColumn);
+        if ($linkColumn === null || $linkValue === null) {
             return;
         }
 
         $username = trim((string)($data['username'] ?? ''));
         $existingByUser = $username !== '' ? $this->findUsuarioByUsername($username) : null;
         if ($existingByUser !== null
-            && (int)($existingByUser['tercero_id'] ?? 0) === $terceroId
+            && $this->personaLink->linkValueFromRow($existingByUser, $linkColumn) === $linkValue
             && (int)($existingByUser['estado_id'] ?? 1) === 1) {
             return;
         }
 
-        $count = $this->countActiveUsuariosByTercero($terceroId, null);
+        $count = $this->countActiveUsuariosByPersonaLink($linkValue, $columnNames, null);
         if ($count > 0) {
             throw new Exception(json_encode([
-                'username' => 'Este tercero ya tiene una cuenta de usuario activa. Use el mismo nombre de usuario para vincular la empresa o reactive la cuenta existente.',
+                'username' => 'Esta identificación ya tiene una cuenta de usuario activa. Use el mismo nombre de usuario para vincular la empresa o reactive la cuenta existente.',
             ], JSON_UNESCAPED_UNICODE));
         }
 
-        $inactive = $this->findInactiveUsuarioByTercero($terceroId, null);
+        $inactive = $this->findInactiveUsuarioByPersonaLink($linkValue, $columnNames, null);
         if ($inactive !== null) {
             throw new Exception(json_encode([
-                'username' => 'Hay una cuenta inactiva para este tercero. No se permite crear otra; reactive la existente.',
+                'username' => 'Hay una cuenta inactiva para esta identificación. No se permite crear otra; reactive la existente.',
             ], JSON_UNESCAPED_UNICODE));
         }
     }
@@ -506,12 +612,16 @@ class UsuarioFormValidationService
             return null;
         }
 
-        $stmt = $this->pdo->prepare('
-            SELECT id, username, tercero_id, estado_id, sesion_idle_minutos
+        $uCols = $this->getTableColumnNames('usuario');
+        $linkColumn = $this->personaLink->personaLinkColumn($uCols);
+        $linkSelect = $linkColumn !== null ? ', `' . $linkColumn . '`' : '';
+
+        $stmt = $this->pdo->prepare("
+            SELECT id, username, estado_id, sesion_idle_minutos$linkSelect
             FROM usuario
             WHERE LOWER(TRIM(username)) = LOWER(TRIM(?))
             LIMIT 1
-        ');
+        ");
         $stmt->execute([trim($username)]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -520,17 +630,50 @@ class UsuarioFormValidationService
 
     /**
      * @param array<string, mixed> $row
+     * @param list<string>|null $usuarioColumnNames
      * @return array<string, mixed>
      */
-    public function publicUsuarioRow(array $row): array
+    public function publicUsuarioRow(array $row, ?array $usuarioColumnNames = null): array
     {
-        return [
+        if ($usuarioColumnNames === null) {
+            $usuarioColumnNames = $this->getTableColumnNames('usuario');
+        }
+
+        $linkColumn = $this->personaLink->personaLinkColumn($usuarioColumnNames);
+        $linkValue = $this->personaLink->linkValueFromRow($row, $linkColumn);
+        $terceroId = $this->personaLink->resolveTerceroId($linkValue, $linkColumn);
+        $identId = $this->personaLink->resolveIdentificacionId($linkValue, $linkColumn);
+
+        $out = [
             'id' => (int)($row['id'] ?? 0),
             'username' => (string)($row['username'] ?? ''),
-            'tercero_id' => isset($row['tercero_id']) ? (int)$row['tercero_id'] : null,
             'estado_id' => isset($row['estado_id']) ? (int)$row['estado_id'] : null,
             'sesion_idle_minutos' => $row['sesion_idle_minutos'] ?? null,
         ];
+
+        if ($linkColumn === 'terceroidentificacion_id') {
+            $out['terceroidentificacion_id'] = $identId;
+        }
+        if ($terceroId !== null) {
+            $out['tercero_id'] = $terceroId;
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return list<int>
+     */
+    private function fetchIdentificacionIdsByTercero(int $terceroId): array
+    {
+        if ($terceroId <= 0 || !$this->tableExists('terceroidentificacion')) {
+            return [];
+        }
+
+        $stmt = $this->pdo->prepare('SELECT id FROM terceroidentificacion WHERE tercero_id = ?');
+        $stmt->execute([$terceroId]);
+
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
     }
 
     public function getTerceroEmail(int $terceroId): ?string
@@ -548,7 +691,115 @@ class UsuarioFormValidationService
 
     public function isSuperAdmin(): bool
     {
-        return (int)($_SESSION['rol_id'] ?? 0) === 1 || !empty($_SESSION['es_super_admin']);
+        return $this->isSuperAdminViewer();
+    }
+
+    /**
+     * Usuario en sesión con acceso global (no aplica filtros de empresa en listados).
+     */
+    public function isSuperAdminViewer(): bool
+    {
+        return !empty($_SESSION['es_super_admin']);
+    }
+
+    /**
+     * Cuenta objetivo con rol Super Admin activo.
+     */
+    public function isSuperAdminUsuario(int $usuarioId): bool
+    {
+        if ($usuarioId <= 0 || !$this->tableExists('usuario_rol')) {
+            return false;
+        }
+
+        $stmt = $this->pdo->prepare('
+            SELECT 1 FROM usuario_rol
+            WHERE usuario_id = ? AND rol_id = ? AND estado_id = 1
+            LIMIT 1
+        ');
+        $stmt->execute([$usuarioId, self::SUPER_ADMIN_ROL_ID]);
+
+        return (bool)$stmt->fetchColumn();
+    }
+
+    /**
+     * Condición SQL: excluir cuentas con rol Super Admin (para listados de usuarios operativos).
+     */
+    public function sqlExcludeSuperAdminUsuarios(string $userAlias = 'u'): string
+    {
+        $alias = preg_replace('/[^a-zA-Z0-9_]/', '', $userAlias) ?: 'u';
+
+        return ' AND NOT EXISTS (
+            SELECT 1 FROM usuario_rol ur_sa
+            WHERE ur_sa.usuario_id = ' . $alias . '.id
+            AND ur_sa.estado_id = 1
+            AND ur_sa.rol_id = ' . self::SUPER_ADMIN_ROL_ID . '
+        ) ';
+    }
+
+    /**
+     * Restringe listado/edición de usuarios al ámbito de la sesión (empresa logueada).
+     *
+     * @param list<int|float|string> $params
+     */
+    public function appendUsuarioListScopeSql(string $userAlias, string &$sql, array &$params): void
+    {
+        if ($this->isSuperAdminViewer()) {
+            return;
+        }
+
+        $alias = preg_replace('/[^a-zA-Z0-9_]/', '', $userAlias) ?: 'u';
+        $sql .= $this->sqlExcludeSuperAdminUsuarios($alias);
+
+        $empresaSession = $_SESSION['empresa_id'] ?? null;
+        $hasEmpresaSession = $empresaSession !== null && $empresaSession !== '';
+
+        if ($hasEmpresaSession && $this->tableExists('usuario_empresa')) {
+            $sql .= ' AND EXISTS (
+                SELECT 1 FROM usuario_empresa ue
+                WHERE ue.usuario_id = ' . $alias . '.id AND ue.empresa_id = ? AND ue.estado_id = 1
+            )';
+            $params[] = (int)$empresaSession;
+
+            return;
+        }
+
+        $uid = (int)($_SESSION['user_id'] ?? 0);
+        if ($uid > 0 && $this->tableExists('usuario_empresa')) {
+            $sql .= ' AND EXISTS (
+                SELECT 1 FROM usuario_empresa ue_target
+                INNER JOIN usuario_empresa ue_self
+                    ON ue_self.empresa_id = ue_target.empresa_id AND ue_self.estado_id = 1
+                WHERE ue_target.usuario_id = ' . $alias . '.id AND ue_target.estado_id = 1
+                AND ue_self.usuario_id = ?
+            )';
+            $params[] = $uid;
+        }
+    }
+
+    /**
+     * @throws Exception
+     */
+    public function assertUsuarioGestionableEnSesion(int $usuarioId): void
+    {
+        if ($usuarioId <= 0) {
+            return;
+        }
+
+        if ($this->isSuperAdminViewer()) {
+            return;
+        }
+
+        if ($this->isSuperAdminUsuario($usuarioId)) {
+            throw new Exception(json_encode([
+                'general' => 'No puede modificar cuentas de superadministrador.',
+            ], JSON_UNESCAPED_UNICODE));
+        }
+
+        if (!$this->usuarioVisibleInSessionScope($usuarioId)) {
+            throw new Exception(json_encode([
+                'general' => 'Este usuario no pertenece a su empresa o no tiene permiso para gestionarlo.',
+            ], JSON_UNESCAPED_UNICODE));
+        }
     }
 
     public function tableExists(string $table): bool

@@ -6,14 +6,20 @@
     <title>Empresa y sede | Savid</title>
     <link rel="stylesheet" href="/css/login.css">
 </head>
-<body class="login-page dark-mode">
+<body class="login-page light-mode">
 
 <div class="main-container">
     <div class="login-box">
         <h1 style="margin-top:0;font-size:1.25rem;text-align:center;">Seleccione empresa y sede</h1>
         <?php require BASE_PATH . '/app/views/select_context.php'; ?>
+
+        <div class="theme-toggle">
+            <button id="toggleTheme" class="theme-icon" type="button" aria-label="Cambiar tema">🌙</button>
+        </div>
     </div>
 </div>
+
+<script src="/js/login.js"></script>
 
 <script>
 (function () {
