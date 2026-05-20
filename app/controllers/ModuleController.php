@@ -9,6 +9,12 @@ class ModuleController
         $this->moduleService = new ModuleService();
     }
 
+    private function isSuperAdmin(): bool
+    {
+        return !empty($_SESSION['es_super_admin'])
+            || (int)($_SESSION['rol_id'] ?? 0) === 1;
+    }
+
     public function index()
     {
 
@@ -56,6 +62,12 @@ class ModuleController
                 die("No tienes permiso para eliminar");
             }
 
+            if ($currentItem['ruta'] === 'empresa' && !$this->isSuperAdmin()) {
+                $_SESSION['flash_notice'] = 'Solo un superadministrador puede eliminar empresas.';
+                header("Location: ?url=".$ruta);
+                exit;
+            }
+
             $this->moduleService->deleteRecord($currentItem['ruta'], $id);
 
             header("Location: ?url=".$ruta);
@@ -101,6 +113,24 @@ class ModuleController
 
                 if(!$permitido){
                     throw new Exception("No tienes permiso para guardar");
+                }
+
+                if ($currentItem['ruta'] === 'empresa') {
+                    $postedId = (int)($_POST['id'] ?? 0);
+                    $isCreating = ($postedId <= 0);
+                    if ($isCreating && !$this->isSuperAdmin()) {
+                        throw new Exception(json_encode([
+                            'general' => 'Solo un superadministrador puede crear empresas.',
+                        ], JSON_UNESCAPED_UNICODE));
+                    }
+                    if (!$isCreating && !$this->isSuperAdmin()) {
+                        $crudService = new CrudService();
+                        if (!$crudService->userCanManageEmpresa($postedId)) {
+                            throw new Exception(json_encode([
+                                'general' => 'No tiene permiso para editar esta empresa.',
+                            ], JSON_UNESCAPED_UNICODE));
+                        }
+                    }
                 }
 
                 $this->moduleService->save($currentItem['ruta'],$_POST);

@@ -53,8 +53,99 @@ document.addEventListener("DOMContentLoaded", function () {
     initCrudCatalog();
     initCrudUppercaseFields();
     initCrudZonaUbicacionToggle();
+    initCrudEmpresaNitLookup();
 
 });
+
+/* =====================================================
+   EMPRESA: LOOKUP NIT
+===================================================== */
+
+function initCrudEmpresaNitLookup() {
+    const form = document.querySelector('form[data-crud-context="empresa"]');
+    if (!form) return;
+
+    const nitInput = form.querySelector('[name="nit"]');
+    if (!nitInput) return;
+
+    nitInput.addEventListener("blur", function () {
+        const nit = String(nitInput.value || "").trim();
+        if (nit === "") return;
+
+        const idEl = form.querySelector('[name="id"]');
+        const currentEmpresaId = idEl ? String(idEl.value || "").trim() : "";
+
+        const url = new URL(window.location.origin + window.location.pathname);
+        url.searchParams.set("url", "empresa/lookupNit");
+        url.searchParams.set("nit", nit);
+        if (currentEmpresaId !== "") {
+            url.searchParams.set("empresa_id", currentEmpresaId);
+        }
+
+        fetch(url.toString(), { credentials: "same-origin" })
+            .then(r => r.json())
+            .then(data => {
+                if (!data || !data.status) return;
+
+                if (data.status === "empresa_exists") {
+                    alert("⚠ " + (data.message || "Ya existe una empresa con este NIT."));
+                    nitInput.value = "";
+                    nitInput.focus();
+                    return;
+                }
+
+                if (data.status === "inactive_tercero") {
+                    alert("⚠ " + data.message);
+                    return;
+                }
+
+                if (data.status === "tercero_only" || data.status === "same_empresa") {
+                    const t = data.tercero || {};
+                    const tIdEl = form.querySelector('[name="tercero_id"]');
+                    if (tIdEl && data.tercero_id) tIdEl.value = data.tercero_id;
+                    const iIdEl = form.querySelector('[name="terceroidentificacion_id"]');
+                    if (iIdEl && data.terceroidentificacion_id) iIdEl.value = data.terceroidentificacion_id;
+
+                    const map = {
+                        razon_social: t.razon_social || "",
+                        email: t.email || "",
+                        telefono: t.telefono || "",
+                        direccion: t.direccion || "",
+                    };
+                    Object.keys(map).forEach(key => {
+                        const el = form.querySelector('[name="' + key + '"]');
+                        if (!el) return;
+                        if (String(el.value || "").trim() === "") {
+                            el.value = map[key];
+                            crudNormalizeUppercaseField(el);
+                        }
+                    });
+
+                    if (data.status === "tercero_only" && data.message) {
+                        showCrudFlashMessage(data.message);
+                    }
+                }
+            })
+            .catch(() => { /* silencioso */ });
+    });
+}
+
+function showCrudFlashMessage(msg) {
+    let div = document.getElementById("crudFlashMessage");
+    if (!div) {
+        div = document.createElement("div");
+        div.id = "crudFlashMessage";
+        div.style.cssText =
+            "position:fixed; top:16px; right:16px; z-index:9999; max-width:340px; " +
+            "padding:10px 14px; border-radius:8px; background:#fff8e1; border:1px solid #ffd54f; " +
+            "color:#5d4037; box-shadow:0 6px 24px rgba(0,0,0,0.15); font-size:13px;";
+        document.body.appendChild(div);
+    }
+    div.textContent = msg;
+    div.style.display = "block";
+    clearTimeout(div.__hideTimer);
+    div.__hideTimer = setTimeout(() => { div.style.display = "none"; }, 6500);
+}
 
 /* =====================================================
    CLICK FILAS
@@ -88,6 +179,20 @@ function initCrudRows() {
                 const trIdentId = this.getAttribute("data-terceroidentificacion-id");
                 if (trIdentId !== null) {
                     const iEl = usuarioForm.querySelector('[name="terceroidentificacion_id"]');
+                    if (iEl) iEl.value = trIdentId;
+                }
+            }
+
+            const empresaForm = document.querySelector('form[data-crud-context="empresa"]');
+            if (empresaForm) {
+                const trTerceroId = this.getAttribute("data-tercero-id");
+                if (trTerceroId !== null) {
+                    const tEl = empresaForm.querySelector('[name="tercero_id"]');
+                    if (tEl) tEl.value = trTerceroId;
+                }
+                const trIdentId = this.getAttribute("data-terceroidentificacion-id");
+                if (trIdentId !== null) {
+                    const iEl = empresaForm.querySelector('[name="terceroidentificacion_id"]');
                     if (iEl) iEl.value = trIdentId;
                 }
             }
@@ -206,6 +311,14 @@ function initCrudNuevo() {
             if (ovEl) ovEl.value = "0";
             const acEl = usuarioForm.querySelector('#usuario_identificacion_accion');
             if (acEl) acEl.value = "update_principal";
+        }
+
+        const empresaForm = document.querySelector('form[data-crud-context="empresa"]');
+        if (empresaForm) {
+            const tEl = empresaForm.querySelector('[name="tercero_id"]');
+            if (tEl) tEl.value = "";
+            const iEl = empresaForm.querySelector('[name="terceroidentificacion_id"]');
+            if (iEl) iEl.value = "";
         }
 
         selectedRow = null;
@@ -774,6 +887,16 @@ function initCrudAcciones() {
                     "tercero/identificaciones/" + selectedId,
                     "lg",
                     "Cargando identificaciones…"
+                ],
+                empresa_sedes: [
+                    "empresa/sedes/" + selectedId,
+                    "lg",
+                    "Cargando sedes..."
+                ],
+                empresa_usuarios: [
+                    "empresa/usuarios/" + selectedId,
+                    "lg",
+                    "Cargando usuarios..."
                 ]
             };
 

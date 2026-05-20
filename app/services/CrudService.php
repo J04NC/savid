@@ -17,6 +17,10 @@ class CrudService
             return $this->getTableDataUsuario();
         }
 
+        if ($tabla === 'empresa') {
+            return $this->getTableDataEmpresa();
+        }
+
         $columns = $this->getColumns($tabla);
 
         $fields = array_column($columns, 'Field');
@@ -42,6 +46,129 @@ class CrudService
         $stmt->execute($params);
 
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Listado de empresas restringido a las asociadas al usuario logueado (no-superadmin).
+     * Superadmin ve todas. Incluye `nit` derivado de terceroidentificacion para el form/grilla.
+     */
+    private function getTableDataEmpresa(): array
+    {
+        $esSuperAdmin = !empty($_SESSION['es_super_admin'])
+            || (int)($_SESSION['rol_id'] ?? 0) === 1;
+
+        $select = 'e.*, ti.numero AS nit';
+        $joins = ' LEFT JOIN terceroidentificacion ti ON ti.id = e.terceroidentificacion_id';
+
+        if ($esSuperAdmin) {
+            $sql = "SELECT $select FROM empresa e $joins ORDER BY e.id DESC";
+            $stmt = $this->pdo->query($sql);
+
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        }
+
+        $uid = (int)($_SESSION['user_id'] ?? 0);
+        if ($uid <= 0) {
+            return [];
+        }
+
+        $sql = "SELECT $select FROM empresa e
+                INNER JOIN usuario_empresa ue
+                    ON ue.empresa_id = e.id AND ue.estado_id = 1
+                $joins
+                WHERE ue.usuario_id = ?
+                ORDER BY e.id DESC";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([$uid]);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Columnas sintéticas (no en la tabla `empresa`) que se inyectan en el form CRUD.
+     *
+     * @return list<array{Field: string, Type: string, IS_NULLABLE: string, COLUMN_COMMENT: string}>
+     */
+    public function getEmpresaPersonaSyntheticColumns(): array
+    {
+        return [
+            [
+                'Field' => 'nit',
+                'Type' => 'varchar',
+                'IS_NULLABLE' => 'NO',
+                'COLUMN_COMMENT' => 'type:text|order:5|label:NIT|placeholder:Número de NIT|title:Identificación tributaria de la persona jurídica',
+            ],
+        ];
+    }
+
+    /**
+     * Orden / visibilidad / etiquetas del CRUD empresa.
+     *
+     * @param list<array<string, mixed>> $columns
+     * @return list<array<string, mixed>>
+     */
+    public function applyEmpresaCrudColumnPresentation(array $columns): array
+    {
+        $inject = [
+            'nit' => 'label:NIT|order:5',
+            'razon_social' => 'label:Razón social|order:10',
+            'email' => 'label:Email|order:20',
+            'telefono' => 'label:Teléfono|order:30',
+            'direccion' => 'label:Dirección|order:40',
+            'ciudad' => 'label:Ciudad|order:50',
+            'contacto' => 'label:Contacto|order:60',
+            'logo' => 'label:Logo|order:70',
+            'fecha_registro' => 'label:Fecha de registro|order:80',
+            'estado_id' => 'label:Estado|order:90',
+            'tercero_id' => 'show:none|order:9999',
+            'terceroidentificacion_id' => 'show:none|order:9999',
+            'created_at' => 'show:none|order:9999',
+            'updated_at' => 'show:none|order:9999',
+        ];
+
+        foreach ($columns as &$col) {
+            $f = $col['Field'] ?? '';
+            if (!isset($inject[$f])) {
+                continue;
+            }
+            $existing = (string)($col['COLUMN_COMMENT'] ?? '');
+            $merged = $existing === '' ? $inject[$f] : ($existing . '|' . $inject[$f]);
+            $col['COLUMN_COMMENT'] = $merged;
+        }
+        unset($col);
+
+        return $columns;
+    }
+
+    /**
+     * Indica si el usuario logueado puede gestionar (editar) una empresa por id.
+     * Superadmin: siempre. No-superadmin: solo si está en su usuario_empresa.
+     */
+    public function userCanManageEmpresa(int $empresaId): bool
+    {
+        if ($empresaId <= 0) {
+            return false;
+        }
+
+        $esSuperAdmin = !empty($_SESSION['es_super_admin'])
+            || (int)($_SESSION['rol_id'] ?? 0) === 1;
+        if ($esSuperAdmin) {
+            return true;
+        }
+
+        $uid = (int)($_SESSION['user_id'] ?? 0);
+        if ($uid <= 0) {
+            return false;
+        }
+
+        $stmt = $this->pdo->prepare(
+            'SELECT 1 FROM usuario_empresa
+             WHERE usuario_id = ? AND empresa_id = ? AND estado_id = 1
+             LIMIT 1'
+        );
+        $stmt->execute([$uid, $empresaId]);
+
+        return (bool)$stmt->fetchColumn();
     }
 
     /**
@@ -528,8 +655,13 @@ class CrudService
         $columnNames = array_column($columns, 'Field');
 
         $usuarioTx = ($tabla === 'usuario');
+        $empresaTx = ($tabla === 'empresa');
 
         $usuarioLinkOnlyExisting = false;
+
+        if ($empresaTx) {
+            $this->pdo->beginTransaction();
+        }
 
         if ($usuarioTx) {
             $this->validateUsuarioPasswordConfirm($data, $id);
@@ -569,6 +701,10 @@ class CrudService
             if ($usuarioTx && $this->usuarioRequiresTerceroPersonaSave($columnNames) && $this->tableExists('tercero')) {
                 $this->ensureTerceroAndPersonaForUsuarioSave($data, $id, $columnNames);
                 $validator->validateAfterTerceroResolved($data, $id, $columnNames);
+            }
+
+            if ($empresaTx) {
+                $this->resolveEmpresaTerceroForSave($data, $id);
             }
 
             /*
@@ -729,7 +865,11 @@ class CrudService
                 }
             }
 
-            if ($usuarioTx) {
+            if ($ok && $empresaTx) {
+                $this->syncTerceroFromEmpresa($data);
+            }
+
+            if ($usuarioTx || $empresaTx) {
                 if ($ok) {
                     $this->pdo->commit();
                 } elseif ($this->pdo->inTransaction()) {
@@ -740,12 +880,165 @@ class CrudService
             return $ok;
 
         } catch (Throwable $e) {
-            if ($usuarioTx && $this->pdo->inTransaction()) {
+            if (($usuarioTx || $empresaTx) && $this->pdo->inTransaction()) {
                 $this->pdo->rollBack();
             }
 
             throw $e;
         }
+    }
+
+    /**
+     * Resuelve `tercero_id` y `terceroidentificacion_id` para una empresa al guardar,
+     * validando unicidad de NIT y reusando terceros existentes cuando aplica.
+     *
+     * @param array<string, mixed> $data
+     */
+    private function resolveEmpresaTerceroForSave(array &$data, $id): void
+    {
+        $nit = trim((string)($data['nit'] ?? ''));
+        if ($nit === '') {
+            throw new Exception(json_encode([
+                'nit' => 'El NIT es obligatorio.',
+            ], JSON_UNESCAPED_UNICODE));
+        }
+
+        $tipoNit = EmpresaTerceroLookupService::TIPODOCUMENTO_NIT_ID;
+        $tipoJur = EmpresaTerceroLookupService::TIPOPERSONA_JURIDICA_ID;
+
+        if ($id) {
+            $st = $this->pdo->prepare('SELECT tercero_id, terceroidentificacion_id FROM empresa WHERE id = ? LIMIT 1');
+            $st->execute([(int)$id]);
+            $cur = $st->fetch(PDO::FETCH_ASSOC);
+
+            if (!$cur) {
+                throw new Exception(json_encode([
+                    'general' => 'Empresa no encontrada.',
+                ], JSON_UNESCAPED_UNICODE));
+            }
+
+            $curTerceroId = (int)$cur['tercero_id'];
+            $curTiId = (int)$cur['terceroidentificacion_id'];
+
+            $st = $this->pdo->prepare('SELECT TRIM(numero) FROM terceroidentificacion WHERE id = ? LIMIT 1');
+            $st->execute([$curTiId]);
+            $curNit = trim((string)$st->fetchColumn());
+
+            if ($curNit === $nit) {
+                $data['tercero_id'] = $curTerceroId;
+                $data['terceroidentificacion_id'] = $curTiId;
+                return;
+            }
+
+            $st = $this->pdo->prepare(
+                'SELECT e.id FROM empresa e
+                 INNER JOIN terceroidentificacion ti ON ti.id = e.terceroidentificacion_id
+                 WHERE TRIM(ti.numero) = TRIM(?) AND ti.tipodocumento_id = ? AND e.id <> ?
+                 LIMIT 1'
+            );
+            $st->execute([$nit, $tipoNit, (int)$id]);
+            if ($st->fetchColumn()) {
+                throw new Exception(json_encode([
+                    'nit' => 'Ya existe otra empresa con este NIT.',
+                ], JSON_UNESCAPED_UNICODE));
+            }
+
+            $st = $this->pdo->prepare(
+                'SELECT id, tercero_id FROM terceroidentificacion
+                 WHERE tipodocumento_id = ? AND TRIM(numero) = TRIM(?)
+                 LIMIT 1'
+            );
+            $st->execute([$tipoNit, $nit]);
+            $ti = $st->fetch(PDO::FETCH_ASSOC);
+
+            if ($ti) {
+                $data['tercero_id'] = (int)$ti['tercero_id'];
+                $data['terceroidentificacion_id'] = (int)$ti['id'];
+                return;
+            }
+
+            $st = $this->pdo->prepare('UPDATE terceroidentificacion SET numero = ? WHERE id = ?');
+            $st->execute([$nit, $curTiId]);
+            $data['tercero_id'] = $curTerceroId;
+            $data['terceroidentificacion_id'] = $curTiId;
+            return;
+        }
+
+        $st = $this->pdo->prepare(
+            'SELECT e.id FROM empresa e
+             INNER JOIN terceroidentificacion ti ON ti.id = e.terceroidentificacion_id
+             WHERE TRIM(ti.numero) = TRIM(?) AND ti.tipodocumento_id = ?
+             LIMIT 1'
+        );
+        $st->execute([$nit, $tipoNit]);
+        if ($st->fetchColumn()) {
+            throw new Exception(json_encode([
+                'nit' => 'Ya existe una empresa con este NIT.',
+            ], JSON_UNESCAPED_UNICODE));
+        }
+
+        $st = $this->pdo->prepare(
+            'SELECT id, tercero_id FROM terceroidentificacion
+             WHERE tipodocumento_id = ? AND TRIM(numero) = TRIM(?)
+             LIMIT 1'
+        );
+        $st->execute([$tipoNit, $nit]);
+        $existing = $st->fetch(PDO::FETCH_ASSOC);
+
+        if ($existing) {
+            $data['tercero_id'] = (int)$existing['tercero_id'];
+            $data['terceroidentificacion_id'] = (int)$existing['id'];
+            return;
+        }
+
+        $st = $this->pdo->prepare(
+            'INSERT INTO tercero (tipopersona_id, razon_social, email, telefono, direccion, estado_id)
+             VALUES (?, ?, ?, ?, ?, 1)'
+        );
+        $st->execute([
+            $tipoJur,
+            (string)($data['razon_social'] ?? ''),
+            (($data['email'] ?? '') !== '') ? (string)$data['email'] : null,
+            (($data['telefono'] ?? '') !== '') ? (string)$data['telefono'] : null,
+            (($data['direccion'] ?? '') !== '') ? (string)$data['direccion'] : null,
+        ]);
+        $newTerceroId = (int)$this->pdo->lastInsertId();
+
+        $st = $this->pdo->prepare(
+            'INSERT INTO terceroidentificacion (tercero_id, tipodocumento_id, numero, principal, estado_id)
+             VALUES (?, ?, ?, 1, 1)'
+        );
+        $st->execute([$newTerceroId, $tipoNit, $nit]);
+        $newTiId = (int)$this->pdo->lastInsertId();
+
+        $data['tercero_id'] = $newTerceroId;
+        $data['terceroidentificacion_id'] = $newTiId;
+    }
+
+    /**
+     * Tras guardar empresa, refleja en `tercero` los datos comunes (razón social/email/teléfono/dirección).
+     *
+     * @param array<string, mixed> $data
+     */
+    private function syncTerceroFromEmpresa(array $data): void
+    {
+        $terceroId = (int)($data['tercero_id'] ?? 0);
+        if ($terceroId <= 0) {
+            return;
+        }
+
+        $st = $this->pdo->prepare(
+            'UPDATE tercero
+                SET razon_social = ?, email = ?, telefono = ?, direccion = ?
+              WHERE id = ?'
+        );
+        $st->execute([
+            (string)($data['razon_social'] ?? ''),
+            (($data['email'] ?? '') !== '') ? (string)$data['email'] : null,
+            (($data['telefono'] ?? '') !== '') ? (string)$data['telefono'] : null,
+            (($data['direccion'] ?? '') !== '') ? (string)$data['direccion'] : null,
+            $terceroId,
+        ]);
     }
 
     /**

@@ -172,6 +172,18 @@ class ModuleService
             }
         }
 
+        if ($tabla === 'empresa') {
+            $existingFields = array_column($columns, 'Field');
+
+            foreach ($this->crudService->getEmpresaPersonaSyntheticColumns() as $syn) {
+                if (!in_array($syn['Field'], $existingFields, true)) {
+                    $columns[] = $syn;
+                }
+            }
+
+            $columns = $this->crudService->applyEmpresaCrudColumnPresentation($columns);
+        }
+
         return [
             'data' => $data,
             'columns' => $columns,
