@@ -33,6 +33,14 @@ class Database
     /**
      * Carga .env desde config/.env, .env en raiz, o variables ya definidas en el servidor.
      */
+    public static function bootstrapEnv(): void
+    {
+        self::loadEnv();
+    }
+
+    /**
+     * Carga .env desde config/.env, .env en raiz, o variables ya definidas en el servidor.
+     */
     private static function loadEnv()
     {
         static $loaded = false;
@@ -84,7 +92,8 @@ class Database
             ];
 
             try {
-                $this->pdo = new PDO($dsn, $this->username, $this->password, $options);
+                $pdoClass = class_exists('AuditingPDO', false) ? 'AuditingPDO' : 'PDO';
+                $this->pdo = new $pdoClass($dsn, $this->username, $this->password, $options);
             } catch (PDOException $e) {
                 die('Error de conexion a la base de datos: ' . $e->getMessage());
             }

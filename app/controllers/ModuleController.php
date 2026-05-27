@@ -34,6 +34,12 @@ class ModuleController
 
         $currentItem = $this->moduleService->findCurrentItem($ruta);
 
+        if ($currentItem && ($currentItem['ruta'] ?? '') === 'item' && !$this->isSuperAdmin()) {
+            $_SESSION['flash_notice'] = 'Solo un superadministrador puede acceder al catálogo de ítems.';
+            header('Location: ?url=dashboard');
+            exit;
+        }
+
         /*
         =========================
         VER (servidor): sin esto, tras cambiar sede podía cargarse la tabla sin botones
@@ -81,6 +87,10 @@ class ModuleController
         */
 
         $breadcrumb = $this->moduleService->buildBreadcrumb($currentItem);
+        $moduloId = $currentItem ? (int)($currentItem['modulo_id'] ?? 0) : null;
+        if ($moduloId !== null && $moduloId <= 0) {
+            $moduloId = null;
+        }
 
         /*
         =========================
@@ -135,7 +145,8 @@ class ModuleController
 
                 $this->moduleService->save($currentItem['ruta'],$_POST);
 
-                header("Location: ?url=".$ruta."&success=1");
+                $modQ = !empty($currentItem['modulo_id']) ? '&modulo=' . (int)$currentItem['modulo_id'] : '';
+                header('Location: ?url=' . $ruta . $modQ . '&success=1');
                 exit;
 
             }catch(Exception $e){
@@ -166,6 +177,7 @@ class ModuleController
             $catalogRegistry = $crud['catalogRegistry'] ?? [];
             $crudContextTable = $currentItem['ruta'];
             $tipodocumentoMetaById = $crud['tipodocumentoMetaById'] ?? [];
+            $usuarioTableColumnFields = $crud['usuarioTableColumnFields'] ?? [];
 
             $view = BASE_PATH . "/app/views/crud/table.php";
             require BASE_PATH . '/app/views/layouts/main.php';

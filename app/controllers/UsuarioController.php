@@ -356,7 +356,6 @@ class UsuarioController
         $sedes = $this->userAccessService->getSedesAuthorizedForUsuarioEmpresa((int)$usuarioId, $empresaId);
 
         $matrix = $this->userAccessService->buildPermissionMatrix((int)$usuarioId, $empresaId, $sedeId);
-        $acciones = $matrix['acciones'];
         $matriz = $matrix['matriz'];
 
         require BASE_PATH . '/app/views/usuario/permisos.php';
@@ -426,6 +425,62 @@ class UsuarioController
     }
 
     /**
+     * Redimensiona y re-codifica a JPEG en el temporal (reduce peso de fotos de cámara).
+     */
+    private function normalizeUploadedImageTmp(string $tmpPath, int $maxSide = 1280): void
+    {
+        if (!function_exists('imagecreatefromstring') || !function_exists('imagejpeg')) {
+            return;
+        }
+
+        $bytes = @file_get_contents($tmpPath);
+        if ($bytes === false || $bytes === '') {
+            return;
+        }
+
+        $im = @imagecreatefromstring($bytes);
+        if ($im === false) {
+            return;
+        }
+
+        $w = imagesx($im);
+        $h = imagesy($im);
+        if ($w < 1 || $h < 1) {
+            imagedestroy($im);
+
+            return;
+        }
+
+        $scale = min(1.0, $maxSide / max($w, $h));
+        $nw = max(1, (int)round($w * $scale));
+        $nh = max(1, (int)round($h * $scale));
+        $work = $im;
+
+        if ($scale < 1.0) {
+            $resized = imagecreatetruecolor($nw, $nh);
+            if ($resized) {
+                imagecopyresampled($resized, $im, 0, 0, 0, 0, $nw, $nh, $w, $h);
+                imagedestroy($im);
+                $work = $resized;
+            }
+        }
+
+        $flat = imagecreatetruecolor(imagesx($work), imagesy($work));
+        if (!$flat) {
+            imagedestroy($work);
+
+            return;
+        }
+
+        $white = imagecolorallocate($flat, 255, 255, 255);
+        imagefill($flat, 0, 0, $white);
+        imagecopy($flat, $work, 0, 0, 0, 0, imagesx($work), imagesy($work));
+        imagedestroy($work);
+        imagejpeg($flat, $tmpPath, 82);
+        imagedestroy($flat);
+    }
+
+    /**
      * Subida de imagen para foto o firma del formulario usuario (multipart campo "archivo").
      */
     public function uploadAsset(): void
@@ -459,10 +514,6 @@ class UsuarioController
                 $this->jsonResponse(400, ['ok' => false, 'error' => $msg]);
             }
 
-            if ((int)($f['size'] ?? 0) > 3 * 1024 * 1024) {
-                $this->jsonResponse(400, ['ok' => false, 'error' => 'Máximo 3 MB']);
-            }
-
             $tmp = (string)$f['tmp_name'];
             $mime = '';
             if (class_exists('finfo')) {
@@ -482,7 +533,14 @@ class UsuarioController
                 $this->jsonResponse(400, ['ok' => false, 'error' => 'Solo JPG, PNG o WebP']);
             }
 
-            $ext = $allowed[$mime];
+            $this->normalizeUploadedImageTmp($tmp, 1280);
+            $mime = 'image/jpeg';
+            $ext = 'jpg';
+
+            clearstatcache(true, $tmp);
+            if ((int)@filesize($tmp) > 3 * 1024 * 1024) {
+                $this->jsonResponse(400, ['ok' => false, 'error' => 'Máximo 3 MB tras comprimir. Acérquese más con el control «Acercar».']);
+            }
             $dir = BASE_PATH . '/public/uploads/usuarios';
 
             if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) {

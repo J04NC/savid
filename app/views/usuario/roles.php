@@ -31,12 +31,13 @@ $renderSedeOptions = static function (?int $empresaId, array $sedesPorEmpresa, $
                 Alcance <em>Global</em> (empresa y sede vacíos) aplica en cualquier contexto de sesión.
             <?php else: ?>
                 Debe elegir empresa en cada fila (solo administradores globales pueden dejar alcance global vacío).
+                El rol <strong>Super Admin</strong> solo lo puede asignar un superadministrador.
             <?php endif; ?>
         </p>
     </div>
 
-    <?php if (empty($empresasDisponibles)): ?>
-        <p class="modal-form-alert">No hay empresas disponibles para asignar roles con alcance. Revise permisos o use un administrador global.</p>
+    <?php if (empty($empresasDisponibles) && empty($puedeRolGlobal)): ?>
+        <p class="modal-form-alert">No hay empresas asociadas a este usuario. Asigne empresas en <strong>Empresa / sede</strong> o use un administrador global para alcance global.</p>
     <?php else: ?>
 
     <div class="crud-table">
@@ -70,9 +71,9 @@ $renderSedeOptions = static function (?int $empresaId, array $sedesPorEmpresa, $
                             $eSelNull = ($eSel === null || $eSel === '');
                             ?>
                             <?php if (!empty($puedeRolGlobal)): ?>
-                                <option value="" <?= $eSelNull ? 'selected' : '' ?>>Global</option>
+                                <option value="" <?= $eSelNull ? 'selected' : '' ?>>Global (cualquier empresa/sede)</option>
                             <?php else: ?>
-                                <option value="" <?= $eSelNull ? 'selected' : '' ?>>— Empresa —</option>
+                                <option value="" disabled <?= $eSelNull ? 'selected' : '' ?>>— Elija empresa —</option>
                             <?php endif; ?>
                             <?php foreach ($empresasDisponibles as $emp):
                                 $eid = (int)$emp['id'];

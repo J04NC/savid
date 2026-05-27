@@ -6,6 +6,12 @@
  */
 class EmpresaController
 {
+    private function isSuperAdmin(): bool
+    {
+        return !empty($_SESSION['es_super_admin'])
+            || (int)($_SESSION['rol_id'] ?? 0) === 1;
+    }
+
     /**
      * CRUD estándar del ítem `empresa`.
      */
@@ -22,6 +28,7 @@ class EmpresaController
      * POST → opera según `_action`:
      *        - link       : agregar usuario_empresa (por usuario_id o username/NIT).
      *        - toggle     : invertir estado del vínculo.
+     *        - delete     : quitar vínculo usuario_empresa (solo superadmin).
      *        - search     : búsqueda de usuarios candidatos por término.
      */
     public function usuarios($empresaId = null): void
@@ -30,19 +37,24 @@ class EmpresaController
 
         $eid = $empresaId !== null && $empresaId !== '' ? (int)$empresaId : 0;
         if ($eid <= 0) {
-            $this->renderError('Seleccione una empresa en la tabla y vuelva a abrir la acción.');
+            $this->renderModalError('Seleccione una empresa en la tabla y vuelva a abrir la acción.', 'Usuarios de la empresa', 'empresa-usuarios-modal');
             return;
         }
 
         $database = new Database();
         $pdo = $database->connect();
 
-        $stmt = $pdo->prepare('SELECT id, razon_social FROM empresa WHERE id = ? LIMIT 1');
+        $stmt = $pdo->prepare(
+            'SELECT e.id, t.razon_social
+             FROM empresa e
+             INNER JOIN tercero t ON t.id = e.tercero_id
+             WHERE e.id = ? LIMIT 1'
+        );
         $stmt->execute([$eid]);
         $empresa = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$empresa) {
-            $this->renderError('Empresa no encontrada.');
+            $this->renderModalError('Empresa no encontrada.', 'Usuarios de la empresa', 'empresa-usuarios-modal');
             return;
         }
 
@@ -55,7 +67,11 @@ class EmpresaController
                 ]);
                 return;
             }
-            $this->renderError('No tiene permiso para gestionar los usuarios de esta empresa.');
+            $this->renderModalError(
+                'No tiene permiso para gestionar los usuarios de esta empresa.',
+                'Usuarios de la empresa',
+                'empresa-usuarios-modal'
+            );
             return;
         }
 
@@ -75,18 +91,32 @@ class EmpresaController
     private function fetchEmpresaUsuarios(PDO $pdo, int $empresaId): array
     {
         $stmt = $pdo->prepare(
-            "SELECT ue.estado_id AS link_estado_id,
-                    u.id, u.username, u.estado_id,
+            "SELECT u.id, u.username, u.estado_id,
                     ti.numero AS nit_or_doc,
-                    t.nombres, t.apellidos, t.razon_social
-               FROM usuario_empresa ue
-               INNER JOIN usuario u ON u.id = ue.usuario_id
+                    t.nombres, t.apellidos, t.razon_social,
+                    ue.estado_id AS link_estado_id,
+                    CASE WHEN ue.usuario_id IS NOT NULL THEN 1 ELSE 0 END AS vinculo_empresa,
+                    (
+                        SELECT COUNT(*)
+                        FROM usuario_sede us
+                        INNER JOIN sede s ON s.id = us.sede_id AND s.empresa_id = ?
+                        WHERE us.usuario_id = u.id AND us.estado_id = 1
+                    ) AS sedes_activas
+               FROM usuario u
+               INNER JOIN (
+                    SELECT usuario_id FROM usuario_empresa WHERE empresa_id = ?
+                    UNION
+                    SELECT DISTINCT us.usuario_id
+                      FROM usuario_sede us
+                      INNER JOIN sede s ON s.id = us.sede_id AND s.empresa_id = ?
+               ) AS eu ON eu.usuario_id = u.id
+               LEFT JOIN usuario_empresa ue
+                      ON ue.usuario_id = u.id AND ue.empresa_id = ?
                LEFT JOIN terceroidentificacion ti ON ti.id = u.terceroidentificacion_id
                LEFT JOIN tercero t ON t.id = ti.tercero_id
-              WHERE ue.empresa_id = ?
-              ORDER BY ue.estado_id DESC, u.username ASC"
+              ORDER BY vinculo_empresa DESC, COALESCE(ue.estado_id, 0) DESC, u.username ASC"
         );
-        $stmt->execute([$empresaId]);
+        $stmt->execute([$empresaId, $empresaId, $empresaId, $empresaId]);
 
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
@@ -110,7 +140,88 @@ class EmpresaController
             return;
         }
 
+        if ($action === 'delete') {
+            $this->handleUsuariosDelete($pdo, $empresaId);
+            return;
+        }
+
         $this->jsonResponse(['success' => false, 'message' => 'Acción inválida.']);
+    }
+
+    private function handleUsuariosDelete(PDO $pdo, int $empresaId): void
+    {
+        if (!$this->isSuperAdmin()) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'Solo un superadministrador puede eliminar vínculos de usuario.',
+            ]);
+            return;
+        }
+
+        $usuarioId = (int)($_POST['usuario_id'] ?? 0);
+        if ($usuarioId <= 0) {
+            $this->jsonResponse(['success' => false, 'message' => 'Usuario no especificado.']);
+            return;
+        }
+
+        $st = $pdo->prepare(
+            'SELECT 1 FROM usuario_rol WHERE usuario_id = ? AND rol_id = 1 AND estado_id = 1 LIMIT 1'
+        );
+        $st->execute([$usuarioId]);
+        if ($st->fetchColumn()) {
+            $this->jsonResponse(['success' => false, 'message' => 'No puede eliminar cuentas de superadministrador.']);
+            return;
+        }
+
+        $currentUid = (int)($_SESSION['user_id'] ?? 0);
+        if ($usuarioId === $currentUid) {
+            $this->jsonResponse(['success' => false, 'message' => 'No puede eliminar su propio vínculo con la empresa.']);
+            return;
+        }
+
+        $st = $pdo->prepare('SELECT 1 FROM usuario_empresa WHERE usuario_id = ? AND empresa_id = ? LIMIT 1');
+        $st->execute([$usuarioId, $empresaId]);
+        $tieneVinculoEmpresa = (bool)$st->fetchColumn();
+
+        $st = $pdo->prepare(
+            'SELECT 1 FROM usuario_sede us
+             INNER JOIN sede s ON s.id = us.sede_id AND s.empresa_id = ?
+             WHERE us.usuario_id = ? LIMIT 1'
+        );
+        $st->execute([$empresaId, $usuarioId]);
+        $tieneAsignacionSede = (bool)$st->fetchColumn();
+
+        if (!$tieneVinculoEmpresa && !$tieneAsignacionSede) {
+            $this->jsonResponse(['success' => false, 'message' => 'El usuario no tiene vínculo ni sedes en esta empresa.']);
+            return;
+        }
+
+        $pdo->beginTransaction();
+        try {
+            $st = $pdo->prepare(
+                'DELETE us FROM usuario_sede us
+                 INNER JOIN sede s ON s.id = us.sede_id AND s.empresa_id = ?
+                 WHERE us.usuario_id = ?'
+            );
+            $st->execute([$empresaId, $usuarioId]);
+
+            if ($tieneVinculoEmpresa) {
+                $st = $pdo->prepare('DELETE FROM usuario_empresa WHERE usuario_id = ? AND empresa_id = ?');
+                $st->execute([$usuarioId, $empresaId]);
+            }
+
+            $pdo->commit();
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            $this->jsonResponse(['success' => false, 'message' => 'No se pudo eliminar: ' . $e->getMessage()]);
+            return;
+        }
+
+        $this->jsonResponse([
+            'success' => true,
+            'message' => 'Vínculo de usuario eliminado de la empresa.',
+            'usuarios' => $this->fetchEmpresaUsuarios($pdo, $empresaId),
+        ]);
     }
 
     private function handleUsuariosSearch(PDO $pdo, int $empresaId): void
@@ -124,9 +235,16 @@ class EmpresaController
         $like = '%' . $term . '%';
 
         $sql = "SELECT u.id, u.username, ti.numero AS doc, t.nombres, t.apellidos, t.razon_social,
-                       EXISTS (
-                         SELECT 1 FROM usuario_empresa ue
-                         WHERE ue.usuario_id = u.id AND ue.empresa_id = ? AND ue.estado_id = 1
+                       (
+                         EXISTS (
+                           SELECT 1 FROM usuario_empresa ue
+                           WHERE ue.usuario_id = u.id AND ue.empresa_id = ? AND ue.estado_id = 1
+                         )
+                         OR EXISTS (
+                           SELECT 1 FROM usuario_sede us
+                           INNER JOIN sede s ON s.id = us.sede_id AND s.empresa_id = ?
+                           WHERE us.usuario_id = u.id
+                         )
                        ) AS ya_vinculado
                   FROM usuario u
                   LEFT JOIN terceroidentificacion ti ON ti.id = u.terceroidentificacion_id
@@ -145,7 +263,7 @@ class EmpresaController
                  LIMIT 15";
 
         $stmt = $pdo->prepare($sql);
-        $stmt->execute([$empresaId, $like, $like, $like, $like, $like]);
+        $stmt->execute([$empresaId, $empresaId, $like, $like, $like, $like, $like]);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         $esSuperAdmin = !empty($_SESSION['es_super_admin'])
@@ -304,22 +422,91 @@ class EmpresaController
     }
 
     /**
+     * Subida de logo / logo2 del formulario empresa.
+     * Ruta: ?url=empresa/uploadLogo (POST multipart campo "archivo")
+     */
+    public function uploadLogo(): void
+    {
+        $prevDisplayErrors = ini_get('display_errors');
+        ini_set('display_errors', '0');
+
+        try {
+            SessionManager::requireLogin();
+
+            if (class_exists('PermisoService') && !PermisoService::can('empresa', 'guardar')) {
+                $this->jsonResponse(['ok' => false, 'error' => 'Sin permiso']);
+                return;
+            }
+
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                $this->jsonResponse(['ok' => false, 'error' => 'Método no permitido']);
+                return;
+            }
+
+            if (empty($_FILES['archivo']) || !is_uploaded_file((string)($_FILES['archivo']['tmp_name'] ?? ''))) {
+                $this->jsonResponse(['ok' => false, 'error' => 'Archivo requerido']);
+                return;
+            }
+
+            $f = $_FILES['archivo'];
+            if ((int)($f['error'] ?? 0) !== UPLOAD_ERR_OK) {
+                $this->jsonResponse(['ok' => false, 'error' => 'Error al subir']);
+                return;
+            }
+
+            if ((int)($f['size'] ?? 0) > 3 * 1024 * 1024) {
+                $this->jsonResponse(['ok' => false, 'error' => 'Máximo 3 MB']);
+                return;
+            }
+
+            $tmp = (string)$f['tmp_name'];
+            $mime = '';
+            if (class_exists('finfo')) {
+                $info = new finfo(FILEINFO_MIME_TYPE);
+                $mime = $info->file($tmp) ?: '';
+            }
+            $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
+            if ($mime === 'image/jpg') {
+                $mime = 'image/jpeg';
+            }
+            if (!isset($allowed[$mime])) {
+                $this->jsonResponse(['ok' => false, 'error' => 'Solo JPG, PNG o WebP']);
+                return;
+            }
+
+            $dir = BASE_PATH . '/public/uploads/empresas';
+            if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) {
+                $this->jsonResponse(['ok' => false, 'error' => 'No se pudo crear la carpeta de subidas']);
+                return;
+            }
+
+            $name = 'e_' . bin2hex(random_bytes(8)) . '.' . $allowed[$mime];
+            $dest = $dir . '/' . $name;
+
+            if (!@move_uploaded_file($tmp, $dest)) {
+                $this->jsonResponse(['ok' => false, 'error' => 'No se pudo guardar el archivo']);
+                return;
+            }
+
+            $this->jsonResponse(['ok' => true, 'path' => '/uploads/empresas/' . $name]);
+        } catch (Throwable $e) {
+            error_log('uploadLogo: ' . $e->getMessage());
+            $this->jsonResponse(['ok' => false, 'error' => 'Error interno al subir']);
+        } finally {
+            if ($prevDisplayErrors !== false) {
+                ini_set('display_errors', (string)$prevDisplayErrors);
+            }
+        }
+    }
+
+    /**
      * Endpoint JSON: lookup por NIT desde el formulario CRUD de empresa.
      * Ruta: ?url=empresa/lookupNit&nit=XXXX[&empresa_id=NN]
      */
     public function lookupNit(): void
     {
         SessionManager::requireLogin();
-
-        if (class_exists('PermisoService')
-            && !PermisoService::can('empresa', 'ver')
-            && !PermisoService::can('empresa', 'guardar')
-        ) {
-            http_response_code(403);
-            header('Content-Type: application/json; charset=utf-8');
-            echo json_encode(['status' => 'forbidden'], JSON_UNESCAPED_UNICODE);
-            exit;
-        }
+        $this->assertEmpresaFormJsonAccess();
 
         $nit = trim((string)($_GET['nit'] ?? ''));
         $excludeEmpresaId = isset($_GET['empresa_id']) && $_GET['empresa_id'] !== ''
@@ -335,10 +522,59 @@ class EmpresaController
     }
 
     /**
+     * GET ?url=empresa/searchRepresentante&q=...
+     */
+    public function searchRepresentante(): void
+    {
+        SessionManager::requireLogin();
+        $this->assertEmpresaFormJsonAccess();
+
+        $term = trim((string)($_GET['q'] ?? $_GET['term'] ?? ''));
+        $svc = new EmpresaTerceroLookupService();
+        $items = $svc->searchRepresentante($term);
+
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['ok' => true, 'items' => $items], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    /**
+     * GET ?url=empresa/lookupRepresentante&tipodocumento_id=&numero_documento=
+     */
+    public function lookupRepresentante(): void
+    {
+        SessionManager::requireLogin();
+        $this->assertEmpresaFormJsonAccess();
+
+        $tipo = (int)($_GET['tipodocumento_id'] ?? 0);
+        $numero = trim((string)($_GET['numero_documento'] ?? ''));
+
+        $svc = new EmpresaTerceroLookupService();
+        $result = $svc->lookupRepresentanteByDocumento($tipo, $numero);
+
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode($result, JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    private function assertEmpresaFormJsonAccess(): void
+    {
+        if (class_exists('PermisoService')
+            && !PermisoService::can('empresa', 'ver')
+            && !PermisoService::can('empresa', 'guardar')
+        ) {
+            http_response_code(403);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['ok' => false, 'error' => 'Sin permiso'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+    }
+
+    /**
      * Modal: gestión de sedes de la empresa seleccionada.
      * Ruta: ?url=empresa/sedes/{empresaId}
      * GET  → renderiza listado + formulario.
-     * POST → opera según campo `_action`: save | toggle.
+     * POST → opera según campo `_action`: save | toggle | delete (solo superadmin).
      */
     public function sedes($empresaId = null): void
     {
@@ -347,19 +583,24 @@ class EmpresaController
         $eid = $empresaId !== null && $empresaId !== '' ? (int)$empresaId : 0;
 
         if ($eid <= 0) {
-            $this->renderError('Seleccione una empresa en la tabla y vuelva a abrir la acción.');
+            $this->renderModalError('Seleccione una empresa en la tabla y vuelva a abrir la acción.');
             return;
         }
 
         $database = new Database();
         $pdo = $database->connect();
 
-        $stmt = $pdo->prepare('SELECT id, razon_social FROM empresa WHERE id = ? LIMIT 1');
+        $stmt = $pdo->prepare(
+            'SELECT e.id, t.razon_social
+             FROM empresa e
+             INNER JOIN tercero t ON t.id = e.tercero_id
+             WHERE e.id = ? LIMIT 1'
+        );
         $stmt->execute([$eid]);
         $empresa = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$empresa) {
-            $this->renderError('Empresa no encontrada.');
+            $this->renderModalError('Empresa no encontrada.');
             return;
         }
 
@@ -372,7 +613,7 @@ class EmpresaController
                 ]);
                 return;
             }
-            $this->renderError('No tiene permiso para gestionar las sedes de esta empresa.');
+            $this->renderModalError('No tiene permiso para gestionar las sedes de esta empresa.');
             return;
         }
 
@@ -416,7 +657,72 @@ class EmpresaController
             return;
         }
 
+        if ($action === 'delete') {
+            $this->handleDelete($pdo, $empresaId);
+            return;
+        }
+
         $this->jsonResponse(['success' => false, 'message' => 'Acción inválida.']);
+    }
+
+    private function handleDelete(PDO $pdo, int $empresaId): void
+    {
+        if (!$this->isSuperAdmin()) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'Solo un superadministrador puede eliminar sedes.',
+            ]);
+            return;
+        }
+
+        $sedeId = (int)($_POST['sede_id'] ?? 0);
+        if ($sedeId <= 0) {
+            $this->jsonResponse(['success' => false, 'message' => 'Sede no especificada.']);
+            return;
+        }
+
+        $own = $pdo->prepare('SELECT id, nombre FROM sede WHERE id = ? AND empresa_id = ? LIMIT 1');
+        $own->execute([$sedeId, $empresaId]);
+        $row = $own->fetch(PDO::FETCH_ASSOC);
+        if (!$row) {
+            $this->jsonResponse(['success' => false, 'message' => 'La sede no pertenece a esta empresa.']);
+            return;
+        }
+
+        $links = $pdo->prepare('SELECT COUNT(*) FROM usuario_sede WHERE sede_id = ?');
+        $links->execute([$sedeId]);
+        $asignaciones = (int)$links->fetchColumn();
+
+        $pdo->beginTransaction();
+        try {
+            if ($asignaciones > 0) {
+                $st = $pdo->prepare('DELETE FROM usuario_sede WHERE sede_id = ?');
+                $st->execute([$sedeId]);
+            }
+
+            $del = $pdo->prepare('DELETE FROM sede WHERE id = ? AND empresa_id = ?');
+            $del->execute([$sedeId, $empresaId]);
+
+            $pdo->commit();
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'No se pudo eliminar: ' . $e->getMessage(),
+            ]);
+            return;
+        }
+
+        $msg = 'Sede eliminada.';
+        if ($asignaciones > 0) {
+            $msg .= ' Se retiraron ' . $asignaciones . ' asignación(es) de usuario en esa sede.';
+        }
+
+        $this->jsonResponse([
+            'success' => true,
+            'message' => $msg,
+            'sedes' => $this->fetchSedes($pdo, $empresaId),
+        ]);
     }
 
     private function handleSave(PDO $pdo, int $empresaId): void
@@ -574,14 +880,19 @@ class EmpresaController
         exit;
     }
 
-    private function renderError(string $message): void
-    {
-        echo '<div class="modal-content" style="padding:24px;">'
-            . '<h3 style="margin:0 0 12px;">Sedes de la empresa</h3>'
-            . '<p style="color:#c00;">' . htmlspecialchars($message, ENT_QUOTES, 'UTF-8') . '</p>'
-            . '<div style="text-align:right; margin-top:16px;">'
+    private function renderModalError(
+        string $message,
+        string $title = 'Sedes de la empresa',
+        string $modalClass = 'empresa-sedes-modal'
+    ): void {
+        $footerClass = $modalClass === 'empresa-usuarios-modal' ? 'empresa-usuarios-footer' : 'empresa-sedes-footer';
+        echo '<div class="' . htmlspecialchars($modalClass, ENT_QUOTES, 'UTF-8') . ' modal-inner">'
+            . '<header class="modal-form-head"><h3 class="modal-form-title">'
+            . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '</h3></header>'
+            . '<p class="modal-form-alert">' . htmlspecialchars($message, ENT_QUOTES, 'UTF-8') . '</p>'
+            . '<footer class="' . htmlspecialchars($footerClass, ENT_QUOTES, 'UTF-8') . '">'
             . '<button type="button" class="btn-cancel" onclick="closeModalGod()">Cerrar</button>'
-            . '</div></div>';
+            . '</footer></div>';
         exit;
     }
 }

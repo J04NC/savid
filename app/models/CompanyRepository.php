@@ -11,11 +11,15 @@ class CompanyRepository
 
     public function findActiveById($empresaId)
     {
+        $eNd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'empresa', 'e');
+
         $stmt = $this->pdo->prepare("
-            SELECT id, razon_social
-            FROM empresa
-            WHERE id = ?
-            AND estado_id = 1
+            SELECT e.id, t.razon_social
+            FROM empresa e
+            INNER JOIN tercero t ON t.id = e.tercero_id
+            WHERE e.id = ?
+            AND e.estado_id = 1
+            {$eNd}
             LIMIT 1
         ");
         $stmt->execute([$empresaId]);
@@ -25,14 +29,18 @@ class CompanyRepository
 
     public function findActiveByUserId($userId)
     {
+        $eNd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'empresa', 'e');
+
         $stmt = $this->pdo->prepare("
-            SELECT e.id, e.razon_social
+            SELECT e.id, t.razon_social
             FROM usuario_empresa ue
             JOIN empresa e ON e.id = ue.empresa_id
+            INNER JOIN tercero t ON t.id = e.tercero_id
             WHERE ue.usuario_id = ?
             AND ue.estado_id = 1
             AND e.estado_id = 1
-            ORDER BY e.razon_social
+            {$eNd}
+            ORDER BY t.razon_social
         ");
         $stmt->execute([$userId]);
 
@@ -41,11 +49,15 @@ class CompanyRepository
 
     public function findAllActive()
     {
+        $eNd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'empresa', 'e');
+
         $stmt = $this->pdo->query("
-            SELECT id, razon_social
-            FROM empresa
-            WHERE estado_id = 1
-            ORDER BY razon_social
+            SELECT e.id, t.razon_social
+            FROM empresa e
+            INNER JOIN tercero t ON t.id = e.tercero_id
+            WHERE e.estado_id = 1
+            {$eNd}
+            ORDER BY t.razon_social
         ");
 
         return $stmt->fetchAll(PDO::FETCH_ASSOC);

@@ -66,6 +66,8 @@ class Router
             'lookupIdentificacion',
         ];
 
+        $empresaJsonApiMethods = ['uploadLogo', 'lookupNit', 'searchRepresentante', 'lookupRepresentante'];
+
         if (SessionManager::userLogged()
             && $controllerName === 'UsuarioController'
             && in_array($method, $usuarioJsonLookupMethods, true)
@@ -78,9 +80,18 @@ class Router
         }
 
         if (SessionManager::userLogged()
-            && !in_array($controllerName, ['LoginController', 'DashboardController', 'ModuleController'], true)
+            && $controllerName === 'ItemController'
+            && class_exists('PermisoService')
+            && !PermisoService::isSuperAdminSession()) {
+            http_response_code(403);
+            exit('Acceso denegado. Solo superadministrador.');
+        }
+
+        if (SessionManager::userLogged()
+            && !in_array($controllerName, ['LoginController', 'DashboardController', 'ModuleController', 'ContextController'], true)
             && class_exists('PermisoService')
             && !($controllerName === 'UsuarioController' && in_array($method, $usuarioJsonLookupMethods, true))
+            && !($controllerName === 'EmpresaController' && in_array($method, $empresaJsonApiMethods, true))
             && !PermisoService::can($rutaCompleta, 'ver')) {
             http_response_code(403);
             exit('Acceso denegado.');

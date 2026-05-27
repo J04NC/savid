@@ -97,26 +97,122 @@ class UserAccessService
             return null;
         }
 
-        $scopeSvc = new UserScopeService();
-        $scopeData = $scopeSvc->getEmpresaSedeModalData($usuarioId);
+        $targetId = (int)$usuarioId;
+        $esSuperAdmin = (int)($_SESSION['rol_id'] ?? 0) === 1 || !empty($_SESSION['es_super_admin']);
+        $operatorUserId = (int)($_SESSION['user_id'] ?? 0);
 
-        if (!$scopeData) {
-            return null;
-        }
-
-        $assignments = $this->repository->findRoleAssignmentsByUserId((int)$usuarioId);
+        $assignments = $this->repository->findRoleAssignmentsByUserId($targetId);
 
         if ($assignments === []) {
             $assignments[] = ['rol_id' => null, 'empresa_id' => null, 'sede_id' => null];
         }
 
+        $empresasDisponibles = $this->buildEmpresasListForRolesModal(
+            $targetId,
+            $assignments,
+            $esSuperAdmin,
+            $operatorUserId
+        );
+
+        $sedesPorEmpresa = [];
+        foreach ($empresasDisponibles as $emp) {
+            $eid = (int)$emp['id'];
+            $sedesPorEmpresa[$eid] = $this->branchRepository->findActiveByEmpresaId($eid);
+        }
+
+        $roles = $this->filterRolesForRolesModal(
+            $this->repository->findAllActiveRoles(),
+            $esSuperAdmin
+        );
+
         return [
             'usuario' => $usuario,
-            'roles' => $this->repository->findAllActiveRoles(),
+            'roles' => $roles,
             'assignments' => $assignments,
-            'empresasDisponibles' => $scopeData['empresasDisponibles'],
-            'sedesPorEmpresa' => $scopeData['sedesPorEmpresa'],
+            'empresasDisponibles' => $empresasDisponibles,
+            'sedesPorEmpresa' => $sedesPorEmpresa,
         ];
+    }
+
+    /**
+     * Solo superadministradores pueden asignar el rol Super Admin en el modal.
+     *
+     * @param array<int, array<string, mixed>> $roles
+     * @return array<int, array<string, mixed>>
+     */
+    private function filterRolesForRolesModal(array $roles, bool $esSuperAdmin): array
+    {
+        if ($esSuperAdmin) {
+            return $roles;
+        }
+
+        $superAdminRolId = UsuarioFormValidationService::SUPER_ADMIN_ROL_ID;
+
+        return array_values(array_filter(
+            $roles,
+            static fn (array $rol): bool => (int)($rol['id'] ?? 0) !== $superAdminRolId
+        ));
+    }
+
+    /**
+     * Empresas del desplegable roles: asociadas al usuario destino (usuario_empresa) y alcance del operador.
+     *
+     * @param array<int, array<string, mixed>> $assignments
+     * @return list<array{id: int, razon_social: string, nombre: string}>
+     */
+    private function buildEmpresasListForRolesModal(
+        int $targetUsuarioId,
+        array $assignments,
+        bool $esSuperAdmin,
+        int $operatorUserId
+    ): array {
+        $byId = [];
+
+        $add = function (?array $emp) use (&$byId): void {
+            if (!$emp || empty($emp['id'])) {
+                return;
+            }
+            $id = (int)$emp['id'];
+            $nombre = (string)($emp['razon_social'] ?? $emp['nombre'] ?? '');
+            $byId[$id] = [
+                'id' => $id,
+                'razon_social' => $nombre,
+                'nombre' => $nombre,
+            ];
+        };
+
+        foreach ($this->companyRepository->findActiveByUserId($targetUsuarioId) as $emp) {
+            $add($emp);
+        }
+
+        foreach ($assignments as $a) {
+            $eid = $a['empresa_id'] ?? null;
+            if ($eid === null || $eid === '') {
+                continue;
+            }
+            $add($this->companyRepository->findActiveById((int)$eid));
+        }
+
+        if ($esSuperAdmin) {
+            foreach ($this->companyRepository->findAllActive() as $emp) {
+                $add($emp);
+            }
+        } elseif ($operatorUserId > 0) {
+            foreach ($this->companyRepository->findActiveByUserId($operatorUserId) as $emp) {
+                $add($emp);
+            }
+        }
+
+        $list = array_values($byId);
+        usort(
+            $list,
+            static fn (array $a, array $b): int => strcasecmp(
+                (string)($a['razon_social'] ?? ''),
+                (string)($b['razon_social'] ?? '')
+            )
+        );
+
+        return $list;
     }
 
     /**
@@ -152,6 +248,13 @@ class UserAccessService
 
             if ($rid <= 0) {
                 continue;
+            }
+
+            if ($rid === UsuarioFormValidationService::SUPER_ADMIN_ROL_ID && !$esSuperAdmin) {
+                return [
+                    'success' => false,
+                    'message' => 'Solo un superadministrador puede asignar el rol Super Admin.',
+                ];
             }
 
             $eid = isset($row['empresa_id']) && $row['empresa_id'] !== '' ? (int)$row['empresa_id'] : null;
@@ -245,22 +348,29 @@ class UserAccessService
         $roleIds = $this->repository->getRoleGrantedItemAccionIdsForUserScope((int)$usuarioId, $empresaId, $sedeId);
         $roleSet = array_flip($roleIds);
 
-        $acciones = [];
         $matriz = [];
 
         foreach ($rows as $r) {
-            $acciones[$r['codigo']] = $r['accion'];
-            $modulo = $r['modulo'];
-            $itemId = $r['item_id'];
+            $modulo = (string)$r['modulo'];
+            $itemId = (int)$r['item_id'];
+            $codigo = (string)$r['codigo'];
             $iaId = (int)$r['item_accion_id'];
 
             if (!isset($matriz[$modulo])) {
-                $matriz[$modulo] = [];
+                $matriz[$modulo] = [
+                    'acciones' => [],
+                    'items' => [],
+                ];
             }
 
-            if (!isset($matriz[$modulo][$itemId])) {
-                $matriz[$modulo][$itemId] = [
-                    'item' => $r['item'],
+            $matriz[$modulo]['acciones'][$codigo] = [
+                'nombre' => (string)$r['accion'],
+                'accion_id' => (int)$r['accion_id'],
+            ];
+
+            if (!isset($matriz[$modulo]['items'][$itemId])) {
+                $matriz[$modulo]['items'][$itemId] = [
+                    'item' => (string)$r['item'],
                     'acciones' => [],
                 ];
             }
@@ -277,18 +387,28 @@ class UserAccessService
                 $denied = false;
             }
 
-            $matriz[$modulo][$itemId]['acciones'][$r['codigo']] = [
-                'id' => $r['item_accion_id'],
+            $matriz[$modulo]['items'][$itemId]['acciones'][$codigo] = [
+                'id' => $iaId,
                 'checked' => $checked,
                 'denied' => $denied,
                 'from_role' => $hasRole,
             ];
         }
 
-        return [
-            'acciones' => $acciones,
-            'matriz' => $matriz,
-        ];
+        foreach ($matriz as $modulo => $bloque) {
+            $acciones = $bloque['acciones'];
+            uasort(
+                $acciones,
+                static fn (array $a, array $b): int => ($a['accion_id'] ?? 0) <=> ($b['accion_id'] ?? 0)
+            );
+            $ordenadas = [];
+            foreach ($acciones as $codigo => $meta) {
+                $ordenadas[$codigo] = $meta['nombre'];
+            }
+            $matriz[$modulo]['acciones'] = $ordenadas;
+        }
+
+        return ['matriz' => $matriz];
     }
 
     /**

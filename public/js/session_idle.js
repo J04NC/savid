@@ -30,7 +30,7 @@
             }
         }
         if (idle >= limitMs) {
-            window.location.href = "?url=login/logout";
+            window.location.href = "?url=login/logout&motivo=idle";
         }
     }, 10000);
 })();

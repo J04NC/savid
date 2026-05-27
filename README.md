@@ -16,7 +16,8 @@ Documentacion unica del proyecto: guia rapida para el dia a dia y detalle tecnic
 6. [Como agregar funcionalidad](#como-agregar-funcionalidad)
 7. [Detalle tecnico (capas y contratos)](#detalle-tecnico-capas-y-contratos)
 8. [Checklist y verificacion](#checklist-y-verificacion)
-9. [Riesgos y mantenimiento](#riesgos-y-mantenimiento)
+9. [Auditoría y archivo histórico](#auditoría-y-archivo-histórico)
+10. [Riesgos y mantenimiento](#riesgos-y-mantenimiento)
 
 ---
 
@@ -179,6 +180,15 @@ Flujo de request:
 | Autenticacion | `LoginController` | `AuthService` | `UserRepository`, `SubscriptionRepository`, etc. |
 | Usuario (roles / permisos directos) | `UsuarioController` | `UserAccessService` | `UserAccessRepository` |
 | Dashboard | `DashboardController` | `DashboardService` | `MenuService`, `ModuleRepository` |
+| SGD (fase 1) | `SgdController` | `SgdConfigService`, `SgdImportService`, `SgdScopeService` | `SgdRepository` |
+
+### SGD — fase 1 (catálogos e importación)
+
+- Migración: `database/migrations/20260524_sgd_fase1.sql` (tablas `sgd_*`, módulo menú, permisos superadmin).
+- Rutas: `?url=sgd`, `sgd/config`, `sgd/importar`; catálogos CRUD: `sgd_proceso`, `sgd_tipo_documental`, `sgd_dependencia`, `sgd_documento`, `sgd_ccd_entrada`, etc.
+- Todo filtrado por `empresa_id` (sesión o filtro superadmin). Tipos documentales desde plantilla JSON (`config/sgd_tipos_plantilla.json`), no hardcodeados en PHP.
+- Importación Excel: lector `scripts/sgd_read_sheet.py` (requiere `python3` + `xlrd` para `.xls`).
+- Diseño funcional: `docs/sgd/FICHA_MODULO_SGD.md`.
 
 ---
 
@@ -345,6 +355,74 @@ rg "data-accion|btn-accion|accion_codigo" public/js app/views
 - [ ] Contexto `empresa_id` / `sede_id` intacto.
 
 **Humo rapido CRUD:** nuevo, editar fila, select `*_id`, eliminar, boton especial si aplica. Si el item es **tercero** con `zona_id` y `zona.tipo`, comprobar que al cambiar de zona urbana a rural (y viceversa) se muestran u ocultan comuna/barrio frente a corregimiento/vereda.
+
+---
+
+## Auditoría y archivo histórico
+
+Sistema de trazabilidad **global** (todas las escrituras SQL vía PDO) y pantalla de consulta.
+
+### Qué se registra
+
+| Campo | Contenido |
+|-------|-----------|
+| `accion` | `INSERT`, `UPDATE`, `DELETE` |
+| `tabla` / `registro_id` | Entidad afectada |
+| `datos_anteriores` / `datos_nuevos` | Snapshot JSON (contraseñas enmascaradas) |
+| `campos_cambiados` | Diff campo a campo en UPDATE |
+| `usuario_id`, `empresa_id`, `sede_id` | Contexto de sesión |
+| `ip`, `user_agent`, `request_url` | Origen HTTP |
+
+### Soft delete (recomendado)
+
+- Si la tabla tiene `deleted_at`, el botón **Eliminar** del CRUD hace baja lógica (`deleted_at`, `deleted_by`) en lugar de `DELETE` físico.
+- La migración `database/migrations/20260522_auditoria_sistema.sql` añade esas columnas a las tablas con `id` (excepto `auditoria` / `auditoria_archivo`).
+- Tablas puente sin `id` o sin `deleted_at` siguen con borrado físico, pero quedan en el log de auditoría.
+
+### Cómo archivar (retención en dos niveles)
+
+1. **Tabla caliente** `auditoria`: consultas rápidas (últimos meses en uso).
+2. **Tabla archivo** `auditoria_archivo`: copia de registros antiguos; misma estructura + `archived_at`.
+
+**Proceso de archivo** (no borra historial, solo lo mueve):
+
+```sql
+INSERT INTO auditoria_archivo (...) SELECT ..., NOW(3) FROM auditoria WHERE occurred_at < 'fecha_corte';
+DELETE FROM auditoria WHERE occurred_at < 'fecha_corte';
+```
+
+**Desde la UI:** superadmin → Auditoría → botón *Archivar antiguos (24 meses)*.
+
+**Por cron (recomendado, mensual):**
+
+```bash
+0 3 1 * * cd /var/www/savid && php database/scripts/archive_auditoria.php 24
+```
+
+El argumento `24` son los meses que permanecen en `auditoria` antes de moverse al archivo. Ajustar según política (ej. `36`).
+
+En la pantalla de auditoría, marcar **Consultar archivo histórico** para buscar solo en `auditoria_archivo`.
+
+### Menú y permisos
+
+- Ruta: `?url=auditoria` (ítem **Auditoría** bajo **Reportes** en módulo **Administración**).
+- **Superadmin:** acceso total + archivar.
+- **Otros usuarios:** permiso **ver** en el ítem `auditoria` (`permiso` / `rol_permiso` como el resto del sistema).
+
+### Trazabilidad created_at/by, updated_at/by
+
+La migración `database/migrations/20260523_trackable_columns.sql` añade las cuatro columnas en tablas con `id`.
+
+En cada **INSERT** y **UPDATE** vía PDO, `TrackableColumnsService` rellena automáticamente:
+
+| Columna | Cuándo |
+|---------|--------|
+| `created_at`, `created_by` | Solo en INSERT (si no vienen en el SQL) |
+| `updated_at`, `updated_by` | En todo UPDATE (incluye soft delete) |
+
+El usuario de sesión (`$_SESSION['user_id']`) se usa para `*_by`. Scripts CLI sin sesión dejan `*_by` en NULL pero sí marcan `*_at`.
+
+El CRUD no permite editar estos campos desde el formulario (se excluyen en `CrudService::save`).
 
 ---
 

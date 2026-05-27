@@ -2,130 +2,92 @@
 
 class MenuHelper
 {
+    private static ?int $moduloId = null;
 
-    public static function renderMenu($items)
+    /**
+     * @param array<int, array<string, mixed>> $items Árbol de ítems (con clave children opcional).
+     */
+    public static function renderMenu(array $items, ?int $moduloId = null): void
     {
-        if (!$items) return;
+        if ($items === []) {
+            return;
+        }
+
+        self::$moduloId = $moduloId !== null && (int)$moduloId > 0 ? (int)$moduloId : null;
 
         echo "<div class='sidebar-menu'>";
+        self::renderNodes($items, 0);
+        echo "</div>";
 
-        foreach ($items as $item) {
+        self::$moduloId = null;
+    }
 
-            $hasChildren = !empty($item['children']);
-            $nombre      = htmlspecialchars($item['nombre']);
-            $ruta        = $item['ruta'] ?? '';
+    /**
+     * @param array<int, array<string, mixed>> $nodes
+     */
+    private static function renderNodes(array $nodes, int $nivel): void
+    {
+        foreach ($nodes as $item) {
+            self::renderNode($item, $nivel);
+        }
+    }
 
-            echo "<div class='menu-block'>";
+    /**
+     * @param array<string, mixed> $item
+     */
+    private static function renderNode(array $item, int $nivel): void
+    {
+        $hasChildren = !empty($item['children']) && is_array($item['children']);
+        $ruta = trim((string)($item['ruta'] ?? ''));
+        $nombre = htmlspecialchars((string)($item['nombre'] ?? ''), ENT_QUOTES, 'UTF-8');
+        $icono = trim((string)($item['icono'] ?? ''));
 
-            /* =========================
-               ITEM PADRE CON HIJOS
-            ========================= */
-            if (!$ruta && $hasChildren) {
+        $isRoot = $nivel === 0;
+        $itemClass = $isRoot ? 'sidebar-item' : 'sidebar-subitem';
+        $levelClass = 'menu-level-' . $nivel;
+        $iconChar = $icono !== '' ? $icono : ($hasChildren ? '◉' : '•');
 
-                echo "<div class='sidebar-item menu-parent' onclick='toggleSubMenu(this)'>";
+        echo "<div class='menu-block'>";
 
-                    echo "<div class='menu-left'>";
-                        echo "<span class='menu-icon'>◉</span>";
-                        echo "<span class='menu-label'>{$nombre}</span>";
-                    echo "</div>";
+        if ($hasChildren) {
+            echo "<div class='{$itemClass} menu-parent {$levelClass}' onclick='toggleSubMenu(this)'>";
+            echo "<div class='menu-left'>";
+            echo "<span class='menu-icon'>" . htmlspecialchars($iconChar, ENT_QUOTES, 'UTF-8') . "</span>";
+            echo "<span class='menu-label'>{$nombre}</span>";
+            echo "</div>";
+            echo "<span class='menu-arrow'>▾</span>";
+            echo "</div>";
 
-                    echo "<span class='menu-arrow'>▾</span>";
-
-                echo "</div>";
-
-            }
-
-            /* =========================
-               ITEM NORMAL LINK
-            ========================= */
-            else {
-
-                echo "<a class='sidebar-item menu-link' href='?url={$ruta}'>";
-
-                    echo "<div class='menu-left'>";
-                        echo "<span class='menu-icon'>•</span>";
-                        echo "<span class='menu-label'>{$nombre}</span>";
-                    echo "</div>";
-
-                echo "</a>";
-
-            }
-
-            /* =========================
-               SUBMENU
-            ========================= */
-            if ($hasChildren) {
-
-                echo "<div class='submenu hidden'>";
-
-                self::renderSubMenu($item['children'], 1);
-
-                echo "</div>";
-            }
-
+            echo "<div class='submenu hidden'>";
+            self::renderNodes($item['children'], $nivel + 1);
+            echo "</div>";
+        } elseif ($ruta !== '') {
+            $href = self::itemHref($ruta);
+            echo "<a class='{$itemClass} menu-link {$levelClass}' href='{$href}'>";
+            echo "<div class='menu-left'>";
+            echo "<span class='menu-icon'>" . htmlspecialchars($iconChar, ENT_QUOTES, 'UTF-8') . "</span>";
+            echo "<span class='menu-label'>{$nombre}</span>";
+            echo "</div>";
+            echo "</a>";
+        } else {
+            echo "<div class='{$itemClass} menu-label-only {$levelClass}'>";
+            echo "<div class='menu-left'>";
+            echo "<span class='menu-icon'>" . htmlspecialchars($iconChar, ENT_QUOTES, 'UTF-8') . "</span>";
+            echo "<span class='menu-label'>{$nombre}</span>";
+            echo "</div>";
             echo "</div>";
         }
 
         echo "</div>";
     }
 
-
-    private static function renderSubMenu($children, $nivel = 1)
+    private static function itemHref(string $ruta): string
     {
-        foreach ($children as $child) {
-
-            $hasChildren = !empty($child['children']);
-            $nombre      = htmlspecialchars($child['nombre']);
-            $ruta        = $child['ruta'] ?? '';
-
-            $claseNivel = "menu-level-" . $nivel;
-
-            /* =========================
-               SUBITEM PADRE
-            ========================= */
-            if (!$ruta && $hasChildren) {
-
-                echo "<div class='sidebar-subitem menu-parent {$claseNivel}' onclick='toggleSubMenu(this)'>";
-
-                    echo "<div class='menu-left'>";
-                        echo "<span class='menu-icon'>▸</span>";
-                        echo "<span class='menu-label'>{$nombre}</span>";
-                    echo "</div>";
-
-                    echo "<span class='menu-arrow'>▾</span>";
-
-                echo "</div>";
-
-            }
-
-            /* =========================
-               SUBITEM LINK
-            ========================= */
-            else {
-
-                echo "<a class='sidebar-subitem menu-link {$claseNivel}' href='?url={$ruta}'>";
-
-                    echo "<div class='menu-left'>";
-                        echo "<span class='menu-icon'>•</span>";
-                        echo "<span class='menu-label'>{$nombre}</span>";
-                    echo "</div>";
-
-                echo "</a>";
-
-            }
-
-            /* =========================
-               HIJOS INTERNOS
-            ========================= */
-            if ($hasChildren) {
-
-                echo "<div class='submenu hidden'>";
-
-                self::renderSubMenu($child['children'], $nivel + 1);
-
-                echo "</div>";
-            }
+        $href = '?url=' . rawurlencode($ruta);
+        if (self::$moduloId !== null) {
+            $href .= '&modulo=' . self::$moduloId;
         }
-    }
 
+        return htmlspecialchars($href, ENT_QUOTES, 'UTF-8');
+    }
 }

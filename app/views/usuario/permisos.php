@@ -54,36 +54,45 @@ document.addEventListener("DOMContentLoaded", function () {
 </div>
 
 <div id="permisosMatriz" class="role-wrapper">
-<?php foreach ($matriz as $modulo => $items): ?>
-<div class="role-module">
+<?php foreach ($matriz as $modulo => $bloque): ?>
+<?php
+    $accionesMod = $bloque['acciones'] ?? [];
+    $itemsMod = $bloque['items'] ?? [];
+    $moduloSlug = preg_replace('/[^a-z0-9_-]+/i', '_', (string)$modulo);
+?>
+<div class="role-module" data-modulo="<?= htmlspecialchars($moduloSlug, ENT_QUOTES, 'UTF-8') ?>">
     <div class="role-module-header">
         <label class="role-module-label">
             <input type="checkbox" class="check-modulo">
-            <span>📁 <?= strtoupper(htmlspecialchars($modulo)) ?></span>
+            <span>📁 <?= strtoupper(htmlspecialchars((string)$modulo, ENT_QUOTES, 'UTF-8')) ?></span>
         </label>
-        <span class="role-counter"><?= count($items) ?> ITEMS</span>
+        <span class="role-counter"><?= count($itemsMod) ?> ITEMS · <?= count($accionesMod) ?> ACCIONES</span>
     </div>
     <div class="role-table-wrap">
-        <table class="role-table">
+        <table class="role-table role-table-perms">
             <thead>
                 <tr>
+                    <th class="sticky-todo th-todo">TODO</th>
                     <th class="sticky-left">ITEM</th>
-                    <?php foreach ($acciones as $codigo => $nombre): ?>
-                        <th>
+                    <?php foreach ($accionesMod as $codigo => $nombre): ?>
+                        <?php $hdr = RolePermissionService::actionHeaderLabels((string)$codigo, (string)$nombre); ?>
+                        <th class="th-action" title="<?= htmlspecialchars($hdr['full'], ENT_QUOTES, 'UTF-8') ?>">
                             <label class="head-check">
-                                <input type="checkbox" class="check-columna" data-col="<?= htmlspecialchars($codigo) ?>">
-                                <span><?= strtoupper(htmlspecialchars($nombre)) ?></span>
+                                <input type="checkbox" class="check-columna" data-col="<?= htmlspecialchars((string)$codigo, ENT_QUOTES, 'UTF-8') ?>">
+                                <span class="head-check-label"><?= htmlspecialchars($hdr['short'], ENT_QUOTES, 'UTF-8') ?></span>
                             </label>
                         </th>
                     <?php endforeach; ?>
-                    <th>TODO</th>
                 </tr>
             </thead>
             <tbody>
-            <?php foreach ($items as $itemId => $item): ?>
+            <?php foreach ($itemsMod as $itemId => $item): ?>
                 <tr>
-                    <td class="sticky-left item-name"><?= strtoupper(htmlspecialchars($item['item'])) ?></td>
-                    <?php foreach ($acciones as $codigo => $nombre): ?>
+                    <td class="sticky-todo cell-check">
+                        <input type="checkbox" class="check-fila" data-fila="<?= (int)$itemId ?>">
+                    </td>
+                    <td class="sticky-left item-name"><?= strtoupper(htmlspecialchars((string)$item['item'], ENT_QUOTES, 'UTF-8')) ?></td>
+                    <?php foreach ($accionesMod as $codigo => $nombre): ?>
                         <?php if (isset($item['acciones'][$codigo])): ?>
                             <?php
                                 $ia = $item['acciones'][$codigo];
@@ -93,16 +102,17 @@ document.addEventListener("DOMContentLoaded", function () {
                                         ? 'Quitar denegación (vuelve el acceso del rol)'
                                         : 'Denegar frente al rol (desmarque el recuadro)')
                                     : ($ia['checked'] ? 'Quitar permiso directo' : 'Añadir permiso directo (permitir)');
+                                $hdrCell = RolePermissionService::actionHeaderLabels((string)$codigo, (string)$nombre);
                             ?>
                     <td class="cell-check<?= $fr ? ' cell-has-role' : '' ?><?= !empty($ia['denied']) ? ' cell-has-deny' : '' ?>">
                             <div class="usuario-perm-cell<?= !empty($ia['denied']) ? ' perm-cell-denied' : '' ?>">
                                 <span class="perm-check-slot">
                                     <input type="checkbox"
                                         value="<?= (int)$ia['id'] ?>"
-                                        class="check-perm fila-<?= (int)$itemId ?> col-<?= htmlspecialchars($codigo) ?>"
+                                        class="check-perm fila-<?= (int)$itemId ?> col-<?= htmlspecialchars((string)$codigo, ENT_QUOTES, 'UTF-8') ?>"
                                         data-from-role="<?= $fr ? '1' : '0' ?>"
                                         <?= !empty($ia['checked']) ? 'checked' : '' ?>
-                                        title="<?= htmlspecialchars($title) ?>"
+                                        title="<?= htmlspecialchars($title, ENT_QUOTES, 'UTF-8') ?>"
                                     >
                                     <?php if (!empty($ia['denied'])): ?>
                                         <span class="perm-deny-inside" title="Denegación activa frente al rol" aria-hidden="true">−</span>
@@ -116,9 +126,6 @@ document.addEventListener("DOMContentLoaded", function () {
                     </td>
                         <?php endif; ?>
                     <?php endforeach; ?>
-                    <td class="cell-check">
-                        <input type="checkbox" class="check-fila" data-fila="<?= (int)$itemId ?>">
-                    </td>
                 </tr>
             <?php endforeach; ?>
             </tbody>
@@ -303,28 +310,42 @@ function marcarChecks(lista, estado) {
     lista.forEach(chk => chk.checked = estado);
 }
 
-function actualizarFila(id) {
-    const master = document.querySelector('.check-fila[data-fila="' + id + '"]');
-    const lista = document.querySelectorAll(".fila-" + id);
-    if (master) master.checked = Array.from(lista).every(x => x.checked);
+function actualizarFila(id, box) {
+    const master = box.querySelector('.check-fila[data-fila="' + id + '"]');
+    const lista = box.querySelectorAll(".fila-" + id);
+    if (master) master.checked = lista.length > 0 && Array.from(lista).every(x => x.checked);
 }
 
-function actualizarCol(id) {
-    const master = document.querySelector('.check-columna[data-col="' + id + '"]');
-    const lista = document.querySelectorAll(".col-" + id);
-    if (master) master.checked = Array.from(lista).every(x => x.checked);
+function actualizarCol(codigo, box) {
+    const master = box.querySelector('.check-columna[data-col="' + codigo + '"]');
+    const lista = box.querySelectorAll(".col-" + codigo);
+    if (master) master.checked = lista.length > 0 && Array.from(lista).every(x => x.checked);
 }
 
 function actualizarModulo(box) {
     const master = box.querySelector(".check-modulo");
     const lista = box.querySelectorAll(".check-perm");
-    if (master) master.checked = Array.from(lista).every(x => x.checked);
+    if (master) master.checked = lista.length > 0 && Array.from(lista).every(x => x.checked);
 }
 
 function actualizarTodo() {
-    document.querySelectorAll(".check-fila").forEach(x => actualizarFila(x.dataset.fila));
-    document.querySelectorAll(".check-columna").forEach(x => actualizarCol(x.dataset.col));
-    document.querySelectorAll(".role-module").forEach(x => actualizarModulo(x));
+    document.querySelectorAll(".role-module").forEach(function (box) {
+        box.querySelectorAll(".check-fila").forEach(function (x) {
+            actualizarFila(x.dataset.fila, box);
+        });
+        box.querySelectorAll(".check-columna").forEach(function (x) {
+            actualizarCol(x.dataset.col, box);
+        });
+        actualizarModulo(box);
+    });
+}
+
+function actionHeaderLabels(codigo, nombre) {
+    const full = String(nombre || "").trim().toUpperCase();
+    const fromCodigo = String(codigo || "").replace(/_/g, " ").toUpperCase();
+    if (full.length <= 14) return { short: full, full: full };
+    if (fromCodigo.length <= 14) return { short: fromCodigo, full: full };
+    return { short: fromCodigo.slice(0, 12) + "…", full: full };
 }
 
 function escapeHtml(str) {
@@ -339,11 +360,17 @@ function renderMatriz(data) {
     const container = document.getElementById("permisosMatriz");
     if (!container) return;
 
+    const matriz = data.matriz || {};
     let html = '';
 
-    for (const modulo in data.matriz) {
-        const items = data.matriz[modulo];
+    for (const modulo in matriz) {
+        const bloque = matriz[modulo];
+        const acciones = bloque.acciones || {};
+        const items = bloque.items || {};
+        const codigosOrdenados = Object.keys(acciones);
         const nItems = Object.keys(items).length;
+        const nAcc = codigosOrdenados.length;
+
         html += `
         <div class="role-module">
             <div class="role-module-header">
@@ -351,32 +378,39 @@ function renderMatriz(data) {
                     <input type="checkbox" class="check-modulo">
                     <span>📁 ${escapeHtml(String(modulo).toUpperCase())}</span>
                 </label>
-                <span class="role-counter">${nItems} ITEMS</span>
+                <span class="role-counter">${nItems} ITEMS · ${nAcc} ACCIONES</span>
             </div>
             <div class="role-table-wrap">
-                <table class="role-table">
+                <table class="role-table role-table-perms">
                     <thead>
                         <tr>
+                            <th class="sticky-todo th-todo">TODO</th>
                             <th class="sticky-left">ITEM</th>`;
 
-        for (const codigo in data.acciones) {
+        for (let i = 0; i < codigosOrdenados.length; i++) {
+            const codigo = codigosOrdenados[i];
+            const hdr = actionHeaderLabels(codigo, acciones[codigo]);
             html += `
-                            <th>
+                            <th class="th-action" title="${escapeHtml(hdr.full)}">
                                 <label class="head-check">
                                     <input type="checkbox" class="check-columna" data-col="${escapeHtml(codigo)}">
-                                    <span>${escapeHtml(String(data.acciones[codigo]).toUpperCase())}</span>
+                                    <span class="head-check-label">${escapeHtml(hdr.short)}</span>
                                 </label>
                             </th>`;
         }
-        html += '<th>TODO</th></tr></thead><tbody>';
+        html += '</tr></thead><tbody>';
 
         for (const itemId in items) {
             const item = items[itemId];
             html += `<tr>
-                <td class="sticky-left item-name">${escapeHtml(String(item.item).toUpperCase())}</td>`;
+                <td class="sticky-todo cell-check">
+                    <input type="checkbox" class="check-fila" data-fila="${itemId}">
+                </td>
+                <td class="sticky-left item-name">${escapeHtml(String(item.item || "").toUpperCase())}</td>`;
 
-            for (const codigo in data.acciones) {
-                const cell = item.acciones[codigo];
+            for (let j = 0; j < codigosOrdenados.length; j++) {
+                const codigo = codigosOrdenados[j];
+                const cell = item.acciones && item.acciones[codigo];
                 const roleClass = cell && cell.from_role ? ' cell-has-role' : '';
                 const denyClass = cell && cell.denied ? ' cell-has-deny' : '';
                 if (cell) {
@@ -403,7 +437,7 @@ function renderMatriz(data) {
                             <span class="perm-check-slot">
                                 <input type="checkbox"
                                     value="${cell.id}"
-                                    class="check-perm fila-${itemId} col-${codigo}"
+                                    class="check-perm fila-${itemId} col-${escapeHtml(codigo)}"
                                     data-from-role="${dataFr}"
                                     title="${escapeHtml(titleAttr)}"
                                     ${chk}>
@@ -415,11 +449,7 @@ function renderMatriz(data) {
                     html += '<td class="cell-check"><span class="no-perm">—</span></td>';
                 }
             }
-            html += `
-                    <td class="cell-check">
-                        <input type="checkbox" class="check-fila" data-fila="${itemId}">
-                    </td>
-                </tr>`;
+            html += '</tr>';
         }
         html += '</tbody></table></div></div>';
     }
@@ -458,6 +488,7 @@ function bindChecks() {
     document.querySelectorAll(".check-modulo").forEach(chk => {
         chk.addEventListener("change", function() {
             const box = this.closest(".role-module");
+            if (!box) return;
             marcarChecks(box.querySelectorAll(".check-perm"), this.checked);
             actualizarTodo();
             scheduleFlush();
@@ -466,7 +497,9 @@ function bindChecks() {
 
     document.querySelectorAll(".check-columna").forEach(chk => {
         chk.addEventListener("change", function() {
-            marcarChecks(document.querySelectorAll(".col-" + this.dataset.col), this.checked);
+            const box = this.closest(".role-module");
+            if (!box) return;
+            marcarChecks(box.querySelectorAll(".col-" + this.dataset.col), this.checked);
             actualizarTodo();
             scheduleFlush();
         });
@@ -474,7 +507,9 @@ function bindChecks() {
 
     document.querySelectorAll(".check-fila").forEach(chk => {
         chk.addEventListener("change", function() {
-            marcarChecks(document.querySelectorAll(".fila-" + this.dataset.fila), this.checked);
+            const box = this.closest(".role-module");
+            if (!box) return;
+            marcarChecks(box.querySelectorAll(".fila-" + this.dataset.fila), this.checked);
             actualizarTodo();
             scheduleFlush();
         });
@@ -482,12 +517,14 @@ function bindChecks() {
 
     document.querySelectorAll(".check-perm").forEach(chk => {
         chk.addEventListener("change", function() {
+            const box = this.closest(".role-module");
+            if (!box) return;
             const clases = [...this.classList];
             const fila = clases.find(x => x.startsWith("fila-"));
             const col = clases.find(x => x.startsWith("col-"));
-            if (fila) actualizarFila(fila.replace("fila-", ""));
-            if (col) actualizarCol(col.replace("col-", ""));
-            actualizarModulo(this.closest(".role-module"));
+            if (fila) actualizarFila(fila.replace("fila-", ""), box);
+            if (col) actualizarCol(col.replace("col-", ""), box);
+            actualizarModulo(box);
             scheduleFlush();
         });
     });

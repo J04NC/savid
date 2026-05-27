@@ -3,13 +3,6 @@
 $menuService = new MenuService($_SESSION['user_id']);
 $searchItems = $menuService->getSearchItems();
 
-$moduloId = $_GET['modulo'] ?? null;
-$menuItems = [];
-
-if ($moduloId) {
-    $menuItems = $menuService->getItemsByModulo($moduloId);
-}
-
 $assetRef = BASE_PATH . '/public/js/app.js';
 $cssTokens = BASE_PATH . '/public/css/tokens.css';
 $cssApp = BASE_PATH . '/public/css/app.css';
@@ -84,12 +77,6 @@ if ($sessionIdleMin < 0) {
 </div>
 
 </div>
-
-<?php
-if ($menuItems) {
-    MenuHelper::renderMenu($menuItems);
-}
-?>
 
 </div>
 
@@ -187,6 +174,11 @@ if (!empty($_SESSION['sesion_idle_minutos']) && (int)$_SESSION['sesion_idle_minu
     $sidPath = BASE_PATH . '/public/js/session_idle.js';
     $sidV = is_readable($sidPath) ? (int)filemtime($sidPath) : (int)$assetsV;
     echo '<script src="/js/session_idle.js?v=' . (int)$sidV . '"></script>';
+}
+if (!empty($_SESSION['user_id'])) {
+    $spPath = BASE_PATH . '/public/js/sesiones_ping.js';
+    $spV = is_readable($spPath) ? (int)filemtime($spPath) : (int)$assetsV;
+    echo '<script src="/js/sesiones_ping.js?v=' . (int)$spV . '"></script>';
 }
 ?>
 

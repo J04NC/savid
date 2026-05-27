@@ -22,28 +22,19 @@ SIDEBAR
 function initSidebar() {
 
     window.toggleUserPanel = function () {
-
         const body = document.getElementById("userBody");
-        const arrow = document.querySelector(".arrow");
+        const arrow = document.querySelector(".sidebar-floating .arrow");
 
         if (!body) return;
 
         body.classList.toggle("hidden");
 
         if (arrow) {
-            arrow.innerHTML =
-                body.classList.contains("hidden")
-                ? "▶"
-                : "▼";
+            arrow.innerHTML = body.classList.contains("hidden") ? "▶" : "▼";
         }
-
     };
 
-    /* =====================================================
-    Recoger sidebar al hacer clic fuera de él
-    ===================================================== */
-    function collapseSidebar() {
-
+    function collapseUserPanel() {
         const body = document.getElementById("userBody");
         const arrow = document.querySelector(".sidebar-floating .arrow");
 
@@ -51,21 +42,9 @@ function initSidebar() {
             body.classList.add("hidden");
             if (arrow) arrow.innerHTML = "▶";
         }
-
-        document
-            .querySelectorAll(".sidebar-floating .submenu:not(.hidden)")
-            .forEach(function (sub) {
-                sub.classList.add("hidden");
-                const parent = sub.previousElementSibling;
-                if (parent && parent.classList.contains("menu-parent")) {
-                    const a = parent.querySelector(".menu-arrow");
-                    if (a) a.innerHTML = "▾";
-                }
-            });
     }
 
     document.addEventListener("click", function (e) {
-
         const sidebar = document.querySelector(".sidebar-floating");
         if (!sidebar) return;
 
@@ -76,11 +55,11 @@ function initSidebar() {
             return;
         }
 
-        collapseSidebar();
+        collapseUserPanel();
     });
 
     document.addEventListener("keydown", function (e) {
-        if (e.key === "Escape") collapseSidebar();
+        if (e.key === "Escape") collapseUserPanel();
     });
 
 }
@@ -104,7 +83,7 @@ function initModalSystem() {
         loading = "Cargando..."
     ) {
 
-        closeModalGod(true);
+        window.__modalBeforeClose = null;
 
         modal.classList.remove("hidden");
         document.body.classList.add("modal-open");

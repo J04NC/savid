@@ -119,7 +119,6 @@ class RolController
         ==========================================
         */
         $matrix = $this->rolePermissionService->buildMatrixResponse($rolId, $empresaId, $sedeId);
-        $acciones = $matrix['acciones'];
         $matriz = $matrix['matriz'];
 
         require BASE_PATH . '/app/views/rol/permisos.php';

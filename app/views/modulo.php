@@ -13,9 +13,12 @@
 <?php foreach ($items as $item): ?>
 
 <a class="system-card"
-   href="<?php echo !empty($item['ruta'])
-        ? '?url='.$item['ruta']
-        : '?url=dashboard/item/'.$item['id']; ?>">
+   href="<?php
+        $modQ = isset($moduloId) && (int)$moduloId > 0 ? '&modulo=' . (int)$moduloId : '';
+        echo !empty($item['ruta'])
+        ? '?url=' . htmlspecialchars((string)$item['ruta'], ENT_QUOTES, 'UTF-8') . $modQ
+        : '?url=dashboard/item/' . (int)$item['id'] . $modQ;
+   ?>">
 
  <!--   <div class="system-card-icon">
         <?php //echo IconHelper::get($item['nombre']); ?>

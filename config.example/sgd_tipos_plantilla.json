@@ -1,0 +1,10 @@
+[
+  {"codigo": "M", "nombre": "Manual", "modo": "maestro", "orden": 10},
+  {"codigo": "PD", "nombre": "Procedimiento documentado", "modo": "maestro", "orden": 20},
+  {"codigo": "PL", "nombre": "Plan", "modo": "maestro", "orden": 30},
+  {"codigo": "PG", "nombre": "Programa", "modo": "maestro", "orden": 40},
+  {"codigo": "G", "nombre": "Guía", "modo": "maestro", "orden": 50},
+  {"codigo": "F", "nombre": "Formato", "modo": "dinamico", "orden": 60},
+  {"codigo": "R", "nombre": "Registro", "modo": "dinamico", "orden": 70},
+  {"codigo": "MT", "nombre": "Matriz", "modo": "hibrido", "orden": 80}
+]

@@ -51,6 +51,13 @@ class LoginController
             exit;
         }
 
+        try {
+            $tracking = new SesionTrackingService();
+            $tracking->openSessionForCurrentUser();
+        } catch (Throwable $e) {
+            error_log('SesionTrackingService (login): ' . $e->getMessage());
+        }
+
         $target = $auth['redirect'] ?? '?url=dashboard';
         header('Location: ' . $target);
         exit;
@@ -58,6 +65,10 @@ class LoginController
 
     public function logout()
     {
+        $motivo = (isset($_GET['motivo']) && $_GET['motivo'] === 'idle') ? 'idle' : 'logout';
+        $tracking = new SesionTrackingService();
+        $tracking->closeCurrentSession($motivo);
+
         SessionManager::destroy();
         header("Location: ?url=login");
         exit;

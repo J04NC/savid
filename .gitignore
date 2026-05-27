@@ -1,4 +1,5 @@
 # Configuracion local (credenciales, overrides). Ver config.example/
 /config/
 /public/uploads/
-
+/docs/
+/storage/sgd_imports/

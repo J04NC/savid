@@ -37,12 +37,15 @@ class ContextGateService
             ['LoginController', 'logout'],
             ['ContextController', 'cambiarSede'],
             ['UsuarioController', 'uploadAsset'],
+            ['EmpresaController', 'uploadLogo'],
+            ['EmpresaController', 'lookupNit'],
             ['UsuarioController', 'lookupDocumento'],
             ['UsuarioController', 'lookupDocumentoNumero'],
             ['UsuarioController', 'lookupEmail'],
             ['UsuarioController', 'lookupUsername'],
             ['UsuarioController', 'lookupEmailTercero'],
             ['UsuarioController', 'lookupIdentificacion'],
+            ['SesionesController', 'ping'],
         ];
 
         foreach ($allowed as [$c, $m]) {

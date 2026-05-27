@@ -59,11 +59,6 @@ class DashboardService
         if ($currentItem) {
             $modulo = $this->moduleRepository->findModuloById($currentItem['modulo_id']);
 
-            if ($modulo) {
-                $breadcrumb .= ' <span class="separator"> / </span> ';
-                $breadcrumb .= '<a href="?url=dashboard/modulo/' . $currentItem['modulo_id'] . '">' . strtoupper($modulo['nombre']) . '</a>';
-            }
-
             $currentId = $itemId;
             $path = [];
 
@@ -78,10 +73,28 @@ class DashboardService
             }
 
             $path = array_reverse($path);
+            $lastIndex = count($path) - 1;
 
-            foreach ($path as $p) {
+            $moduloLabel = $modulo ? strtoupper((string)$modulo['nombre']) : '';
+            $singleRootSameAsModulo = $modulo !== null
+                && count($path) === 1
+                && strcasecmp(trim((string)($path[0]['nombre'] ?? '')), trim((string)$modulo['nombre'])) === 0;
+
+            if ($modulo && !$singleRootSameAsModulo) {
                 $breadcrumb .= ' <span class="separator"> / </span> ';
-                $breadcrumb .= '<a href="?url=dashboard/item/' . $p['id'] . '">' . strtoupper($p['nombre']) . '</a>';
+                $breadcrumb .= '<a href="?url=dashboard/modulo/' . $currentItem['modulo_id'] . '">'
+                    . htmlspecialchars($moduloLabel, ENT_QUOTES, 'UTF-8') . '</a>';
+            }
+
+            foreach ($path as $index => $p) {
+                $breadcrumb .= ' <span class="separator"> / </span> ';
+                $label = strtoupper((string)($p['nombre'] ?? ''));
+                if ($index === $lastIndex) {
+                    $breadcrumb .= '<span>' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</span>';
+                } else {
+                    $breadcrumb .= '<a href="?url=dashboard/item/' . (int)$p['id'] . '">'
+                        . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</a>';
+                }
             }
         }
 

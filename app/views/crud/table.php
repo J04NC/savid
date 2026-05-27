@@ -71,14 +71,18 @@ function getConfigFromComment($comment){
 
         if(str_starts_with($part,'show:')){
             $show = str_replace('show:','',$part);
-            $arr = explode(',', $show);
+            $arr = array_map('trim', explode(',', $show));
 
             if(in_array('none',$arr)){
                 $config['showForm'] = false;
                 $config['showTable'] = false;
             }else{
-                $config['showForm'] = in_array('form',$arr);
-                $config['showTable'] = in_array('table',$arr);
+                if(in_array('form',$arr)){
+                    $config['showForm'] = true;
+                }
+                if(in_array('table',$arr)){
+                    $config['showTable'] = true;
+                }
             }
         }
 
@@ -111,11 +115,12 @@ usort($columns, function($a,$b){
 $catalogRegistry = $catalogRegistry ?? [];
 $crudContextTable = $crudContextTable ?? '';
 $tipodocumentoMetaById = $tipodocumentoMetaById ?? [];
+$usuarioTableColumnFields = $usuarioTableColumnFields ?? [];
 
 $crudZonaFieldNames = array_column($columns, 'Field');
 $crudUrbanoRuralFields = ['comuna_id', 'barrio_id', 'corregimiento_id', 'vereda_id'];
 $crudHasUrbanoRural = count(array_intersect($crudUrbanoRuralFields, $crudZonaFieldNames)) > 0;
-$crudZonaUbicacionToggle = ($crudContextTable === 'tercero')
+$crudZonaUbicacionToggle = in_array($crudContextTable, ['tercero', 'empresa'], true)
     && in_array('zona_id', $crudZonaFieldNames, true)
     && $crudHasUrbanoRural;
 
@@ -151,6 +156,7 @@ foreach ($relationData as $campoRel => $options) {
 <?php if ($crudContextTable === 'empresa'): ?>
 <input type="hidden" name="tercero_id" id="empresa_tercero_id" value="<?= htmlspecialchars((string)($old['tercero_id'] ?? ''), ENT_QUOTES, 'UTF-8') ?>">
 <input type="hidden" name="terceroidentificacion_id" id="empresa_terceroidentificacion_id" value="<?= htmlspecialchars((string)($old['terceroidentificacion_id'] ?? ''), ENT_QUOTES, 'UTF-8') ?>">
+<input type="hidden" name="representante_terceroidentificacion_id" id="empresa_rep_terceroidentificacion_id" value="<?= htmlspecialchars((string)($old['representante_terceroidentificacion_id'] ?? ''), ENT_QUOTES, 'UTF-8') ?>">
 <?php endif; ?>
 
 <div class="crud-toolbar">
@@ -175,6 +181,17 @@ if ($crudContextTable === 'empresa') {
         || (int)($_SESSION['rol_id'] ?? 0) === 1;
     if (!$crudEsSuperAdmin) {
         $canNuevo = false;
+        $canEliminar = false;
+    }
+}
+
+if ($crudContextTable === 'item') {
+    $crudEsSuperAdmin = class_exists('PermisoService')
+        ? PermisoService::isSuperAdminSession()
+        : (!empty($_SESSION['es_super_admin']) || (int)($_SESSION['rol_id'] ?? 0) === 1);
+    if (!$crudEsSuperAdmin) {
+        $canNuevo = false;
+        $canGuardar = false;
         $canEliminar = false;
     }
 }
@@ -214,18 +231,22 @@ title="<?= $accion['nombre'] ?>">
 
 <?php endforeach; ?>
 
-<input type="text" placeholder="Buscar..." class="crud-search">
-
 </div>
 
 </div>
 
-<div class="crud-form<?= $crudContextTable === 'usuario' ? ' crud-form-usuario' : '' ?>">
+<div class="crud-form<?= $crudContextTable === 'usuario' ? ' crud-form-usuario' : '' ?><?= $crudContextTable === 'empresa' ? ' crud-form-empresa' : '' ?>">
 
 <?php
 $crudUsuarioLayoutOpen = false;
 $crudUsuarioFieldsOpen = false;
 $crudUsuarioAsideOpen = false;
+$crudEmpresaLayoutOpen = false;
+$crudEmpresaFieldsOpen = false;
+$crudEmpresaAsideOpen = false;
+$crudEmpresaUbicacionOpen = false;
+$crudEmpresaRepOpen = false;
+$crudEmpresaContactoPairOpen = false;
 ?>
 
 <?php foreach($columns as $col): ?>
@@ -258,17 +279,112 @@ if (!empty($crudZonaUbicacionToggle)) {
     }
 }
 if ($campo === 'documento_dv') {
-    $formGroupExtra .= ' crud-usuario-dv-wrap';
-    $formGroupStyle = ' style="display:none;"';
+    if ($crudContextTable === 'usuario') {
+        $formGroupExtra .= ' crud-usuario-dv-wrap';
+        $formGroupStyle = ' style="display:none;"';
+    } elseif ($crudContextTable === 'empresa') {
+        $formGroupExtra .= ' crud-empresa-dv-wrap';
+    }
 }
 if ($crudContextTable === 'usuario' && in_array($campo, ['tipodocumento_id', 'numero_documento', 'documento_dv'], true)) {
     $formGroupExtra .= ' crud-usuario-doc-field';
+}
+if ($crudContextTable === 'empresa' && in_array($campo, ['nit', 'documento_dv', 'razon_social'], true)) {
+    $formGroupExtra .= ' crud-empresa-doc-field';
+}
+if ($crudContextTable === 'empresa' && in_array($campo, ['rep_tipodocumento_id', 'rep_numero_documento', 'rep_nombres', 'rep_apellidos'], true)) {
+    $formGroupExtra .= ' crud-empresa-rep-field';
+}
+if ($crudContextTable === 'empresa' && in_array($campo, ['email', 'sitio_web'], true)) {
+    $formGroupExtra .= ' crud-empresa-contacto-field';
+}
+if ($crudContextTable === 'empresa' && in_array($campo, ['pais_id', 'departamento_id', 'municipio_id', 'zona_id', 'comuna_id', 'corregimiento_id', 'barrio_id', 'vereda_id'], true)) {
+    $formGroupExtra .= ' crud-empresa-ubicacion-field';
 }
 if (($config['span'] ?? '') === 'full') {
     $formGroupExtra .= ' crud-form-field-full';
 }
 if ($crudContextTable === 'usuario' && in_array($campo, ['foto_ruta', 'firma_ruta'], true)) {
     $formGroupExtra .= ' crud-usuario-media-field';
+}
+if ($crudContextTable === 'empresa' && in_array($campo, ['logo', 'logo2'], true)) {
+    $formGroupExtra .= ' crud-empresa-media-field';
+}
+
+if ($crudContextTable === 'empresa') {
+    $isEmpresaMedia = in_array($campo, ['logo', 'logo2'], true);
+    if (!$crudEmpresaLayoutOpen) {
+        echo '<div class="crud-empresa-layout">';
+        $crudEmpresaLayoutOpen = true;
+    }
+    if ($isEmpresaMedia) {
+        if ($crudEmpresaFieldsOpen) {
+            echo '</div>';
+            $crudEmpresaFieldsOpen = false;
+        }
+        if (!$crudEmpresaAsideOpen) {
+            echo '<aside class="crud-empresa-media-aside" aria-label="Logos de la empresa">';
+            $crudEmpresaAsideOpen = true;
+        }
+    } else {
+        if ($crudEmpresaAsideOpen) {
+            echo '</aside>';
+            $crudEmpresaAsideOpen = false;
+        }
+        if (!$crudEmpresaFieldsOpen) {
+            echo '<div class="crud-empresa-fields">';
+            $crudEmpresaFieldsOpen = true;
+        }
+    }
+}
+
+if ($crudContextTable === 'empresa' && $campo === 'nit') {
+    echo '<div class="crud-empresa-section-head crud-form-field-full"><h3 class="crud-empresa-section-title">Identificación tributaria</h3></div>';
+    echo '<div class="crud-empresa-nit-fields">';
+}
+if ($crudContextTable === 'empresa' && $campo === 'razon_social') {
+    echo '</div>';
+}
+if ($crudContextTable === 'empresa' && $campo === 'pais_id') {
+    echo '<div class="crud-empresa-section-head crud-form-field-full"><h3 class="crud-empresa-section-title">Ubicación</h3></div>';
+    echo '<div class="crud-empresa-ubicacion-fields">';
+    $crudEmpresaUbicacionOpen = true;
+}
+if ($crudContextTable === 'empresa' && $campo === 'telefono') {
+    if ($crudEmpresaUbicacionOpen) {
+        echo '</div>';
+        $crudEmpresaUbicacionOpen = false;
+    }
+    echo '<div class="crud-empresa-section-head crud-form-field-full"><h3 class="crud-empresa-section-title">Contacto</h3></div>';
+}
+if ($crudContextTable === 'empresa' && $campo === 'email') {
+    echo '<div class="crud-empresa-contacto-pair">';
+    $crudEmpresaContactoPairOpen = true;
+}
+if ($crudContextTable === 'empresa' && $campo === 'rep_tipodocumento_id') {
+    if ($crudEmpresaContactoPairOpen) {
+        echo '</div>';
+        $crudEmpresaContactoPairOpen = false;
+    }
+    echo '<div class="crud-empresa-section-head crud-form-field-full"><h3 class="crud-empresa-section-title">Representante legal</h3></div>';
+    echo '<div class="crud-empresa-rep-fields">';
+    echo '<div class="form-group crud-empresa-rep-field crud-form-field-full">';
+    echo '<label>Buscar representante</label>';
+    echo '<div class="crud-rep-lookup-wrap">';
+    echo '<input type="search" class="form-input crud-rep-lookup-search" placeholder="Documento, nombre o apellido…" autocomplete="off" data-label="Buscar representante">';
+    echo '<ul class="crud-catalog-dropdown" hidden></ul>';
+    echo '</div>';
+    echo '</div>';
+    $crudEmpresaRepOpen = true;
+}
+if ($crudContextTable === 'empresa' && $campo === 'rep_apellidos') {
+    if ($crudEmpresaRepOpen) {
+        echo '</div>';
+        $crudEmpresaRepOpen = false;
+    }
+}
+if ($crudContextTable === 'empresa' && $campo === 'fecha_registro') {
+    echo '<div class="crud-empresa-section-head crud-form-field-full"><h3 class="crud-empresa-section-title">Datos operativos</h3></div>';
 }
 
 if ($crudContextTable === 'usuario') {
@@ -307,11 +423,15 @@ if ($crudContextTable === 'usuario' && $campo === 'username') {
 }
 
 $crudUsuarioMediaAccordion = $crudContextTable === 'usuario' && in_array($campo, ['foto_ruta', 'firma_ruta'], true);
-if ($crudUsuarioMediaAccordion) {
-    $accOpen = $campo === 'foto_ruta' ? ' open' : '';
-    echo '<details class="crud-usuario-accordion"' . $accOpen . '>';
-    echo '<summary class="crud-usuario-accordion-summary">' . htmlspecialchars($fieldLabel, ENT_QUOTES, 'UTF-8') . '</summary>';
-    echo '<div class="crud-usuario-accordion-body">';
+$crudEmpresaMediaAccordion = $crudContextTable === 'empresa' && in_array($campo, ['logo', 'logo2'], true);
+if ($crudUsuarioMediaAccordion || $crudEmpresaMediaAccordion) {
+    $accOpen = ($campo === 'foto_ruta' || $campo === 'logo') ? ' open' : '';
+    $accClass = $crudContextTable === 'empresa' ? 'crud-empresa-accordion' : 'crud-usuario-accordion';
+    $accSummaryClass = $crudContextTable === 'empresa' ? 'crud-empresa-accordion-summary' : 'crud-usuario-accordion-summary';
+    $accBodyClass = $crudContextTable === 'empresa' ? 'crud-empresa-accordion-body' : 'crud-usuario-accordion-body';
+    echo '<details class="' . $accClass . '"' . $accOpen . '>';
+    echo '<summary class="' . $accSummaryClass . '">' . htmlspecialchars($fieldLabel, ENT_QUOTES, 'UTF-8') . '</summary>';
+    echo '<div class="' . $accBodyClass . '">';
 }
 
 ?>
@@ -323,7 +443,7 @@ $labelTitleAttr = ($config['title'] ?? '') !== ''
     ? ' title="' . htmlspecialchars((string)$config['title'], ENT_QUOTES, 'UTF-8') . '"'
     : '';
 ?>
-<?php if (!$crudUsuarioMediaAccordion): ?>
+<?php if (!$crudUsuarioMediaAccordion && !$crudEmpresaMediaAccordion): ?>
 <label<?= $labelTitleAttr ?>><?= htmlspecialchars($fieldLabel, ENT_QUOTES, 'UTF-8') ?></label>
 <?php endif; ?>
 
@@ -414,9 +534,12 @@ class="form-input <?= $error ? 'input-error' : '' ?>"
 <?php
 $uploadSubtype = strtolower((string)($config['subtype'] ?? ''));
 $pathVal = htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
+$uploadEndpoint = $crudContextTable === 'empresa'
+    ? '?url=empresa/uploadLogo'
+    : '?url=usuario/uploadAsset';
 ?>
 <div class="crud-upload-wrap"
-     data-upload-endpoint="?url=usuario/uploadAsset"
+     data-upload-endpoint="<?= htmlspecialchars($uploadEndpoint, ENT_QUOTES, 'UTF-8') ?>"
      data-field-name="<?= htmlspecialchars($campo, ENT_QUOTES, 'UTF-8') ?>"
      data-subtype="<?= htmlspecialchars($uploadSubtype, ENT_QUOTES, 'UTF-8') ?>">
 <input type="hidden" name="<?= $campo ?>" value="<?= $pathVal ?>" class="form-input crud-upload-path <?= $error ? 'input-error' : '' ?>"
@@ -434,11 +557,19 @@ $pathVal = htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
 <?php endif; ?>
 </div>
 <div class="crud-upload-side">
-<p class="crud-upload-hint"><?= htmlspecialchars($uploadSubtype === 'signature' ? 'Firma: imagen PNG, JPG o WebP (máx. 3 MB).' : 'Foto: imagen PNG, JPG o WebP (máx. 3 MB).', ENT_QUOTES, 'UTF-8') ?></p>
+<p class="crud-upload-hint"><?= htmlspecialchars(
+    $uploadSubtype === 'signature'
+        ? 'Firma: imagen PNG, JPG o WebP (máx. 3 MB).'
+        : ($crudContextTable === 'empresa' ? 'Logo: imagen PNG, JPG o WebP (máx. 3 MB).' : 'Foto: imagen PNG, JPG o WebP (máx. 3 MB).'),
+    ENT_QUOTES,
+    'UTF-8'
+) ?></p>
 <div class="crud-upload-btnrow">
 <input type="file" class="crud-upload-input-hidden" tabindex="-1" aria-hidden="true" accept="image/jpeg,image/png,image/webp">
 <button type="button" class="btn-crud-upload-file">Elegir archivo</button>
+<?php if ($crudContextTable === 'usuario' && $uploadSubtype === 'image'): ?>
 <button type="button" class="btn-crud-upload-camera">Tomar foto</button>
+<?php endif; ?>
 <button type="button" class="btn-crud-upload-clear">Quitar</button>
 </div>
 </div>
@@ -481,7 +612,7 @@ class="form-input <?= $error ? 'input-error' : '' ?>"
 
 </div>
 
-<?php if (!empty($crudUsuarioMediaAccordion)): ?>
+<?php if (!empty($crudUsuarioMediaAccordion) || !empty($crudEmpresaMediaAccordion)): ?>
 </div>
 </details>
 <?php endif; ?>
@@ -503,6 +634,26 @@ if ($crudContextTable === 'usuario') {
         echo '</div>';
     }
 }
+if ($crudContextTable === 'empresa') {
+    if ($crudEmpresaContactoPairOpen) {
+        echo '</div>';
+    }
+    if ($crudEmpresaUbicacionOpen) {
+        echo '</div>';
+    }
+    if ($crudEmpresaRepOpen) {
+        echo '</div>';
+    }
+    if ($crudEmpresaFieldsOpen) {
+        echo '</div>';
+    }
+    if ($crudEmpresaAsideOpen) {
+        echo '</aside>';
+    }
+    if ($crudEmpresaLayoutOpen) {
+        echo '</div>';
+    }
+}
 ?>
 
 </div>
@@ -512,6 +663,11 @@ if ($crudContextTable === 'usuario') {
 <?php endif; ?>
 
 </form>
+
+<div class="crud-list-search">
+<label class="crud-list-search-label" for="crudTableSearch">Buscar</label>
+<input type="search" id="crudTableSearch" placeholder="Buscar en el listado…" class="crud-search" autocomplete="off">
+</div>
 
 <div class="crud-table">
 
@@ -540,6 +696,10 @@ if($col['Field']=='id') continue;
 
 $config = getConfigFromComment($col['COLUMN_COMMENT'] ?? '');
 if(!$config['showTable']) continue;
+if ($crudContextTable === 'usuario' && $usuarioTableColumnFields !== []
+    && !in_array($col['Field'], $usuarioTableColumnFields, true)) {
+    continue;
+}
 ?>
 
 <?php
@@ -560,6 +720,7 @@ $thLabel = ($thCfg['label'] ?? '') !== '' ? (string)$thCfg['label'] : formatLabe
 <tr class="crud-row" data-id="<?= $row['id'] ?>"<?php if (in_array($crudContextTable, ['usuario', 'empresa'], true)): ?>
     <?php if (array_key_exists('tercero_id', $row)): ?> data-tercero-id="<?= htmlspecialchars((string)($row['tercero_id'] ?? ''), ENT_QUOTES, 'UTF-8') ?>"<?php endif; ?>
     <?php if (array_key_exists('terceroidentificacion_id', $row)): ?> data-terceroidentificacion-id="<?= htmlspecialchars((string)($row['terceroidentificacion_id'] ?? ''), ENT_QUOTES, 'UTF-8') ?>"<?php endif; ?>
+    <?php if (in_array($crudContextTable, ['empresa', 'usuario'], true)): ?> data-row-json="<?= htmlspecialchars(json_encode($row, JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8') ?>"<?php endif; ?>
 <?php endif; ?>>
 
 <?php foreach($columns as $col): ?>
@@ -570,6 +731,10 @@ if($campo=='id') continue;
 
 $config = getConfigFromComment($col['COLUMN_COMMENT'] ?? '');
 if(!$config['showTable']) continue;
+if ($crudContextTable === 'usuario' && $usuarioTableColumnFields !== []
+    && !in_array($campo, $usuarioTableColumnFields, true)) {
+    continue;
+}
 
 $valor = $row[$campo];
 
@@ -631,6 +796,9 @@ if ($rawPath !== null && $rawPath !== '') {
 </div>
 
 <?php
+if (!empty($crudContextTable) && $crudContextTable === 'empresa') {
+    echo '<script>window.__CRUD_EMPRESA_FK_LABELS = ' . json_encode($relationMaps, JSON_UNESCAPED_UNICODE) . ';</script>';
+}
 if (!empty($crudContextTable) && $crudContextTable === 'usuario') {
     $meta = $tipodocumentoMetaById ?? [];
     echo '<script>window.__TIPO_DOC_USUARIO_META = ' . json_encode($meta, JSON_UNESCAPED_UNICODE) . ';</script>';

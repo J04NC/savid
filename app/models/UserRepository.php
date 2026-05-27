@@ -11,6 +11,8 @@ class UserRepository
 
     public function findActiveByUsername($username)
     {
+        $uNd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'usuario', 'u');
+
         $stmt = $this->pdo->prepare("
             SELECT u.*,
                 COALESCE(
@@ -37,6 +39,7 @@ class UserRepository
             LEFT JOIN tercero t ON t.id = ti.tercero_id
             WHERE u.username = ?
             AND u.estado_id = 1
+            {$uNd}
             LIMIT 1
         ");
         $stmt->execute([$username]);

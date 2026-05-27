@@ -11,11 +11,16 @@ class RolePermissionRepository
 
     public function getMatrixRows()
     {
+        $itemNd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'item', 'i');
+        $modNd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'modulo', 'm');
+        $accNd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'accion', 'a');
+
         return $this->pdo->query("
             SELECT
                 m.nombre AS modulo,
                 i.id AS item_id,
                 i.nombre AS item,
+                a.id AS accion_id,
                 a.nombre AS accion,
                 a.codigo,
                 ia.id AS item_accion_id
@@ -25,7 +30,10 @@ class RolePermissionRepository
             JOIN accion a ON a.id = ia.accion_id
             WHERE ia.estado_id = 1
             AND i.estado_id = 1
-            ORDER BY m.id, i.orden, a.orden
+            {$itemNd}
+            {$modNd}
+            {$accNd}
+            ORDER BY m.id, i.orden, a.id
         ")->fetchAll(PDO::FETCH_ASSOC);
     }
 

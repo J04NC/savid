@@ -97,6 +97,17 @@ class ContextService
         $_SESSION['sede_id'] = $sede['id'];
         $_SESSION['sede'] = $sede['nombre'];
 
+        try {
+            $tracking = new SesionTrackingService();
+            if (!isset($_SESSION['usuario_sesion_id'])) {
+                $tracking->openSessionForCurrentUser();
+            } else {
+                $tracking->touchCurrentSession();
+            }
+        } catch (Throwable $e) {
+            error_log('SesionTrackingService (changeContext): ' . $e->getMessage());
+        }
+
         return [
             'success' => true,
             'empresa' => $_SESSION['empresa'],

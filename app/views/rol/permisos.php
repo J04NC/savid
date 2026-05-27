@@ -8,30 +8,28 @@ document.addEventListener("DOMContentLoaded", function () {
 <form id="formRolPermisos">
 <input type="hidden" name="rol_id" value="<?= $rolId ?>">
 
-<div style="padding:12px 16px; border-bottom:1px solid #eee; display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+<div class="rol-permisos-scope">
 
-    <!-- EMPRESA -->
     <div>
-        <label style="font-size:12px;font-weight:700;">EMPRESA</label>
-        <select name="empresa_id" id="empresaSelect" style="width:100%;padding:8px;" <?= !$esSuperAdmin ? 'disabled' : '' ?>>
+        <label class="rol-permisos-label">EMPRESA</label>
+        <select name="empresa_id" id="empresaSelect" class="form-input rol-permisos-select" <?= !$esSuperAdmin ? 'disabled' : '' ?>>
             <?php if ($esSuperAdmin): ?><option value="">Todas</option><?php endif; ?>
             <?php foreach ($empresas as $emp): ?>
                 <option value="<?= $emp['id'] ?>" <?= ((string)$empresaId === (string)$emp['id']) ? 'selected' : '' ?>>
-                    <?= $emp['razon_social'] ?>
+                    <?= htmlspecialchars($emp['razon_social'], ENT_QUOTES, 'UTF-8') ?>
                 </option>
             <?php endforeach; ?>
         </select>
-        <?php if (!$esSuperAdmin): ?><input type="hidden" name="empresa_id" value="<?= $empresaId ?>"><?php endif; ?>
+        <?php if (!$esSuperAdmin): ?><input type="hidden" name="empresa_id" value="<?= (int)$empresaId ?>"><?php endif; ?>
     </div>
 
-    <!-- SEDE -->
     <div>
-        <label style="font-size:12px;font-weight:700;">SEDE</label>
-        <select name="sede_id" id="sedeSelect" style="width:100%;padding:8px;">
+        <label class="rol-permisos-label">SEDE</label>
+        <select name="sede_id" id="sedeSelect" class="form-input rol-permisos-select">
             <option value="">Todas</option>
             <?php foreach ($sedes as $s): ?>
                 <option value="<?= $s['id'] ?>" <?= ((string)$sedeId === (string)$s['id']) ? 'selected' : '' ?>>
-                    <?= $s['nombre'] ?>
+                    <?= htmlspecialchars($s['nombre'], ENT_QUOTES, 'UTF-8') ?>
                 </option>
             <?php endforeach; ?>
         </select>
@@ -39,57 +37,64 @@ document.addEventListener("DOMContentLoaded", function () {
 
 </div>
 
-<!-- CONTENEDOR QUE SE RECARGA -->
 <div id="permisosMatriz" class="role-wrapper">
 
-<?php foreach ($matriz as $modulo => $items): ?>
-<div class="role-module">
+<?php foreach ($matriz as $modulo => $bloque): ?>
+<?php
+    $accionesMod = $bloque['acciones'] ?? [];
+    $itemsMod = $bloque['items'] ?? [];
+    $moduloSlug = preg_replace('/[^a-z0-9_-]+/i', '_', (string)$modulo);
+?>
+<div class="role-module" data-modulo="<?= htmlspecialchars($moduloSlug, ENT_QUOTES, 'UTF-8') ?>">
 
     <div class="role-module-header">
         <label class="role-module-label">
             <input type="checkbox" class="check-modulo">
-            <span>📁 <?= strtoupper($modulo) ?></span>
+            <span>📁 <?= strtoupper(htmlspecialchars((string)$modulo, ENT_QUOTES, 'UTF-8')) ?></span>
         </label>
-        <span class="role-counter"><?= count($items) ?> ITEMS</span>
+        <span class="role-counter"><?= count($itemsMod) ?> ITEMS · <?= count($accionesMod) ?> ACCIONES</span>
     </div>
 
     <div class="role-table-wrap">
-        <table class="role-table">
+        <table class="role-table role-table-perms">
             <thead>
                 <tr>
+                    <th class="sticky-todo th-todo">TODO</th>
                     <th class="sticky-left">ITEM</th>
-                    <?php foreach ($acciones as $codigo => $nombre): ?>
-                        <th>
+                    <?php foreach ($accionesMod as $codigo => $nombre): ?>
+                        <?php $hdr = RolePermissionService::actionHeaderLabels((string)$codigo, (string)$nombre); ?>
+                        <th class="th-action" title="<?= htmlspecialchars($hdr['full'], ENT_QUOTES, 'UTF-8') ?>">
                             <label class="head-check">
-                                <input type="checkbox" class="check-columna" data-col="<?= $codigo ?>">
-                                <span><?= strtoupper($nombre) ?></span>
+                                <input type="checkbox" class="check-columna" data-col="<?= htmlspecialchars((string)$codigo, ENT_QUOTES, 'UTF-8') ?>">
+                                <span class="head-check-label"><?= htmlspecialchars($hdr['short'], ENT_QUOTES, 'UTF-8') ?></span>
                             </label>
                         </th>
                     <?php endforeach; ?>
-                    <th>TODO</th>
                 </tr>
             </thead>
             <tbody>
-            <?php foreach ($items as $itemId => $item): ?>
+            <?php foreach ($itemsMod as $itemId => $item): ?>
                 <tr>
-                    <td class="sticky-left item-name"><?= strtoupper($item['item']) ?></td>
-                    <?php foreach ($acciones as $codigo => $nombre): ?>
+                    <td class="sticky-todo cell-check">
+                        <input type="checkbox" class="check-fila" data-fila="<?= (int)$itemId ?>">
+                    </td>
+                    <td class="sticky-left item-name"><?= strtoupper(htmlspecialchars((string)$item['item'], ENT_QUOTES, 'UTF-8')) ?></td>
+                    <?php foreach ($accionesMod as $codigo => $nombre): ?>
+                    <?php $hdrCell = RolePermissionService::actionHeaderLabels((string)$codigo, (string)$nombre); ?>
                     <td class="cell-check">
                         <?php if (isset($item['acciones'][$codigo])): ?>
-                            <input type="checkbox" 
-                                name="permisos[]" 
-                                value="<?= $item['acciones'][$codigo]['id'] ?>"
-                                class="check-perm fila-<?= $itemId ?> col-<?= $codigo ?>"
-                                <?= $item['acciones'][$codigo]['checked'] ? 'checked' : '' ?>
+                            <input type="checkbox"
+                                name="permisos[]"
+                                value="<?= (int)$item['acciones'][$codigo]['id'] ?>"
+                                class="check-perm fila-<?= (int)$itemId ?> col-<?= htmlspecialchars((string)$codigo, ENT_QUOTES, 'UTF-8') ?>"
+                                title="<?= htmlspecialchars($hdrCell['full'], ENT_QUOTES, 'UTF-8') ?>"
+                                <?= !empty($item['acciones'][$codigo]['checked']) ? 'checked' : '' ?>
                             >
                         <?php else: ?>
                             <span class="no-perm">—</span>
                         <?php endif; ?>
                     </td>
                     <?php endforeach; ?>
-                    <td class="cell-check">
-                        <input type="checkbox" class="check-fila" data-fila="<?= $itemId ?>">
-                    </td>
                 </tr>
             <?php endforeach; ?>
             </tbody>
@@ -114,7 +119,25 @@ document.addEventListener("DOMContentLoaded", function () {
 const form = document.getElementById("formRolPermisos");
 if (!form) return;
 
-let accionesGlobales = <?= json_encode($acciones) ?>;
+function escapeHtml(s) {
+    return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+}
+
+function actionHeaderLabels(codigo, nombre) {
+    const full = String(nombre || "").trim().toUpperCase();
+    const fromCodigo = String(codigo || "").replace(/_/g, " ").toUpperCase();
+    if (full.length <= 14) return { short: full, full: full };
+    if (fromCodigo.length <= 14) return { short: fromCodigo, full: full };
+    return { short: fromCodigo.slice(0, 12) + "…", full: full };
+}
+
+function slugModulo(modulo) {
+    return String(modulo).replace(/[^a-z0-9_-]+/gi, "_");
+}
 
 /* ==========================================
 RECARGAR SOLO LA MATRIZ
@@ -122,16 +145,16 @@ RECARGAR SOLO LA MATRIZ
 function recargarMatriz(empresaId = '', sedeId = '') {
     const container = document.getElementById("permisosMatriz");
     if (!container) return;
-    
-    container.innerHTML = '<div style="padding:20px;text-align:center;">🔄 Cargando permisos...</div>';
-    
+
+    container.innerHTML = '<div class="rol-permisos-loading">🔄 Cargando permisos…</div>';
+
     const params = new URLSearchParams({
         ajax: 'matriz',
-        id: '<?= $rolId ?>'
+        id: '<?= (int)$rolId ?>'
     });
     if (empresaId) params.set('empresa_id', empresaId);
     if (sedeId) params.set('sede_id', sedeId);
-    
+
     fetch(`?url=rol/permisos&${params}`)
     .then(r => r.json())
     .then(data => {
@@ -140,167 +163,185 @@ function recargarMatriz(empresaId = '', sedeId = '') {
     })
     .catch(err => {
         console.error("Error:", err);
-        container.innerHTML = '<div style="padding:20px;color:red;">❌ Error cargando permisos</div>';
+        container.innerHTML = '<div class="rol-permisos-loading rol-permisos-error">❌ Error cargando permisos</div>';
     });
 }
 
 /* ==========================================
-RENDERIZAR MATRIZ
+RENDERIZAR MATRIZ (acciones por módulo)
 ========================================== */
 function renderMatriz(data) {
-    accionesGlobales = data.acciones;
     const container = document.getElementById("permisosMatriz");
-    
+    const matriz = data.matriz || {};
     let html = '';
-    
-    for (let modulo in data.matriz) {
-        let items = data.matriz[modulo];
+
+    for (let modulo in matriz) {
+        const bloque = matriz[modulo];
+        const acciones = bloque.acciones || {};
+        const items = bloque.items || {};
+        const modSlug = slugModulo(modulo);
+        const nItems = Object.keys(items).length;
+        const nAcc = Object.keys(acciones).length;
+
         html += `
-        <div class="role-module">
+        <div class="role-module" data-modulo="${escapeHtml(modSlug)}">
             <div class="role-module-header">
                 <label class="role-module-label">
                     <input type="checkbox" class="check-modulo">
-                    <span>📁 ${modulo.toUpperCase()}</span>
+                    <span>📁 ${escapeHtml(modulo.toUpperCase())}</span>
                 </label>
-                <span class="role-counter">${Object.keys(items).length} ITEMS</span>
+                <span class="role-counter">${nItems} ITEMS · ${nAcc} ACCIONES</span>
             </div>
             <div class="role-table-wrap">
-                <table class="role-table">
-                    <thead>
-                        <tr>
-                            <th class="sticky-left">ITEM</th>
-        `;
-        
-        for (let codigo in data.acciones) {
+                <table class="role-table role-table-perms">
+                    <thead><tr>
+                        <th class="sticky-todo th-todo">TODO</th>
+                        <th class="sticky-left">ITEM</th>`;
+
+        const codigosOrdenados = Object.keys(acciones);
+        for (let i = 0; i < codigosOrdenados.length; i++) {
+            const codigo = codigosOrdenados[i];
+            const hdr = actionHeaderLabels(codigo, acciones[codigo]);
             html += `
-                            <th>
-                                <label class="head-check">
-                                    <input type="checkbox" class="check-columna" data-col="${codigo}">
-                                    <span>${data.acciones[codigo].toUpperCase()}</span>
-                                </label>
-                            </th>
-            `;
+                        <th class="th-action" title="${escapeHtml(hdr.full)}">
+                            <label class="head-check">
+                                <input type="checkbox" class="check-columna" data-col="${escapeHtml(codigo)}">
+                                <span class="head-check-label">${escapeHtml(hdr.short)}</span>
+                            </label>
+                        </th>`;
         }
-        html += '<th>TODO</th></tr></thead><tbody>';
-        
+
+        html += '</tr></thead><tbody>';
+
         for (let itemId in items) {
-            let item = items[itemId];
+            const item = items[itemId];
             html += `<tr>
-                <td class="sticky-left item-name">${item.item.toUpperCase()}</td>`;
-            
-            for (let codigo in data.acciones) {
-                if (item.acciones[codigo]) {
+                <td class="sticky-todo cell-check">
+                    <input type="checkbox" class="check-fila" data-fila="${itemId}">
+                </td>
+                <td class="sticky-left item-name">${escapeHtml(String(item.item || "").toUpperCase())}</td>`;
+
+            for (let j = 0; j < codigosOrdenados.length; j++) {
+                const codigo = codigosOrdenados[j];
+                if (item.acciones && item.acciones[codigo]) {
+                    const ia = item.acciones[codigo];
+                    const hdr = actionHeaderLabels(codigo, acciones[codigo]);
                     html += `
                     <td class="cell-check">
-                        <input type="checkbox" 
-                            name="permisos[]" 
-                            value="${item.acciones[codigo].id}"
-                            class="check-perm fila-${itemId} col-${codigo}"
-                            ${item.acciones[codigo].checked ? 'checked' : ''}>
+                        <input type="checkbox"
+                            name="permisos[]"
+                            value="${ia.id}"
+                            class="check-perm fila-${itemId} col-${escapeHtml(codigo)}"
+                            title="${escapeHtml(hdr.full)}"
+                            ${ia.checked ? 'checked' : ''}>
                     </td>`;
                 } else {
                     html += '<td class="cell-check"><span class="no-perm">—</span></td>';
                 }
             }
-            html += `
-                    <td class="cell-check">
-                        <input type="checkbox" class="check-fila" data-fila="${itemId}">
-                    </td>
-                </tr>`;
+
+            html += '</tr>';
         }
+
         html += '</tbody></table></div></div>';
     }
-    
+
     container.innerHTML = html;
 }
 
 /* ==========================================
-VINCULAR CHECKS
+VINCULAR CHECKS (alcance por .role-module)
 ========================================== */
 function bindChecks() {
-    
+
     function marcarChecks(lista, estado) {
-        lista.forEach(chk => chk.checked = estado);
+        lista.forEach(chk => { chk.checked = estado; });
     }
-    
-    function actualizarFila(id) {
-        const master = document.querySelector('.check-fila[data-fila="' + id + '"]');
-        const lista = document.querySelectorAll(".fila-" + id);
+
+    function actualizarFila(id, box) {
+        const master = box.querySelector('.check-fila[data-fila="' + id + '"]');
+        const lista = box.querySelectorAll(".fila-" + id);
         if (master) master.checked = Array.from(lista).every(x => x.checked);
     }
-    
-    function actualizarCol(id) {
-        const master = document.querySelector('.check-columna[data-col="' + id + '"]');
-        const lista = document.querySelectorAll(".col-" + id);
-        if (master) master.checked = Array.from(lista).every(x => x.checked);
+
+    function actualizarCol(codigo, box) {
+        const master = box.querySelector('.check-columna[data-col="' + codigo + '"]');
+        const lista = box.querySelectorAll(".col-" + codigo);
+        if (master) master.checked = lista.length > 0 && Array.from(lista).every(x => x.checked);
     }
-    
+
     function actualizarModulo(box) {
         const master = box.querySelector(".check-modulo");
         const lista = box.querySelectorAll(".check-perm");
-        if (master) master.checked = Array.from(lista).every(x => x.checked);
+        if (master) master.checked = lista.length > 0 && Array.from(lista).every(x => x.checked);
     }
-    
+
     function actualizarTodo() {
-        document.querySelectorAll(".check-fila").forEach(x => actualizarFila(x.dataset.fila));
-        document.querySelectorAll(".check-columna").forEach(x => actualizarCol(x.dataset.col));
-        document.querySelectorAll(".role-module").forEach(x => actualizarModulo(x));
+        document.querySelectorAll(".role-module").forEach(function (box) {
+            box.querySelectorAll(".check-fila").forEach(function (x) {
+                actualizarFila(x.dataset.fila, box);
+            });
+            box.querySelectorAll(".check-columna").forEach(function (x) {
+                actualizarCol(x.dataset.col, box);
+            });
+            actualizarModulo(box);
+        });
     }
-    
-    // MODULO
-    document.querySelectorAll(".check-modulo").forEach(chk => {
+
+    document.querySelectorAll(".check-modulo").forEach(function (chk) {
         chk.addEventListener("change", function() {
             const box = this.closest(".role-module");
+            if (!box) return;
             marcarChecks(box.querySelectorAll(".check-perm"), this.checked);
             actualizarTodo();
         });
     });
-    
-    // COLUMNA
-    document.querySelectorAll(".check-columna").forEach(chk => {
+
+    document.querySelectorAll(".check-columna").forEach(function (chk) {
         chk.addEventListener("change", function() {
-            marcarChecks(document.querySelectorAll(".col-" + this.dataset.col), this.checked);
+            const box = this.closest(".role-module");
+            if (!box) return;
+            marcarChecks(box.querySelectorAll(".col-" + this.dataset.col), this.checked);
             actualizarTodo();
         });
     });
-    
-    // FILA
-    document.querySelectorAll(".check-fila").forEach(chk => {
+
+    document.querySelectorAll(".check-fila").forEach(function (chk) {
         chk.addEventListener("change", function() {
-            marcarChecks(document.querySelectorAll(".fila-" + this.dataset.fila), this.checked);
+            const box = this.closest(".role-module");
+            if (!box) return;
+            marcarChecks(box.querySelectorAll(".fila-" + this.dataset.fila), this.checked);
             actualizarTodo();
         });
     });
-    
-    // CELDA
-    document.querySelectorAll(".check-perm").forEach(chk => {
+
+    document.querySelectorAll(".check-perm").forEach(function (chk) {
         chk.addEventListener("change", function() {
+            const box = this.closest(".role-module");
+            if (!box) return;
             const clases = [...this.classList];
             const fila = clases.find(x => x.startsWith("fila-"));
             const col = clases.find(x => x.startsWith("col-"));
-            if (fila) actualizarFila(fila.replace("fila-",""));
-            if (col) actualizarCol(col.replace("col-",""));
-            actualizarModulo(this.closest(".role-module"));
+            if (fila) actualizarFila(fila.replace("fila-", ""), box);
+            if (col) actualizarCol(col.replace("col-", ""), box);
+            actualizarModulo(box);
         });
     });
 }
 
-/* ==========================================
-EVENTOS SELECTS
-========================================== */
 document.getElementById("empresaSelect")?.addEventListener("change", function() {
     const empresaId = this.value;
     const sedeSelect = document.getElementById("sedeSelect");
-    
+
     sedeSelect.innerHTML = '<option value="">Cargando sedes...</option>';
-    
+
     if (empresaId === "") {
         sedeSelect.innerHTML = '<option value="">Todas</option>';
         recargarMatriz('', '');
         return;
     }
-    
-    fetch(`?url=rol/permisos&ajax=sedes&empresa_id=${empresaId}&id=<?= $rolId ?>`)
+
+    fetch(`?url=rol/permisos&ajax=sedes&empresa_id=${empresaId}&id=<?= (int)$rolId ?>`)
     .then(r => r.json())
     .then(sedes => {
         sedeSelect.innerHTML = '<option value="">Todas</option>';
@@ -321,23 +362,19 @@ document.getElementById("empresaSelect")?.addEventListener("change", function() 
 document.getElementById("sedeSelect")?.addEventListener("change", function() {
     const empresaSelect = document.getElementById("empresaSelect");
     const empresaId = empresaSelect ? empresaSelect.value : '';
-    const sedeId = this.value;
-    recargarMatriz(empresaId, sedeId);
+    recargarMatriz(empresaId, this.value);
 });
 
-/* ==========================================
-GUARDAR
-========================================== */
 form.addEventListener("submit", function(e) {
     e.preventDefault();
-    
+
     const btn = this.querySelector(".btn-save");
     const txt = btn.innerHTML;
-    
+
     btn.disabled = true;
     btn.innerHTML = "💾 Guardando...";
-    
-    fetch("?url=rol/permisos&id=<?= $rolId ?>", {
+
+    fetch("?url=rol/permisos&id=<?= (int)$rolId ?>", {
         method: "POST",
         body: new FormData(this)
     })
@@ -345,7 +382,7 @@ form.addEventListener("submit", function(e) {
     .then(data => {
         btn.disabled = false;
         btn.innerHTML = txt;
-        
+
         if (data.success) {
             alert("✅ Permisos guardados correctamente");
             closeModalGod();
@@ -360,7 +397,6 @@ form.addEventListener("submit", function(e) {
     });
 });
 
-// INICIALIZAR
 bindChecks();
 
 })();

@@ -178,6 +178,13 @@
         } else {
             el.value = value == null ? "" : String(value);
         }
+        if (el.classList.contains("crud-upload-path")) {
+            const wrap = el.closest(".crud-upload-wrap");
+            const preview = wrap && wrap.querySelector(".crud-upload-preview");
+            if (wrap && preview) {
+                paintUploadPreview(wrap, preview, el.value || "");
+            }
+        }
         el.dispatchEvent(new Event("change", { bubbles: true }));
     }
 
@@ -269,43 +276,6 @@
                 }
             });
         });
-    }
-
-    async function postUpload(endpoint, formData) {
-        const r = await fetch(resolveAppUrl(endpoint), {
-            method: "POST",
-            body: formData,
-            credentials: "same-origin",
-        });
-        const text = await r.text();
-        let j = null;
-        try {
-            j = JSON.parse(text);
-        } catch (e) {
-            const jsonStart = text ? text.indexOf("{") : -1;
-            if (jsonStart >= 0) {
-                try {
-                    j = JSON.parse(text.slice(jsonStart));
-                } catch (e2) {
-                    j = null;
-                }
-            }
-        }
-        if (j === null) {
-            const msg = r.status === 403
-                ? "Sin permiso para subir archivos."
-                : (text && text.indexOf("Acceso denegado") !== -1
-                    ? "Acceso denegado. Verifique permisos o sesión."
-                    : "El servidor no devolvió una respuesta válida (código " + r.status + ").");
-            throw new Error(msg);
-        }
-        if (!r.ok && j && j.error) {
-            throw new Error(j.error);
-        }
-        if (!r.ok) {
-            throw new Error("Error del servidor (código " + r.status + ").");
-        }
-        return j;
     }
 
     function debounce(key, fn) {
@@ -829,67 +799,6 @@
         }
     }
 
-    function bindUploadWrap(wrap) {
-        const endpoint = wrap.getAttribute("data-upload-endpoint") || "?url=usuario/uploadAsset";
-        const pathInput = wrap.querySelector(".crud-upload-path");
-        const preview = wrap.querySelector(".crud-upload-preview");
-        const fileEl = wrap.querySelector(".crud-upload-input-hidden");
-        const btnFile = wrap.querySelector(".btn-crud-upload-file");
-        const btnCam = wrap.querySelector(".btn-crud-upload-camera");
-        const btnClr = wrap.querySelector(".btn-crud-upload-clear");
-
-        if (!pathInput || !fileEl || !preview) return;
-
-        function renderPreview(url) {
-            paintUploadPreview(wrap, preview, url);
-        }
-
-        function pickFile(capture) {
-            fileEl.value = "";
-            fileEl.removeAttribute("capture");
-            if (capture === "user") {
-                fileEl.setAttribute("capture", "user");
-            } else if (capture === "environment") {
-                fileEl.setAttribute("capture", "environment");
-            }
-            fileEl.click();
-        }
-
-        fileEl.addEventListener("change", async function () {
-            const f = fileEl.files && fileEl.files[0];
-            if (!f) return;
-            const fd = new FormData();
-            fd.append("archivo", f);
-            try {
-                const j = await postUpload(endpoint, fd);
-                if (!j || !j.ok || !j.path) {
-                    alert((j && j.error) || "No se pudo subir el archivo");
-                    return;
-                }
-                pathInput.value = j.path;
-                renderPreview(j.path);
-            } catch (e) {
-                alert(e && e.message ? e.message : "Error al subir el archivo");
-            } finally {
-                fileEl.value = "";
-                fileEl.removeAttribute("capture");
-            }
-        });
-
-        if (btnFile) btnFile.addEventListener("click", function () {
-            pickFile(null);
-        });
-        if (btnCam) btnCam.addEventListener("click", function () {
-            pickFile("environment");
-        });
-        if (btnClr) btnClr.addEventListener("click", function () {
-            pathInput.value = "";
-            renderPreview("");
-        });
-
-        renderPreview(pathInput.value || "");
-    }
-
     function bindTipoAndNumero(form) {
         const sel = form.querySelector('[name="tipodocumento_id"]');
         const num = form.querySelector('[name="numero_documento"]');
@@ -908,15 +817,11 @@
         }
     }
 
-    document.addEventListener("click", function (ev) {
-        const row = ev.target.closest && ev.target.closest(".crud-row");
-        if (!row) return;
-        const form = document.querySelector('form[data-crud-context="usuario"]');
-        if (!form || !row.closest(".module-container")) return;
-        window.setTimeout(function () {
-            syncDvVisibility(form);
-            refreshUploadPreviews(form);
-        }, 0);
+    document.addEventListener("crud-usuario-row-filled", function (ev) {
+        const form = ev.detail && ev.detail.form;
+        if (!form || form.getAttribute("data-crud-context") !== "usuario") return;
+        syncDvVisibility(form);
+        syncEmailBaseline(form);
     });
 
     function initForm(form) {
@@ -924,7 +829,6 @@
         bindLookups(form);
         syncDvVisibility(form);
         syncEmailBaseline(form);
-        form.querySelectorAll(".crud-upload-wrap").forEach(bindUploadWrap);
 
         form.addEventListener("submit", function (ev) {
             if (!validatePasswordClient(form)) {

@@ -41,6 +41,7 @@ class DashboardController
         $moduloData = $this->dashboardService->getModuloData($moduloId);
         $items = $moduloData['items'];
         $moduloNombre = $moduloData['moduloNombre'];
+        $moduloId = (int)$moduloId;
 
         $breadcrumb = '
         <a href="?url=dashboard">INICIO</a>
@@ -61,13 +62,16 @@ class DashboardController
 
         $itemRow = $this->dashboardService->findItemForAccessCheck((int)$itemId);
 
-        if (!$itemRow || empty($itemRow['ruta'])) {
+        if (!$itemRow) {
             $_SESSION['flash_notice'] = 'Ítem no encontrado o sin acceso.';
             header('Location: ?url=dashboard');
             exit;
         }
 
-        if (class_exists('PermisoService') && !PermisoService::can((string)$itemRow['ruta'], 'ver')) {
+        $itemRuta = trim((string)($itemRow['ruta'] ?? ''));
+        if ($itemRuta !== ''
+            && class_exists('PermisoService')
+            && !PermisoService::can($itemRuta, 'ver')) {
             $_SESSION['flash_notice'] = 'No tiene permiso para este ítem en la empresa o sede actual.';
             header('Location: ?url=dashboard');
             exit;
@@ -76,6 +80,10 @@ class DashboardController
         $itemData = $this->dashboardService->getItemData($itemId);
         $items = $itemData['items'];
         $breadcrumb = $itemData['breadcrumb'];
+        $moduloId = (int)($itemRow['modulo_id'] ?? 0);
+        if ($moduloId <= 0) {
+            $moduloId = null;
+        }
 
         $view = BASE_PATH . '/app/views/modulo.php';
 

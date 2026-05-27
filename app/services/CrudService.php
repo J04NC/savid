@@ -28,6 +28,10 @@ class CrudService
         $sql = "SELECT * FROM $tabla WHERE 1=1";
         $params = [];
 
+        if (SoftDeleteService::supports($this->pdo, $tabla)) {
+            $sql .= SoftDeleteService::sqlAndNotDeleted($this->pdo, $tabla);
+        }
+
         // 🔥 FILTRO EMPRESA
         if (in_array('empresa_id', $fields) && isset($_SESSION['empresa_id'])) {
             $sql .= " AND empresa_id = ?";
@@ -57,11 +61,28 @@ class CrudService
         $esSuperAdmin = !empty($_SESSION['es_super_admin'])
             || (int)($_SESSION['rol_id'] ?? 0) === 1;
 
-        $select = 'e.*, ti.numero AS nit';
-        $joins = ' LEFT JOIN terceroidentificacion ti ON ti.id = e.terceroidentificacion_id';
+        $select = 'e.*, ti.numero AS nit, ti.dv AS documento_dv,
+            t.razon_social, t.email, t.telefono, t.celular, t.direccion,
+            t.pais_id, t.departamento_id, t.municipio_id, t.zona_id,
+            t.comuna_id, t.corregimiento_id, t.barrio_id, t.vereda_id,
+            ri.tipodocumento_id AS rep_tipodocumento_id,
+            ri.numero AS rep_numero_documento,
+            tr.nombres AS rep_nombres,
+            tr.apellidos AS rep_apellidos';
+        $joins = ' INNER JOIN tercero t ON t.id = e.tercero_id
+            INNER JOIN terceroidentificacion ti ON ti.id = e.terceroidentificacion_id
+            LEFT JOIN terceroidentificacion ri ON ri.id = e.representante_terceroidentificacion_id
+            LEFT JOIN tercero tr ON tr.id = ri.tercero_id';
+
+        $deletedFilter = SoftDeleteService::supports($this->pdo, 'empresa')
+            ? SoftDeleteService::sqlAndNotDeleted($this->pdo, 'empresa', 'e')
+            : '';
+        if ($deletedFilter !== '' && !str_contains($deletedFilter, 'WHERE')) {
+            $deletedFilter = ' WHERE 1=1' . $deletedFilter;
+        }
 
         if ($esSuperAdmin) {
-            $sql = "SELECT $select FROM empresa e $joins ORDER BY e.id DESC";
+            $sql = "SELECT $select FROM empresa e $joins{$deletedFilter} ORDER BY e.id DESC";
             $stmt = $this->pdo->query($sql);
 
             return $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -76,8 +97,11 @@ class CrudService
                 INNER JOIN usuario_empresa ue
                     ON ue.empresa_id = e.id AND ue.estado_id = 1
                 $joins
-                WHERE ue.usuario_id = ?
-                ORDER BY e.id DESC";
+                WHERE ue.usuario_id = ?";
+        if (SoftDeleteService::supports($this->pdo, 'empresa')) {
+            $sql .= SoftDeleteService::sqlAndNotDeleted($this->pdo, 'empresa', 'e');
+        }
+        $sql .= ' ORDER BY e.id DESC';
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([$uid]);
 
@@ -91,49 +115,215 @@ class CrudService
      */
     public function getEmpresaPersonaSyntheticColumns(): array
     {
+        $syn = [
+            ['Field' => 'nit', 'Type' => 'varchar', 'IS_NULLABLE' => 'NO',
+                'COLUMN_COMMENT' => 'type:text|order:5|label:NIT|placeholder:Número de NIT|show:form,table'],
+            ['Field' => 'documento_dv', 'Type' => 'varchar', 'IS_NULLABLE' => 'YES',
+                'COLUMN_COMMENT' => 'type:text|order:8|label:DV|show:form,table|title:Dígito de verificación NIT'],
+            ['Field' => 'razon_social', 'Type' => 'varchar', 'IS_NULLABLE' => 'NO',
+                'COLUMN_COMMENT' => 'type:text|order:10|label:Razón social|show:form,table'],
+            ['Field' => 'pais_id', 'Type' => 'smallint', 'IS_NULLABLE' => 'YES',
+                'COLUMN_COMMENT' => 'type:text|order:20|relmode:autocomplete|label:País|show:form,table'],
+            ['Field' => 'departamento_id', 'Type' => 'smallint', 'IS_NULLABLE' => 'YES',
+                'COLUMN_COMMENT' => 'type:text|order:25|relmode:autocomplete|label:Departamento|show:form,table'],
+            ['Field' => 'municipio_id', 'Type' => 'int', 'IS_NULLABLE' => 'YES',
+                'COLUMN_COMMENT' => 'type:text|order:30|relmode:autocomplete|label:Municipio|show:form,table'],
+            ['Field' => 'zona_id', 'Type' => 'int', 'IS_NULLABLE' => 'YES',
+                'COLUMN_COMMENT' => 'type:text|order:35|relmode:autocomplete|label:Zona|show:form'],
+            ['Field' => 'comuna_id', 'Type' => 'int', 'IS_NULLABLE' => 'YES',
+                'COLUMN_COMMENT' => 'type:text|order:40|relmode:autocomplete|label:Comuna|show:form'],
+            ['Field' => 'corregimiento_id', 'Type' => 'int', 'IS_NULLABLE' => 'YES',
+                'COLUMN_COMMENT' => 'type:text|order:45|relmode:autocomplete|label:Corregimiento|show:form'],
+            ['Field' => 'barrio_id', 'Type' => 'int', 'IS_NULLABLE' => 'YES',
+                'COLUMN_COMMENT' => 'type:text|order:50|relmode:autocomplete|label:Barrio|show:form'],
+            ['Field' => 'vereda_id', 'Type' => 'int', 'IS_NULLABLE' => 'YES',
+                'COLUMN_COMMENT' => 'type:text|order:55|relmode:autocomplete|label:Vereda|show:form'],
+            ['Field' => 'telefono', 'Type' => 'varchar', 'IS_NULLABLE' => 'YES',
+                'COLUMN_COMMENT' => 'type:text|order:60|label:Teléfono|show:form'],
+            ['Field' => 'celular', 'Type' => 'varchar', 'IS_NULLABLE' => 'YES',
+                'COLUMN_COMMENT' => 'type:text|order:65|label:Celular|show:form'],
+            ['Field' => 'direccion', 'Type' => 'varchar', 'IS_NULLABLE' => 'YES',
+                'COLUMN_COMMENT' => 'type:text|order:70|label:Dirección|show:form'],
+            ['Field' => 'email', 'Type' => 'varchar', 'IS_NULLABLE' => 'YES',
+                'COLUMN_COMMENT' => 'type:text|order:75|label:Email|show:form'],
+            ['Field' => 'rep_tipodocumento_id', 'Type' => 'smallint', 'IS_NULLABLE' => 'YES',
+                'COLUMN_COMMENT' => 'type:text|order:82|relmode:select|label:Tipo doc. representante|show:form'],
+            ['Field' => 'rep_numero_documento', 'Type' => 'varchar', 'IS_NULLABLE' => 'YES',
+                'COLUMN_COMMENT' => 'type:text|order:84|label:Número doc. representante|show:form'],
+            ['Field' => 'rep_nombres', 'Type' => 'varchar', 'IS_NULLABLE' => 'YES',
+                'COLUMN_COMMENT' => 'type:text|order:86|label:Nombres representante|show:form|uppercase'],
+            ['Field' => 'rep_apellidos', 'Type' => 'varchar', 'IS_NULLABLE' => 'YES',
+                'COLUMN_COMMENT' => 'type:text|order:88|label:Apellidos representante|show:form|uppercase'],
+        ];
+
+        return $syn;
+    }
+
+    /**
+     * Campos del formulario empresa que no son columnas físicas de `empresa`.
+     *
+     * @return list<string>
+     */
+    public function getEmpresaNonTableFormFields(): array
+    {
+        return array_merge(
+            array_column($this->getEmpresaPersonaSyntheticColumns(), 'Field'),
+            ['tercero_id', 'terceroidentificacion_id']
+        );
+    }
+
+    /**
+     * FK de ubicación en formulario empresa (columnas de `tercero`, no de `empresa`).
+     *
+     * @return array<string, string> campo => tabla referenciada
+     */
+    public function getEmpresaUbicacionFkMap(): array
+    {
         return [
-            [
-                'Field' => 'nit',
-                'Type' => 'varchar',
-                'IS_NULLABLE' => 'NO',
-                'COLUMN_COMMENT' => 'type:text|order:5|label:NIT|placeholder:Número de NIT|title:Identificación tributaria de la persona jurídica',
-            ],
+            'pais_id' => 'pais',
+            'departamento_id' => 'departamento',
+            'municipio_id' => 'municipio',
+            'zona_id' => 'zona',
+            'comuna_id' => 'comuna',
+            'corregimiento_id' => 'corregimiento',
+            'barrio_id' => 'barrio',
+            'vereda_id' => 'vereda',
         ];
     }
 
     /**
-     * Orden / visibilidad / etiquetas del CRUD empresa.
-     *
+     * Tabla de contexto para catálogo/autocomplete (FK en schema).
+     */
+    public function resolveCatalogContextTable(string $formContextTable, string $fkColumn): string
+    {
+        if ($formContextTable === 'empresa' && array_key_exists($fkColumn, $this->getEmpresaUbicacionFkMap())) {
+            return 'tercero';
+        }
+
+        return $formContextTable;
+    }
+
+    /**
      * @param list<array<string, mixed>> $columns
      * @return list<array<string, mixed>>
      */
     public function applyEmpresaCrudColumnPresentation(array $columns): array
     {
+        $ubicacionRelmode = [
+            'pais_id' => 'relmode:autocomplete',
+            'departamento_id' => 'relmode:autocomplete',
+            'municipio_id' => 'relmode:autocomplete',
+            'zona_id' => 'relmode:autocomplete',
+            'comuna_id' => 'relmode:autocomplete',
+            'corregimiento_id' => 'relmode:autocomplete',
+            'barrio_id' => 'relmode:autocomplete',
+            'vereda_id' => 'relmode:autocomplete',
+        ];
+
         $inject = [
             'nit' => 'label:NIT|order:5',
+            'documento_dv' => 'label:DV|order:8',
             'razon_social' => 'label:Razón social|order:10',
-            'email' => 'label:Email|order:20',
-            'telefono' => 'label:Teléfono|order:30',
-            'direccion' => 'label:Dirección|order:40',
-            'ciudad' => 'label:Ciudad|order:50',
-            'contacto' => 'label:Contacto|order:60',
-            'logo' => 'label:Logo|order:70',
-            'fecha_registro' => 'label:Fecha de registro|order:80',
-            'estado_id' => 'label:Estado|order:90',
+            'sitio_web' => 'label:Sitio web|order:76|show:form',
+            'logo' => 'type:upload|subtype:image|order:900|span:full|label:Logo|show:form',
+            'logo2' => 'type:upload|subtype:image|order:901|span:full|label:Logo 2|show:form',
+            'fecha_registro' => 'label:Fecha de registro|order:120|show:form',
+            'estado_id' => 'label:Estado|order:130|show:form,table',
             'tercero_id' => 'show:none|order:9999',
             'terceroidentificacion_id' => 'show:none|order:9999',
+            'representante_terceroidentificacion_id' => 'show:none|order:9999',
             'created_at' => 'show:none|order:9999',
+            'created_by' => 'show:none|order:9999',
             'updated_at' => 'show:none|order:9999',
+            'updated_by' => 'show:none|order:9999',
         ];
 
         foreach ($columns as &$col) {
             $f = $col['Field'] ?? '';
-            if (!isset($inject[$f])) {
+            if (isset($ubicacionRelmode[$f])) {
+                $existing = (string)($col['COLUMN_COMMENT'] ?? '');
+                if (!str_contains($existing, 'relmode:')) {
+                    $col['COLUMN_COMMENT'] = trim($existing . '|' . $ubicacionRelmode[$f], '|');
+                }
+            }
+            if (isset($inject[$f])) {
+                $existing = (string)($col['COLUMN_COMMENT'] ?? '');
+                if ($existing === '') {
+                    $col['COLUMN_COMMENT'] = $inject[$f];
+                } elseif ($f === 'sitio_web') {
+                    $existing = preg_replace('/\|?order:\d+/', '', $existing) ?? $existing;
+                    $col['COLUMN_COMMENT'] = trim($existing . '|' . $inject[$f], '|');
+                } elseif (!str_contains($existing, 'order:') && str_contains($inject[$f], 'order:')) {
+                    $col['COLUMN_COMMENT'] = $existing . '|' . $inject[$f];
+                }
+            }
+            if (!in_array($f, ['nit', 'razon_social', 'email', 'telefono', 'estado_id'], true)
+                && $f !== 'id'
+                && !str_contains((string)($col['COLUMN_COMMENT'] ?? ''), 'show:')
+            ) {
+                $col['COLUMN_COMMENT'] = trim((string)($col['COLUMN_COMMENT'] ?? '') . '|show:form', '|');
+            }
+        }
+        unset($col);
+
+        return $this->applyEmpresaCrudTableVisibility($columns);
+    }
+
+    /**
+     * Grilla empresa: NIT, DV, razón social, país, departamento, municipio, estado.
+     *
+     * @param list<array<string, mixed>> $columns
+     * @return list<array<string, mixed>>
+     */
+    public function applyEmpresaCrudTableVisibility(array $columns): array
+    {
+        $tableFields = [
+            'nit',
+            'documento_dv',
+            'razon_social',
+            'pais_id',
+            'departamento_id',
+            'municipio_id',
+            'estado_id',
+        ];
+
+        foreach ($columns as &$col) {
+            $f = $col['Field'] ?? '';
+            if ($f === 'id') {
                 continue;
             }
-            $existing = (string)($col['COLUMN_COMMENT'] ?? '');
-            $merged = $existing === '' ? $inject[$f] : ($existing . '|' . $inject[$f]);
-            $col['COLUMN_COMMENT'] = $merged;
+            $comment = (string)($col['COLUMN_COMMENT'] ?? '');
+            if (!in_array($f, $tableFields, true)) {
+                $comment = preg_replace('/\|?show:table\|?/', '|', $comment) ?? $comment;
+                if (!str_contains($comment, 'show:form') && !str_contains($comment, 'show:none')) {
+                    $comment = trim($comment . '|show:form', '|');
+                }
+            } else {
+                if (!str_contains($comment, 'show:form')) {
+                    $comment = trim($comment . '|show:form', '|');
+                }
+                if (!str_contains($comment, 'show:table')) {
+                    $comment = trim($comment . '|show:table', '|');
+                }
+            }
+            $col['COLUMN_COMMENT'] = $comment;
+        }
+        unset($col);
+
+        return $columns;
+    }
+
+    public function applyEmpresaLogoUploadPresentation(array $columns): array
+    {
+        foreach ($columns as &$col) {
+            $f = $col['Field'] ?? '';
+            if ($f === 'logo' || $f === 'logo2') {
+                $col['Type'] = 'upload';
+                $sub = $f === 'logo' ? 'Logo principal' : 'Logo secundario';
+                $ord = $f === 'logo' ? 900 : 901;
+                $col['COLUMN_COMMENT'] = 'type:upload|subtype:image|order:' . $ord . '|span:full|label:' . $sub
+                    . '|show:form|title:PNG/JPG/WebP, máx. 3 MB';
+            }
         }
         unset($col);
 
@@ -181,6 +371,10 @@ class CrudService
 
         $sql = 'SELECT DISTINCT u.*' . $fromSql['selectSuffix'] . ' FROM usuario u' . $fromSql['joins'] . ' WHERE 1=1';
         $params = [];
+
+        if (SoftDeleteService::supports($this->pdo, 'usuario')) {
+            $sql .= SoftDeleteService::sqlAndNotDeleted($this->pdo, 'usuario', 'u');
+        }
 
         $scope->appendUsuarioListScopeSql('u', $sql, $params);
 
@@ -403,7 +597,9 @@ class CrudService
             'tercero_id' => 'show:none|order:9999',
             'terceroidentificacion_id' => 'show:none|order:9999',
             'created_at' => 'show:none|order:9999',
+            'created_by' => 'show:none|order:9999',
             'updated_at' => 'show:none|order:9999',
+            'updated_by' => 'show:none|order:9999',
         ];
 
         foreach ($columns as &$col) {
@@ -454,7 +650,7 @@ class CrudService
                     'form,table'
                 );
             } else {
-                if (in_array($f, ['tercero_id', 'terceroidentificacion_id', 'created_at', 'updated_at', 'deleted_at'], true)) {
+                if (in_array($f, ['tercero_id', 'terceroidentificacion_id', 'created_at', 'created_by', 'updated_at', 'updated_by', 'deleted_at', 'deleted_by'], true)) {
                     $col['COLUMN_COMMENT'] = $this->mergeColumnCommentShow($base, 'none');
                 } else {
                     $col['COLUMN_COMMENT'] = $this->mergeColumnCommentShow($base, 'form');
@@ -464,6 +660,26 @@ class CrudService
         unset($col);
 
         return $columns;
+    }
+
+    /**
+     * Columnas permitidas en la grilla del ítem usuario (el formulario no se filtra aquí).
+     *
+     * @return list<string>
+     */
+    public function getUsuarioCrudTableColumnFields(): array
+    {
+        return [
+            'tipodocumento_id',
+            'numero_documento',
+            'documento_dv',
+            'nombres',
+            'apellidos',
+            'username',
+            'sesion_idle_minutos',
+            'email',
+            'estado_id',
+        ];
     }
 
     private function mergeColumnCommentShow(string $comment, string $show): string
@@ -552,6 +768,21 @@ class CrudService
         return (bool) $stmt->fetchColumn();
     }
 
+    private function tableHasColumn(string $table, string $column): bool
+    {
+        $t = preg_replace('/[^A-Za-z0-9_]/', '', $table);
+        $c = preg_replace('/[^A-Za-z0-9_]/', '', $column);
+
+        $stmt = $this->pdo->prepare('
+            SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?
+            LIMIT 1
+        ');
+        $stmt->execute([$t, $c]);
+
+        return (bool) $stmt->fetchColumn();
+    }
+
     /**
      * @return list<string>
      */
@@ -594,6 +825,8 @@ class CrudService
 
     public function getAcciones($itemId)
     {
+        $accNd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'accion', 'a');
+
         $stmt = $this->pdo->prepare("
             SELECT 
                 ia.id as item_accion_id,
@@ -605,6 +838,7 @@ class CrudService
             INNER JOIN accion a ON (ia.accion_id=a.id)
             WHERE ia.item_id = ?
             AND ia.estado_id = 1
+            {$accNd}
             ORDER BY a.orden
         ");
 
@@ -703,8 +937,14 @@ class CrudService
                 $validator->validateAfterTerceroResolved($data, $id, $columnNames);
             }
 
+            $empresaTableCols = $empresaTx
+                ? array_flip($this->getTableColumnNames('empresa'))
+                : [];
+
             if ($empresaTx) {
                 $this->resolveEmpresaTerceroForSave($data, $id);
+                $this->syncTerceroFromEmpresaForm($data);
+                $this->resolveRepresentanteLegalForSave($data);
             }
 
             /*
@@ -748,7 +988,11 @@ class CrudService
                 $name = $col['Field'];
                 $nullable = $col['IS_NULLABLE'];
 
-                if (in_array($name, ['id', 'created_at', 'updated_at', 'deleted_at'])) {
+                if (in_array($name, ['id', 'created_at', 'created_by', 'updated_at', 'updated_by', 'deleted_at', 'deleted_by'])) {
+                    continue;
+                }
+
+                if ($empresaTx && !isset($empresaTableCols[$name])) {
                     continue;
                 }
 
@@ -865,10 +1109,6 @@ class CrudService
                 }
             }
 
-            if ($ok && $empresaTx) {
-                $this->syncTerceroFromEmpresa($data);
-            }
-
             if ($usuarioTx || $empresaTx) {
                 if ($ok) {
                     $this->pdo->commit();
@@ -927,6 +1167,7 @@ class CrudService
             if ($curNit === $nit) {
                 $data['tercero_id'] = $curTerceroId;
                 $data['terceroidentificacion_id'] = $curTiId;
+                $this->updateEmpresaNitDv($curTiId, $nit, $data);
                 return;
             }
 
@@ -954,6 +1195,7 @@ class CrudService
             if ($ti) {
                 $data['tercero_id'] = (int)$ti['tercero_id'];
                 $data['terceroidentificacion_id'] = (int)$ti['id'];
+                $this->updateEmpresaNitDv((int)$ti['id'], $nit, $data);
                 return;
             }
 
@@ -961,6 +1203,7 @@ class CrudService
             $st->execute([$nit, $curTiId]);
             $data['tercero_id'] = $curTerceroId;
             $data['terceroidentificacion_id'] = $curTiId;
+            $this->updateEmpresaNitDv($curTiId, $nit, $data);
             return;
         }
 
@@ -988,27 +1231,27 @@ class CrudService
         if ($existing) {
             $data['tercero_id'] = (int)$existing['tercero_id'];
             $data['terceroidentificacion_id'] = (int)$existing['id'];
+            $this->updateEmpresaNitDv((int)$existing['id'], $nit, $data);
             return;
         }
 
         $st = $this->pdo->prepare(
-            'INSERT INTO tercero (tipopersona_id, razon_social, email, telefono, direccion, estado_id)
-             VALUES (?, ?, ?, ?, ?, 1)'
+            'INSERT INTO tercero (tipopersona_id, razon_social, estado_id) VALUES (?, ?, 1)'
         );
         $st->execute([
             $tipoJur,
             (string)($data['razon_social'] ?? ''),
-            (($data['email'] ?? '') !== '') ? (string)$data['email'] : null,
-            (($data['telefono'] ?? '') !== '') ? (string)$data['telefono'] : null,
-            (($data['direccion'] ?? '') !== '') ? (string)$data['direccion'] : null,
         ]);
         $newTerceroId = (int)$this->pdo->lastInsertId();
 
+        $dv = self::colombianNitDvFromNumber($nit);
+        $data['documento_dv'] = (string)$dv;
+
         $st = $this->pdo->prepare(
-            'INSERT INTO terceroidentificacion (tercero_id, tipodocumento_id, numero, principal, estado_id)
-             VALUES (?, ?, ?, 1, 1)'
+            'INSERT INTO terceroidentificacion (tercero_id, tipodocumento_id, numero, dv, principal, estado_id)
+             VALUES (?, ?, ?, ?, 1, 1)'
         );
-        $st->execute([$newTerceroId, $tipoNit, $nit]);
+        $st->execute([$newTerceroId, $tipoNit, $nit, $dv]);
         $newTiId = (int)$this->pdo->lastInsertId();
 
         $data['tercero_id'] = $newTerceroId;
@@ -1016,29 +1259,168 @@ class CrudService
     }
 
     /**
-     * Tras guardar empresa, refleja en `tercero` los datos comunes (razón social/email/teléfono/dirección).
+     * @param array<string, mixed> $data
+     */
+    private function updateEmpresaNitDv(int $identificacionId, string $nit, array &$data): void
+    {
+        if ($identificacionId <= 0) {
+            return;
+        }
+        $dv = self::colombianNitDvFromNumber($nit);
+        $data['documento_dv'] = (string)$dv;
+        $st = $this->pdo->prepare('UPDATE terceroidentificacion SET dv = ? WHERE id = ?');
+        $st->execute([$dv, $identificacionId]);
+    }
+
+    /**
+     * Persiste en `tercero` los datos del formulario empresa (fuente única).
      *
      * @param array<string, mixed> $data
      */
-    private function syncTerceroFromEmpresa(array $data): void
+    private function syncTerceroFromEmpresaForm(array $data): void
     {
         $terceroId = (int)($data['tercero_id'] ?? 0);
         if ($terceroId <= 0) {
             return;
         }
 
+        $tCols = $this->getTableColumnNames('tercero');
+        $map = [
+            'razon_social' => (string)($data['razon_social'] ?? ''),
+            'email' => (($data['email'] ?? '') !== '') ? (string)$data['email'] : null,
+            'telefono' => (($data['telefono'] ?? '') !== '') ? (string)$data['telefono'] : null,
+            'celular' => (($data['celular'] ?? '') !== '') ? (string)$data['celular'] : null,
+            'direccion' => (($data['direccion'] ?? '') !== '') ? (string)$data['direccion'] : null,
+            'pais_id' => $this->nullableInt($data['pais_id'] ?? null),
+            'departamento_id' => $this->nullableInt($data['departamento_id'] ?? null),
+            'municipio_id' => $this->nullableInt($data['municipio_id'] ?? null),
+            'zona_id' => $this->nullableInt($data['zona_id'] ?? null),
+            'comuna_id' => $this->nullableInt($data['comuna_id'] ?? null),
+            'corregimiento_id' => $this->nullableInt($data['corregimiento_id'] ?? null),
+            'barrio_id' => $this->nullableInt($data['barrio_id'] ?? null),
+            'vereda_id' => $this->nullableInt($data['vereda_id'] ?? null),
+        ];
+
+        $sets = [];
+        $params = [];
+        foreach ($map as $field => $val) {
+            if (!in_array($field, $tCols, true)) {
+                continue;
+            }
+            $sets[] = '`' . str_replace('`', '', $field) . '`=?';
+            $params[] = $val;
+        }
+
+        if ($sets === []) {
+            return;
+        }
+
+        $params[] = $terceroId;
+        $st = $this->pdo->prepare('UPDATE tercero SET ' . implode(', ', $sets) . ' WHERE id = ?');
+        $st->execute($params);
+
+        $tiId = (int)($data['terceroidentificacion_id'] ?? 0);
+        $nit = trim((string)($data['nit'] ?? ''));
+        if ($tiId > 0 && $nit !== '') {
+            $this->updateEmpresaNitDv($tiId, $nit, $data);
+        }
+    }
+
+    /**
+     * Representante legal → tercero (natural) + terceroidentificacion; FK en empresa.
+     *
+     * @param array<string, mixed> $data
+     */
+    private function resolveRepresentanteLegalForSave(array &$data): void
+    {
+        $tipoDoc = $this->nullableInt($data['rep_tipodocumento_id'] ?? null);
+        $numero = trim((string)($data['rep_numero_documento'] ?? ''));
+        $nombres = trim((string)($data['rep_nombres'] ?? ''));
+        $apellidos = trim((string)($data['rep_apellidos'] ?? ''));
+
+        if ($numero === '' && $nombres === '' && $apellidos === '') {
+            $data['representante_terceroidentificacion_id'] = null;
+            return;
+        }
+
+        if ($tipoDoc === null || $tipoDoc <= 0) {
+            throw new Exception(json_encode([
+                'rep_tipodocumento_id' => 'Indique el tipo de documento del representante legal.',
+            ], JSON_UNESCAPED_UNICODE));
+        }
+
+        if ($numero === '') {
+            throw new Exception(json_encode([
+                'rep_numero_documento' => 'Indique el número de documento del representante legal.',
+            ], JSON_UNESCAPED_UNICODE));
+        }
+
+        $tipoNatural = 1;
+        $tiId = 0;
+
         $st = $this->pdo->prepare(
-            'UPDATE tercero
-                SET razon_social = ?, email = ?, telefono = ?, direccion = ?
-              WHERE id = ?'
+            'SELECT ti.id, ti.tercero_id FROM terceroidentificacion ti
+             WHERE ti.tipodocumento_id = ? AND TRIM(ti.numero) = TRIM(?)
+             LIMIT 1'
         );
-        $st->execute([
-            (string)($data['razon_social'] ?? ''),
-            (($data['email'] ?? '') !== '') ? (string)$data['email'] : null,
-            (($data['telefono'] ?? '') !== '') ? (string)$data['telefono'] : null,
-            (($data['direccion'] ?? '') !== '') ? (string)$data['direccion'] : null,
-            $terceroId,
-        ]);
+        $st->execute([$tipoDoc, $numero]);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+
+        if ($row) {
+            $tiId = (int)$row['id'];
+            $tId = (int)$row['tercero_id'];
+        } else {
+            $st = $this->pdo->prepare(
+                'INSERT INTO tercero (tipopersona_id, nombres, apellidos, estado_id) VALUES (?, ?, ?, 1)'
+            );
+            $st->execute([
+                $tipoNatural,
+                $nombres !== '' ? $nombres : null,
+                $apellidos !== '' ? $apellidos : null,
+            ]);
+            $tId = (int)$this->pdo->lastInsertId();
+            $st = $this->pdo->prepare(
+                'INSERT INTO terceroidentificacion (tercero_id, tipodocumento_id, numero, principal, estado_id)
+                 VALUES (?, ?, ?, 1, 1)'
+            );
+            $st->execute([$tId, $tipoDoc, $numero]);
+            $tiId = (int)$this->pdo->lastInsertId();
+        }
+
+        $tCols = $this->getTableColumnNames('tercero');
+        $sets = [];
+        $params = [];
+        if (in_array('nombres', $tCols, true)) {
+            $sets[] = 'nombres=?';
+            $params[] = $nombres !== '' ? $nombres : null;
+        }
+        if (in_array('apellidos', $tCols, true)) {
+            $sets[] = 'apellidos=?';
+            $params[] = $apellidos !== '' ? $apellidos : null;
+        }
+        if (in_array('tipopersona_id', $tCols, true)) {
+            $sets[] = 'tipopersona_id=?';
+            $params[] = $tipoNatural;
+        }
+        if ($sets !== []) {
+            $params[] = $tId;
+            $st = $this->pdo->prepare('UPDATE tercero SET ' . implode(', ', $sets) . ' WHERE id = ?');
+            $st->execute($params);
+        }
+
+        $data['representante_terceroidentificacion_id'] = $tiId;
+    }
+
+    /**
+     * @param mixed $v
+     */
+    private function nullableInt($v): ?int
+    {
+        if ($v === null || $v === '') {
+            return null;
+        }
+
+        return (int)$v;
     }
 
     /**
@@ -1322,23 +1704,103 @@ class CrudService
         return (int)$this->pdo->lastInsertId();
     }
 
+    /**
+     * Tabla referenciada en COLUMN_COMMENT: rel:sgd_dependencia
+     */
+    public function extractRelTableFromComment(?string $comment): ?string
+    {
+        $comment = trim((string)$comment);
+        if ($comment === '') {
+            return null;
+        }
+
+        foreach (explode('|', $comment) as $part) {
+            $part = trim($part);
+            if ($part === '') {
+                continue;
+            }
+            if (str_starts_with(strtolower($part), 'rel:')) {
+                $table = trim(substr($part, strlen('rel:')));
+                $table = preg_replace('/[^A-Za-z0-9_]/', '', $table);
+
+                return $table !== '' ? $table : null;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Columna a mostrar en combos FK: label:codigo | label:nombre
+     */
+    public function extractRelLabelColumnFromComment(?string $comment): ?string
+    {
+        $comment = trim((string)$comment);
+        if ($comment === '') {
+            return null;
+        }
+
+        foreach (explode('|', $comment) as $part) {
+            $part = trim($part);
+            if ($part === '') {
+                continue;
+            }
+            if (str_starts_with(strtolower($part), 'label:')) {
+                $col = trim(substr($part, strlen('label:')));
+                $col = preg_replace('/[^A-Za-z0-9_]/', '', $col);
+
+                return $col !== '' ? $col : null;
+            }
+        }
+
+        return null;
+    }
+
     public function getRelations($tabla)
     {
-        $stmt = $this->pdo->query("SHOW COLUMNS FROM $tabla");
-        $columns = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $tablaSql = $this->sqlIdentifierTable($tabla);
+        $columns = $this->getColumns($tablaSql);
 
         $relations = [];
 
-        foreach ($columns as $col) {
+        $fks = $this->getOutgoingForeignKeys($tablaSql);
+        foreach ($fks as $fk) {
+            $relations[$fk['column']] = $fk['referenced_table'];
+        }
 
+        foreach ($columns as $col) {
             $field = $col['Field'];
 
-            if (str_ends_with($field, '_id')) {
+            if (!str_ends_with($field, '_id')) {
+                continue;
+            }
+
+            $fromComment = $this->extractRelTableFromComment($col['COLUMN_COMMENT'] ?? null);
+            if ($fromComment !== null) {
+                $relations[$field] = $fromComment;
+                continue;
+            }
+
+            if (!isset($relations[$field])) {
                 $relations[$field] = str_replace('_id', '', $field);
             }
         }
 
         return $relations;
+    }
+
+    /**
+     * FK internas de empresa (no se cargan como selects del CRUD genérico).
+     *
+     * @return list<string>
+     */
+    public function getEmpresaInternalFkFields(): array
+    {
+        return [
+            'tercero_id',
+            'terceroidentificacion_id',
+            'representante_terceroidentificacion_id',
+        ];
     }
 
     /**
@@ -1399,6 +1861,7 @@ class CrudService
      */
     public function getCatalogParentFieldsForFk(string $contextTable, string $fkColumn): array
     {
+        $contextTable = $this->resolveCatalogContextTable($contextTable, $fkColumn);
         $fk = $this->getForeignKeyForColumn($contextTable, $fkColumn);
 
         if ($fk === null) {
@@ -1419,7 +1882,7 @@ class CrudService
          * pero no son jerarquía de catálogo; si las incluimos, el API exige parent_estado_id y el
          * formulario a veces no tiene ese campo → búsqueda siempre vacía.
          */
-        $skipParentNames = ['estado_id', 'empresa_id', 'sede_id', 'created_at', 'updated_at'];
+        $skipParentNames = ['estado_id', 'empresa_id', 'sede_id', 'created_at', 'created_by', 'updated_at', 'updated_by', 'deleted_at', 'deleted_by'];
 
         foreach ($this->getOutgoingForeignKeys($ref) as $childFk) {
             $col = $childFk['column'];
@@ -1460,6 +1923,7 @@ class CrudService
      */
     public function buildCatalogMetaForFk(string $contextTable, string $fkColumn): ?array
     {
+        $contextTable = $this->resolveCatalogContextTable($contextTable, $fkColumn);
         $fk = $this->getForeignKeyForColumn($contextTable, $fkColumn);
 
         if ($fk === null) {
@@ -1486,6 +1950,7 @@ class CrudService
         array $parentValues,
         int $limit = 25
     ): array {
+        $contextTable = $this->resolveCatalogContextTable($contextTable, $fkColumn);
         $meta = $this->buildCatalogMetaForFk($contextTable, $fkColumn);
 
         if ($meta === null) {
@@ -1584,6 +2049,8 @@ class CrudService
             $where[] = '`estado_id` = 1';
         }
 
+        SoftDeleteService::pushWhereNotDeleted($this->pdo, $refTable, $where);
+
         $includeCatalogTipo = ($refTable === 'zona') && in_array('tipo', $refFieldNames, true);
         $tipoSelectSql = $includeCatalogTipo ? ', `tipo`' : '';
 
@@ -1678,15 +2145,27 @@ class CrudService
         $stmt = $this->pdo->query("SHOW COLUMNS FROM $tablaSql");
         $columns = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        $displayColumn = null;
+        $displayColumn = $this->extractRelLabelColumnFromComment($comment);
 
-        $preferred = ['nombre', 'razon_social', 'descripcion', 'titulo', 'username', 'email'];
+        $preferred = ['nombre', 'razon_social', 'descripcion', 'titulo', 'username', 'email', 'codigo'];
 
-        foreach ($preferred as $pref) {
-            foreach ($columns as $col) {
-                if ($col['Field'] === $pref) {
-                    $displayColumn = $pref;
-                    break 2;
+        if ($displayColumn === null) {
+            foreach ($preferred as $pref) {
+                foreach ($columns as $col) {
+                    if ($col['Field'] === $pref) {
+                        $displayColumn = $pref;
+                        break 2;
+                    }
+                }
+            }
+        } elseif (!in_array($displayColumn, array_column($columns, 'Field'), true)) {
+            $displayColumn = null;
+            foreach ($preferred as $pref) {
+                foreach ($columns as $col) {
+                    if ($col['Field'] === $pref) {
+                        $displayColumn = $pref;
+                        break 2;
+                    }
                 }
             }
         }
@@ -1797,11 +2276,19 @@ class CrudService
             }
 
             if (!empty($conditions)) {
-                $sql .= " WHERE " . implode(' AND ', $conditions);
+                $sql .= ' WHERE ' . implode(' AND ', $conditions);
+            } else {
+                $sql .= ' WHERE 1=1';
             }
+        } else {
+            $sql .= ' WHERE 1=1';
         }
 
-        $sql .= " ORDER BY nombre";
+        if (SoftDeleteService::supports($this->pdo, $tabla)) {
+            $sql .= SoftDeleteService::sqlAndNotDeleted($this->pdo, $tabla);
+        }
+
+        $sql .= ' ORDER BY nombre';
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);

@@ -13,6 +13,11 @@ class PermisoService
     private static function rolIdsForUser(PDO $pdo, int $userId): array
     {
         [$empresaId, $sedeId] = self::sessionEmpresaSede();
+
+        if ($empresaId === null || $empresaId <= 0) {
+            return self::rolIdsForUserAllScopes($pdo, $userId);
+        }
+
         [$urScopeSql, $urScopeParams] = self::tenantScopeSql('ur', $empresaId, $sedeId);
 
         $stmt = $pdo->prepare("
@@ -25,6 +30,45 @@ class PermisoService
         $stmt->execute(array_merge([$userId], $urScopeParams));
 
         return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /**
+     * Alcance permiso/rol antes de elegir empresa en sesión: global o cualquier empresa asignada al usuario.
+     *
+     * @return array{0: string, 1: array<int|float>}
+     */
+    private static function preContextTenantScopeSql(PDO $pdo, string $alias, int $userId): array
+    {
+        $stmt = $pdo->prepare('
+            SELECT DISTINCT empresa_id
+            FROM usuario_empresa
+            WHERE usuario_id = ?
+            AND estado_id = 1
+        ');
+        $stmt->execute([$userId]);
+        $empresaIds = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+
+        if ($empresaIds === []) {
+            return self::tenantScopeSql($alias, null, null);
+        }
+
+        $placeholders = implode(',', array_fill(0, count($empresaIds), '?'));
+
+        return [
+            " AND (
+                ({$alias}.empresa_id IS NULL AND {$alias}.sede_id IS NULL)
+                OR {$alias}.empresa_id IN ($placeholders)
+            ) ",
+            $empresaIds,
+        ];
+    }
+
+    private static function sessionHasOperationalContext(): bool
+    {
+        $empresaId = isset($_SESSION['empresa_id']) ? (int)$_SESSION['empresa_id'] : 0;
+        $sedeId = isset($_SESSION['sede_id']) ? (int)$_SESSION['sede_id'] : 0;
+
+        return $empresaId > 0 && $sedeId > 0;
     }
 
     /**
@@ -95,6 +139,25 @@ class PermisoService
     ========================================
     */
 
+    /**
+     * Superadministrador de plataforma (flag de sesión o rol global id=1).
+     */
+    public static function isSuperAdminSession(): bool
+    {
+        return !empty($_SESSION['es_super_admin'])
+            || (int)($_SESSION['rol_id'] ?? 0) === 1;
+    }
+
+    /**
+     * Catálogo de ítems / menú del sistema (?url=item y APIs bajo item/).
+     */
+    private static function isItemCatalogRuta(string $ruta): bool
+    {
+        $ruta = trim($ruta);
+
+        return $ruta === 'item' || str_starts_with($ruta, 'item/');
+    }
+
     public static function can($ruta, $accion)
     {
         if (!isset($_SESSION['user_id'])) {
@@ -106,6 +169,12 @@ class PermisoService
         }
 
         $cacheKey = ($ruta ?? '') . '|' . ($accion ?? '');
+
+        if (self::isItemCatalogRuta((string)($ruta ?? '')) && !self::isSuperAdminSession()) {
+            self::$canCache[$cacheKey] = false;
+
+            return false;
+        }
         if (isset(self::$canCache[$cacheKey])) {
             return self::$canCache[$cacheKey];
         }
@@ -151,6 +220,8 @@ class PermisoService
 
         foreach ($rutasBuscar as $rutaBuscar) {
 
+            $itemNotDeleted = SoftDeleteService::sqlAndNotDeleted($pdo, 'item', 'i');
+
             $stmt = $pdo->prepare("
                 SELECT ia.id
                 FROM item_accion ia
@@ -158,6 +229,7 @@ class PermisoService
                 INNER JOIN accion a ON a.id = ia.accion_id
                 WHERE i.ruta = ?
                 AND a.codigo = ?
+                {$itemNotDeleted}
                 LIMIT 1
             ");
 
@@ -180,9 +252,15 @@ class PermisoService
     {
         [$empresaId, $sedeId] = self::sessionEmpresaSede();
 
-        $rolIds = self::rolIdsForUser($pdo, $userId);
-
-        [$permScopeSql, $permScopeParams] = self::tenantScopeSql('p', $empresaId, $sedeId);
+        if (!self::sessionHasOperationalContext()) {
+            $rolIds = self::rolIdsForUserAllScopes($pdo, $userId);
+            [$permScopeSql, $permScopeParams] = self::preContextTenantScopeSql($pdo, 'p', $userId);
+            [$scopeSql, $scopeParams] = self::preContextTenantScopeSql($pdo, 'rp', $userId);
+        } else {
+            $rolIds = self::rolIdsForUser($pdo, $userId);
+            [$permScopeSql, $permScopeParams] = self::tenantScopeSql('p', $empresaId, $sedeId);
+            [$scopeSql, $scopeParams] = self::tenantScopeSql('rp', $empresaId, $sedeId);
+        }
 
         /*
         ========================================
@@ -239,8 +317,6 @@ class PermisoService
         if (empty($rolIds)) {
             return false;
         }
-
-        [$scopeSql, $scopeParams] = self::tenantScopeSql('rp', $empresaId, $sedeId);
 
         $placeholders = implode(',', array_fill(0, count($rolIds), '?'));
 

@@ -18,8 +18,17 @@ if (is_readable($dbFile)) {
     require_once BASE_PATH . '/config.example/Database.php';
 }
 
+// Zona horaria de la aplicación (alineada con MySQL / servidor)
+Database::bootstrapEnv();
+$appTz = getenv('APP_TIMEZONE') ?: 'America/Bogota';
+if (@date_default_timezone_set($appTz) === false) {
+    date_default_timezone_set('UTC');
+}
+
 // ✅ INICIO DE SESIÓN GLOBAL - ÚNICO LUGAR
 require_once BASE_PATH . '/core/SessionManager.php';
+require_once BASE_PATH . '/core/AuditingPDO.php';
+require_once BASE_PATH . '/core/AuditingPDOStatement.php';
 SessionManager::start();
 
 // Autocarga inteligente
