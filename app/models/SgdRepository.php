@@ -3,6 +3,7 @@
 class SgdRepository
 {
     private PDO $pdo;
+    private ?string $documentoCodeColumn = null;
 
     public function __construct(?PDO $pdo = null)
     {
@@ -203,9 +204,10 @@ class SgdRepository
     public function findDocumentoId(int $empresaId, string $codigo): ?int
     {
         $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_documento');
+        $codeColumn = $this->getDocumentoCodeColumn();
         $stmt = $this->pdo->prepare("
             SELECT id FROM sgd_documento
-            WHERE empresa_id = ? AND codigo = ? {$nd}
+            WHERE empresa_id = ? AND {$codeColumn} = ? {$nd}
             LIMIT 1
         ");
         $stmt->execute([$empresaId, $codigo]);
@@ -217,6 +219,7 @@ class SgdRepository
     public function upsertDocumento(int $empresaId, array $row): int
     {
         $existingId = $this->findDocumentoId($empresaId, $row['codigo']);
+        $codeColumn = $this->getDocumentoCodeColumn();
 
         if ($existingId) {
             $stmt = $this->pdo->prepare('
@@ -241,7 +244,7 @@ class SgdRepository
 
         $stmt = $this->pdo->prepare('
             INSERT INTO sgd_documento (
-                empresa_id, codigo, nombre, proceso_id, tipo_documental_id,
+                empresa_id, ' . $codeColumn . ', nombre, proceso_id, tipo_documental_id,
                 version_actual, fecha_primera_aprobacion, fecha_ultima_aprobacion,
                 estado_documental, estado_id, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(3))
@@ -280,11 +283,12 @@ class SgdRepository
 
     public function linkAllDocumentosCcd(int $empresaId): int
     {
+        $codeColumn = $this->getDocumentoCodeColumn();
         $stmt = $this->pdo->prepare('
             UPDATE sgd_ccd_entrada e
             INNER JOIN sgd_documento d
                 ON d.empresa_id = e.empresa_id
-               AND d.codigo = e.codigo_calidad
+               AND d.' . $codeColumn . ' = e.codigo_calidad
                AND d.deleted_at IS NULL
             SET e.documento_id = d.id
             WHERE e.empresa_id = ?
@@ -295,6 +299,19 @@ class SgdRepository
         $stmt->execute([$empresaId]);
 
         return $stmt->rowCount();
+    }
+
+    private function getDocumentoCodeColumn(): string
+    {
+        if ($this->documentoCodeColumn !== null) {
+            return $this->documentoCodeColumn;
+        }
+
+        $stmt = $this->pdo->query("SHOW COLUMNS FROM sgd_documento LIKE 'consecutivo'");
+        $hasConsecutivo = (bool)$stmt->fetch(PDO::FETCH_ASSOC);
+        $this->documentoCodeColumn = $hasConsecutivo ? 'consecutivo' : 'codigo';
+
+        return $this->documentoCodeColumn;
     }
 
     public function insertCcdEntrada(int $empresaId, array $row): int
@@ -380,6 +397,308 @@ class SgdRepository
     /**
      * @return array{procesos: int, dependencias: int, series: int, subseries: int, documentos: int, ccd: int}
      */
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function listProcesosByEmpresa(int $empresaId): array
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_proceso');
+        $stmt = $this->pdo->prepare("
+            SELECT id, codigo, nombre, tipo_proceso
+            FROM sgd_proceso
+            WHERE empresa_id = ? {$nd}
+            ORDER BY orden, codigo
+        ");
+        $stmt->execute([$empresaId]);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function listLineasDocumentales(int $empresaId): array
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_linea_documental');
+        $stmt = $this->pdo->prepare("
+            SELECT id, codigo, nombre
+            FROM sgd_linea_documental
+            WHERE empresa_id = ? {$nd}
+            ORDER BY orden, codigo
+        ");
+        $stmt->execute([$empresaId]);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function listDocumentosForSelect(int $empresaId, ?int $excludeId = null): array
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_documento', 'd');
+        $sql = "
+            SELECT
+                d.id,
+                d.documento_id,
+                d.consecutivo,
+                d.nombre,
+                p.codigo AS proceso_codigo,
+                t.codigo AS tipo_codigo,
+                ld.codigo AS linea_codigo
+            FROM sgd_documento d
+            LEFT JOIN sgd_proceso p ON p.id = d.proceso_id
+            LEFT JOIN sgd_tipo_documental t ON t.id = d.tipo_documental_id
+            LEFT JOIN sgd_linea_documental ld ON ld.id = d.linea_documental_id
+            WHERE d.empresa_id = ? {$nd}
+              AND d.documento_id IS NULL
+        ";
+        $params = [$empresaId];
+        if ($excludeId !== null && $excludeId > 0) {
+            $sql .= ' AND d.id <> ?';
+            $params[] = $excludeId;
+        }
+        $sql .= ' ORDER BY p.codigo, t.codigo, d.consecutivo, d.nombre';
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function listDocumentos(int $empresaId, ?string $search = null, int $limit = 1000, int $offset = 0): array
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_documento', 'd');
+        $where = "d.empresa_id = ? {$nd}";
+        $params = [$empresaId];
+
+        if ($search !== null && trim($search) !== '') {
+            $where .= ' AND (d.nombre LIKE ? OR d.consecutivo LIKE ? OR p.codigo LIKE ? OR t.codigo LIKE ? OR ld.codigo LIKE ?)';
+            $like = '%' . trim($search) . '%';
+            array_push($params, $like, $like, $like, $like, $like);
+        }
+
+        $sql = "
+            SELECT
+                d.id,
+                d.empresa_id,
+                d.proceso_id,
+                d.documento_id,
+                d.tipo_documental_id,
+                d.linea_documental_id,
+                d.consecutivo,
+                d.nombre,
+                d.modo,
+                d.version_actual,
+                d.estado_documental,
+                d.estado_id,
+                p.codigo AS proceso_codigo,
+                p.nombre AS proceso_nombre,
+                t.codigo AS tipo_codigo,
+                t.nombre AS tipo_nombre,
+                ld.codigo AS linea_codigo,
+                ld.nombre AS linea_nombre,
+                pad.consecutivo AS padre_consecutivo,
+                pad.nombre AS padre_nombre
+            FROM sgd_documento d
+            LEFT JOIN sgd_proceso p ON p.id = d.proceso_id
+            LEFT JOIN sgd_tipo_documental t ON t.id = d.tipo_documental_id
+            LEFT JOIN sgd_linea_documental ld ON ld.id = d.linea_documental_id
+            LEFT JOIN sgd_documento pad ON pad.id = d.documento_id
+            WHERE {$where}
+            ORDER BY d.id ASC
+            LIMIT " . max(1, $limit) . ' OFFSET ' . max(0, $offset);
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    public function countDocumentos(int $empresaId, ?string $search = null): int
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_documento', 'd');
+        $where = "d.empresa_id = ? {$nd}";
+        $params = [$empresaId];
+
+        if ($search !== null && trim($search) !== '') {
+            $where .= ' AND (d.nombre LIKE ? OR d.consecutivo LIKE ? OR p.codigo LIKE ? OR t.codigo LIKE ? OR ld.codigo LIKE ?)';
+            $like = '%' . trim($search) . '%';
+            array_push($params, $like, $like, $like, $like, $like);
+        }
+
+        $stmt = $this->pdo->prepare("
+            SELECT COUNT(*)
+            FROM sgd_documento d
+            LEFT JOIN sgd_proceso p ON p.id = d.proceso_id
+            LEFT JOIN sgd_tipo_documental t ON t.id = d.tipo_documental_id
+            LEFT JOIN sgd_linea_documental ld ON ld.id = d.linea_documental_id
+            WHERE {$where}
+        ");
+        $stmt->execute($params);
+
+        return (int)$stmt->fetchColumn();
+    }
+
+    public function findDocumentoById(int $empresaId, int $id): ?array
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_documento', 'd');
+        $stmt = $this->pdo->prepare("
+            SELECT
+                d.*,
+                p.codigo AS proceso_codigo,
+                p.nombre AS proceso_nombre,
+                t.codigo AS tipo_codigo,
+                t.nombre AS tipo_nombre,
+                ld.codigo AS linea_codigo,
+                ld.nombre AS linea_nombre
+            FROM sgd_documento d
+            LEFT JOIN sgd_proceso p ON p.id = d.proceso_id
+            LEFT JOIN sgd_tipo_documental t ON t.id = d.tipo_documental_id
+            LEFT JOIN sgd_linea_documental ld ON ld.id = d.linea_documental_id
+            WHERE d.empresa_id = ? AND d.id = ? {$nd}
+            LIMIT 1
+        ");
+        $stmt->execute([$empresaId, $id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row ?: null;
+    }
+
+    public function documentoUniqueExists(
+        int $empresaId,
+        ?int $procesoId,
+        ?int $documentoId,
+        ?int $tipoDocumentalId,
+        string $consecutivo,
+        ?int $excludeId = null
+    ): bool {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_documento');
+        $sql = "
+            SELECT 1 FROM sgd_documento
+            WHERE empresa_id = ?
+              AND COALESCE(proceso_id, 0) = COALESCE(?, 0)
+              AND COALESCE(documento_id, 0) = COALESCE(?, 0)
+              AND COALESCE(tipo_documental_id, 0) = COALESCE(?, 0)
+              AND consecutivo = ?
+              {$nd}
+        ";
+        $params = [$empresaId, $procesoId, $documentoId, $tipoDocumentalId, $consecutivo];
+        if ($excludeId !== null && $excludeId > 0) {
+            $sql .= ' AND id <> ?';
+            $params[] = $excludeId;
+        }
+        $sql .= ' LIMIT 1';
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+
+        return (bool)$stmt->fetchColumn();
+    }
+
+    public function saveDocumento(int $empresaId, array $data): int
+    {
+        $id = (int)($data['id'] ?? 0);
+        $fields = [
+            'proceso_id' => $data['proceso_id'] ?? null,
+            'documento_id' => $data['documento_id'] ?? null,
+            'tipo_documental_id' => $data['tipo_documental_id'] ?? null,
+            'linea_documental_id' => $data['linea_documental_id'] ?? null,
+            'consecutivo' => trim((string)($data['consecutivo'] ?? '')),
+            'nombre' => trim((string)($data['nombre'] ?? '')),
+            'modo' => $data['modo'] ?? null,
+            'version_actual' => $data['version_actual'] ?? null,
+            'fecha_primera_aprobacion' => $data['fecha_primera_aprobacion'] ?? null,
+            'fecha_ultima_aprobacion' => $data['fecha_ultima_aprobacion'] ?? null,
+            'estado_documental' => $data['estado_documental'] ?? 'vigente',
+        ];
+
+        if ($id > 0) {
+            $stmt = $this->pdo->prepare('
+                UPDATE sgd_documento
+                SET proceso_id = ?, documento_id = ?, tipo_documental_id = ?, linea_documental_id = ?,
+                    consecutivo = ?, nombre = ?, modo = ?, version_actual = ?,
+                    fecha_primera_aprobacion = ?, fecha_ultima_aprobacion = ?,
+                    estado_documental = ?, updated_at = NOW(3)
+                WHERE id = ? AND empresa_id = ?
+            ');
+            $stmt->execute([
+                $fields['proceso_id'],
+                $fields['documento_id'],
+                $fields['tipo_documental_id'],
+                $fields['linea_documental_id'],
+                $fields['consecutivo'],
+                $fields['nombre'],
+                $fields['modo'],
+                $fields['version_actual'],
+                $fields['fecha_primera_aprobacion'],
+                $fields['fecha_ultima_aprobacion'],
+                $fields['estado_documental'],
+                $id,
+                $empresaId,
+            ]);
+
+            return $id;
+        }
+
+        $stmt = $this->pdo->prepare('
+            INSERT INTO sgd_documento (
+                empresa_id, proceso_id, documento_id, tipo_documental_id, linea_documental_id,
+                consecutivo, nombre, modo, version_actual,
+                fecha_primera_aprobacion, fecha_ultima_aprobacion,
+                estado_documental, estado_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(3))
+        ');
+        $stmt->execute([
+            $empresaId,
+            $fields['proceso_id'],
+            $fields['documento_id'],
+            $fields['tipo_documental_id'],
+            $fields['linea_documental_id'],
+            $fields['consecutivo'],
+            $fields['nombre'],
+            $fields['modo'],
+            $fields['version_actual'],
+            $fields['fecha_primera_aprobacion'],
+            $fields['fecha_ultima_aprobacion'],
+            $fields['estado_documental'],
+        ]);
+
+        return (int)$this->pdo->lastInsertId();
+    }
+
+    public function softDeleteDocumento(int $empresaId, int $id, ?int $userId = null): bool
+    {
+        if (!SoftDeleteService::supports($this->pdo, 'sgd_documento')) {
+            $stmt = $this->pdo->prepare('DELETE FROM sgd_documento WHERE id = ? AND empresa_id = ?');
+
+            return $stmt->execute([$id, $empresaId]);
+        }
+
+        $stmt = $this->pdo->prepare('
+            UPDATE sgd_documento
+            SET deleted_at = NOW(3), deleted_by = ?
+            WHERE id = ? AND empresa_id = ? AND deleted_at IS NULL
+        ');
+
+        return $stmt->execute([$userId, $id, $empresaId]);
+    }
+
+    public function countDocumentoHijos(int $empresaId, int $documentoId): int
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_documento');
+        $stmt = $this->pdo->prepare("
+            SELECT COUNT(*) FROM sgd_documento
+            WHERE empresa_id = ? AND documento_id = ? {$nd}
+        ");
+        $stmt->execute([$empresaId, $documentoId]);
+
+        return (int)$stmt->fetchColumn();
+    }
+
     public function countCatalog(int $empresaId): array
     {
         $tables = [

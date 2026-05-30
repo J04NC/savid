@@ -139,7 +139,7 @@ $patronesCarpetaSugeridos = [
             <span class="crud-list-search-label">Referencia rápida — patrón documento</span>
         </div>
         <div class="crud-table-wrapper sgd-ref-table-wrap">
-            <table class="crud-table sgd-ref-table">
+            <table class="crud-table sgd-ref-table savid-datatable" data-dt-page-length="10">
                 <thead>
                     <tr>
                         <th>Placeholder</th>
@@ -179,7 +179,7 @@ $patronesCarpetaSugeridos = [
             <p class="field-note">Sin tipos aún. Cargue la plantilla o use el menú <strong>Tipos documentales</strong>.</p>
         <?php else: ?>
             <div class="crud-table-wrapper">
-                <table class="crud-table">
+                <table class="crud-table savid-datatable" data-dt-page-length="50">
                     <thead><tr><th>Código</th><th>Nombre</th><th>Modo</th></tr></thead>
                     <tbody>
                     <?php foreach ($tipos as $t): ?>

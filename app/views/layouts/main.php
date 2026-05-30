@@ -7,11 +7,20 @@ $assetRef = BASE_PATH . '/public/js/app.js';
 $cssTokens = BASE_PATH . '/public/css/tokens.css';
 $cssApp = BASE_PATH . '/public/css/app.css';
 $jsCrud = BASE_PATH . '/public/js/crud.js';
+$dtDir = BASE_PATH . '/public/vendor/datatables';
+$jqueryPath = BASE_PATH . '/public/vendor/jquery/jquery.min.js';
+$cssDtSavid = BASE_PATH . '/public/css/datatables-savid.css';
+$jsDtSavid = BASE_PATH . '/public/js/datatables-savid.js';
 $assetsV = max(
     is_readable($assetRef) ? (int)filemtime($assetRef) : time(),
     is_readable($cssTokens) ? (int)filemtime($cssTokens) : 0,
     is_readable($cssApp) ? (int)filemtime($cssApp) : 0,
+    is_readable($cssDtSavid) ? (int)filemtime($cssDtSavid) : 0,
     is_readable($jsCrud) ? (int)filemtime($jsCrud) : 0,
+    is_readable($jsDtSavid) ? (int)filemtime($jsDtSavid) : 0,
+    is_readable($dtDir . '/datatables.min.js') ? (int)filemtime($dtDir . '/datatables.min.js') : 0,
+    is_readable($dtDir . '/buttons.colVis.min.js') ? (int)filemtime($dtDir . '/buttons.colVis.min.js') : 0,
+    is_readable($jqueryPath) ? (int)filemtime($jqueryPath) : 0,
     (int)($_SESSION['asset_cache_bust'] ?? 0),
     1
 );
@@ -27,6 +36,12 @@ $assetsV = max(
 
 <link rel="stylesheet" href="/css/tokens.css?v=<?= (int)$assetsV ?>">
 <link rel="stylesheet" href="/css/app.css?v=<?= (int)$assetsV ?>">
+<link rel="stylesheet" href="/vendor/datatables/datatables.min.css?v=<?= (int)$assetsV ?>">
+<link rel="stylesheet" href="/vendor/datatables/buttons.dataTables.min.css?v=<?= (int)$assetsV ?>">
+<link rel="stylesheet" href="/vendor/datatables/colReorder.dataTables.min.css?v=<?= (int)$assetsV ?>">
+<link rel="stylesheet" href="/vendor/datatables/fixedHeader.dataTables.min.css?v=<?= (int)$assetsV ?>">
+<link rel="stylesheet" href="/vendor/datatables/responsive.dataTables.min.css?v=<?= (int)$assetsV ?>">
+<link rel="stylesheet" href="/css/datatables-savid.css?v=<?= (int)$assetsV ?>">
 
 </head>
 
@@ -168,6 +183,17 @@ url:"?url=<?php echo $item['ruta']; ?>"
 <script src="/js/app.js?v=<?= (int)$assetsV ?>"></script>
 <script src="/js/theme.js?v=<?= (int)$assetsV ?>"></script>
 <script src="/js/search.js?v=<?= (int)$assetsV ?>"></script>
+<script src="/vendor/jquery/jquery.min.js?v=<?= (int)$assetsV ?>"></script>
+<script src="/vendor/datatables/datatables.min.js?v=<?= (int)$assetsV ?>"></script>
+<script src="/vendor/datatables/jszip.min.js?v=<?= (int)$assetsV ?>"></script>
+<script src="/vendor/datatables/buttons.min.js?v=<?= (int)$assetsV ?>"></script>
+<script src="/vendor/datatables/buttons.html5.min.js?v=<?= (int)$assetsV ?>"></script>
+<script src="/vendor/datatables/buttons.print.min.js?v=<?= (int)$assetsV ?>"></script>
+<script src="/vendor/datatables/buttons.colVis.min.js?v=<?= (int)$assetsV ?>"></script>
+<script src="/vendor/datatables/colReorder.min.js?v=<?= (int)$assetsV ?>"></script>
+<script src="/vendor/datatables/fixedHeader.min.js?v=<?= (int)$assetsV ?>"></script>
+<script src="/vendor/datatables/responsive.min.js?v=<?= (int)$assetsV ?>"></script>
+<script src="/js/datatables-savid.js?v=<?= (int)$assetsV ?>"></script>
 <script src="/js/crud.js?v=<?= (int)$assetsV ?>"></script>
 <?php
 if (!empty($_SESSION['sesion_idle_minutos']) && (int)$_SESSION['sesion_idle_minutos'] > 0) {

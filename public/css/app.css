@@ -607,9 +607,22 @@ button:hover{
     align-items:center;
 }
 
-.crud-toolbar button{
+.crud-toolbar button:not(.sgd-doc-btn){
     background:#1abc9c;
     color:#fff;
+}
+
+.crud-auto-toolbar .sgd-doc-btn{
+    font-family:inherit;
+}
+
+.crud-auto-toolbar .crud-toolbar-btn-text{
+    display:inline-block;
+    max-width:10rem;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    vertical-align:bottom;
 }
 
 .crud-search{
@@ -1630,6 +1643,10 @@ body.dark-mode .crud-empresa-media-aside .crud-upload-btnrow .btn-crud-upload-cl
 .crud-table{
     overflow:auto;
     border-radius:12px;
+}
+
+.crud-table.savid-dt-host{
+    overflow:visible;
 }
 
 .crud-table table{
@@ -4962,5 +4979,194 @@ AGREGAR AL FINAL DE public/css/app.css
 
     .sgd-check-row{
         align-items:flex-start;
+    }
+}
+
+/* CRUD Documentos SGD */
+.sgd-documentos-page .sgd-doc-toolbar{
+    display:flex;
+    flex-wrap:wrap;
+    align-items:center;
+    gap:12px;
+    margin-bottom:14px;
+}
+
+.sgd-doc-toolbar-actions{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+}
+
+.sgd-doc-btn{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    padding:8px 14px;
+    border-radius:8px;
+    border:1px solid rgba(255,255,255,.12);
+    background:rgba(255,255,255,.04);
+    color:inherit;
+    text-decoration:none;
+    font-size:14px;
+    cursor:pointer;
+}
+
+.sgd-doc-btn:hover{
+    background:rgba(29,209,161,.12);
+    border-color:rgba(29,209,161,.35);
+}
+
+.sgd-doc-btn-primary{
+    background:rgba(29,209,161,.18);
+    border-color:rgba(29,209,161,.45);
+}
+
+.sgd-doc-btn-danger{
+    background:rgba(220,53,69,.15);
+    border-color:rgba(220,53,69,.4);
+}
+
+.sgd-doc-search{
+    margin-left:auto;
+}
+
+.sgd-doc-layout{
+    display:grid;
+    grid-template-columns:minmax(320px,1fr) minmax(360px,1fr);
+    gap:16px;
+    align-items:start;
+}
+
+.sgd-doc-list-panel,
+.sgd-doc-form-panel{
+    min-height:420px;
+}
+
+.sgd-doc-count{
+    font-size:13px;
+    opacity:.75;
+}
+
+.sgd-doc-table-wrap{
+    max-height:calc(100vh - 260px);
+    overflow:auto;
+}
+
+.sgd-doc-table{
+    width:100%;
+    border-collapse:collapse;
+    font-size:13px;
+}
+
+.sgd-doc-table th,
+.sgd-doc-table td{
+    padding:10px 12px;
+    border-bottom:1px solid rgba(255,255,255,.08);
+    text-align:left;
+    vertical-align:top;
+}
+
+.sgd-doc-table th{
+    position:sticky;
+    top:0;
+    background:#1a2332;
+    z-index:1;
+    font-weight:600;
+    font-size:12px;
+    text-transform:uppercase;
+    letter-spacing:.03em;
+}
+
+.light-mode .sgd-doc-table th{
+    background:#f1f5f9;
+}
+
+.sgd-doc-row.is-active{
+    background:rgba(29,209,161,.1);
+}
+
+.sgd-doc-code-link{
+    color:#1dd1a1;
+    text-decoration:none;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+    font-weight:600;
+}
+
+.sgd-doc-code-link:hover{
+    text-decoration:underline;
+}
+
+.sgd-doc-badge{
+    display:inline-block;
+    padding:2px 8px;
+    border-radius:999px;
+    background:rgba(255,255,255,.08);
+    font-size:11px;
+    font-weight:600;
+}
+
+.sgd-doc-empty{
+    text-align:center;
+    opacity:.7;
+    padding:24px;
+}
+
+.sgd-doc-code-preview{
+    margin:0 0 16px;
+    padding:14px 16px;
+    border-radius:10px;
+    border:1px solid rgba(29,209,161,.35);
+    background:linear-gradient(135deg,rgba(29,209,161,.08),rgba(29,209,161,.02));
+}
+
+.sgd-doc-code-preview-label{
+    display:block;
+    font-size:12px;
+    text-transform:uppercase;
+    letter-spacing:.04em;
+    opacity:.75;
+    margin-bottom:6px;
+}
+
+.sgd-doc-code-preview-value{
+    display:block;
+    font-size:22px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+    color:#1dd1a1;
+    word-break:break-all;
+}
+
+.sgd-doc-code-note{
+    margin:8px 0 0;
+}
+
+.sgd-doc-form{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:12px 14px;
+}
+
+.sgd-doc-form .crud-form-field-full{
+    grid-column:1 / -1;
+}
+
+.sgd-doc-fieldset{
+    border:0;
+    margin:0;
+    padding:0;
+    display:contents;
+}
+
+@media(max-width:960px){
+    .sgd-doc-layout{
+        grid-template-columns:1fr;
+    }
+
+    .sgd-doc-table-wrap{
+        max-height:320px;
+    }
+
+    .sgd-doc-form{
+        grid-template-columns:1fr;
     }
 }

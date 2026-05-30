@@ -1350,59 +1350,68 @@ function crudFillFormFromUsuarioRow(row, form) {
     return true;
 }
 
+function handleCrudRowClick(row) {
+
+    document.querySelectorAll(".crud-row.selected").forEach(function (r) {
+        r.classList.remove("selected");
+    });
+
+    row.classList.add("selected");
+
+    selectedRow = row;
+    selectedId = row.dataset.id || "";
+
+    const form = document.querySelector("form[data-crud-context]");
+    const hiddenId = form
+        ? form.querySelector("#crud_id") || form.querySelector('[name="id"]')
+        : document.getElementById("crud_id");
+    if (hiddenId) hiddenId.value = selectedId;
+
+    if (!form) return;
+
+    const ctx = form.getAttribute("data-crud-context") || "";
+
+    if (ctx === "empresa" && crudFillFormFromEmpresaRow(row, form)) {
+        return;
+    }
+
+    if (ctx === "usuario" && crudFillFormFromUsuarioRow(row, form)) {
+        document.dispatchEvent(
+            new CustomEvent("crud-usuario-row-filled", { detail: { row: row, form: form } })
+        );
+        return;
+    }
+
+    row.querySelectorAll("td[data-field]").forEach(function (cell) {
+
+        const field = cell.dataset.field;
+        const displayLabel = cell.innerText.trim();
+        const value = cell.dataset.value ?? displayLabel;
+
+        crudSetFieldValue(form, field, value, displayLabel);
+
+    });
+
+    const zf = document.querySelector("form[data-crud-zona-ubicacion-toggle]");
+    if (zf) {
+        crudZonaUbicacionApplyFromForm(zf);
+    }
+}
+
 function initCrudRows() {
 
-    document.querySelectorAll(".crud-row").forEach(row => {
-
-        row.addEventListener("click", function () {
-
-            document.querySelectorAll(".crud-row").forEach(r => {
-                r.classList.remove("selected");
-            });
-
-            this.classList.add("selected");
-
-            selectedRow = this;
-            selectedId = this.dataset.id || "";
-
-            const form = document.querySelector("form[data-crud-context]");
-            const hiddenId = form
-                ? form.querySelector("#crud_id") || form.querySelector('[name="id"]')
-                : document.getElementById("crud_id");
-            if (hiddenId) hiddenId.value = selectedId;
-
-            if (!form) return;
-
-            const ctx = form.getAttribute("data-crud-context") || "";
-
-            if (ctx === "empresa" && crudFillFormFromEmpresaRow(this, form)) {
+    document.querySelectorAll(".crud-table").forEach(function (wrap) {
+        if (wrap.dataset.crudRowsBound === "1") {
+            return;
+        }
+        wrap.dataset.crudRowsBound = "1";
+        wrap.addEventListener("click", function (e) {
+            const row = e.target.closest("tr.crud-row");
+            if (!row || !wrap.contains(row)) {
                 return;
             }
-
-            if (ctx === "usuario" && crudFillFormFromUsuarioRow(this, form)) {
-                document.dispatchEvent(
-                    new CustomEvent("crud-usuario-row-filled", { detail: { row: this, form: form } })
-                );
-                return;
-            }
-
-            this.querySelectorAll("td[data-field]").forEach(cell => {
-
-                const field = cell.dataset.field;
-                const displayLabel = cell.innerText.trim();
-                const value = cell.dataset.value ?? displayLabel;
-
-                crudSetFieldValue(form, field, value, displayLabel);
-
-            });
-
-            const zf = document.querySelector("form[data-crud-zona-ubicacion-toggle]");
-            if (zf) {
-                crudZonaUbicacionApplyFromForm(zf);
-            }
-
+            handleCrudRowClick(row);
         });
-
     });
 
 }
@@ -1904,9 +1913,13 @@ function initCrudCatalog() {
 
 function initCrudSearch() {
 
-    const search = document.querySelector(".crud-search");
+    const search = document.querySelector(".crud-search:not(.savid-dt-col-filter)");
 
     if (!search) return;
+
+    if (document.querySelector("table.savid-datatable[data-savid-dt-init='1'], table[data-savid-dt-init='1']")) {
+        return;
+    }
 
     search.addEventListener("keyup", function () {
 

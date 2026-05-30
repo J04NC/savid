@@ -56,7 +56,7 @@ document.addEventListener("DOMContentLoaded", function () {
     </div>
 
     <div class="role-table-wrap">
-        <table class="role-table role-table-perms">
+        <table class="role-table role-table-perms savid-datatable" data-dt-paging="false">
             <thead>
                 <tr>
                     <th class="sticky-todo th-todo">TODO</th>
@@ -193,7 +193,7 @@ function renderMatriz(data) {
                 <span class="role-counter">${nItems} ITEMS · ${nAcc} ACCIONES</span>
             </div>
             <div class="role-table-wrap">
-                <table class="role-table role-table-perms">
+                <table class="role-table role-table-perms savid-datatable" data-dt-paging="false">
                     <thead><tr>
                         <th class="sticky-todo th-todo">TODO</th>
                         <th class="sticky-left">ITEM</th>`;

@@ -60,28 +60,29 @@
         document.body.classList.remove('modal-open');
     }
 
-    document.querySelectorAll('.btn-auditoria-detalle').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-            const id = btn.getAttribute('data-id');
-            const archivo = btn.getAttribute('data-archivo') === '1' ? '&archivo=1' : '';
-            if (!body) return;
+    document.addEventListener('click', function (e) {
+        var btn = e.target.closest('.btn-auditoria-detalle');
+        if (!btn) return;
 
-            body.innerHTML = '<p class="auditoria-loading">Cargando…</p>';
-            openModal();
+        var id = btn.getAttribute('data-id');
+        var archivo = btn.getAttribute('data-archivo') === '1' ? '&archivo=1' : '';
+        if (!body) return;
 
-            fetch('?url=auditoria/detalle&id=' + encodeURIComponent(id) + archivo, { credentials: 'same-origin' })
-                .then(function (r) { return r.json(); })
-                .then(function (j) {
-                    if (!j.ok) {
-                        body.innerHTML = '<p class="auditoria-error">' + esc(j.error || 'Error') + '</p>';
-                        return;
-                    }
-                    body.innerHTML = renderDetail(j.data);
-                })
-                .catch(function () {
-                    body.innerHTML = '<p class="auditoria-error">No se pudo cargar el detalle.</p>';
-                });
-        });
+        body.innerHTML = '<p class="auditoria-loading">Cargando…</p>';
+        openModal();
+
+        fetch('?url=auditoria/detalle&id=' + encodeURIComponent(id) + archivo, { credentials: 'same-origin' })
+            .then(function (r) { return r.json(); })
+            .then(function (j) {
+                if (!j.ok) {
+                    body.innerHTML = '<p class="auditoria-error">' + esc(j.error || 'Error') + '</p>';
+                    return;
+                }
+                body.innerHTML = renderDetail(j.data);
+            })
+            .catch(function () {
+                body.innerHTML = '<p class="auditoria-error">No se pudo cargar el detalle.</p>';
+            });
     });
 
     ['auditoriaModalClose', 'auditoriaModalCloseBtn'].forEach(function (id) {
@@ -99,15 +100,7 @@
         });
     }
 
-    if (searchInput && tableBody) {
-        searchInput.addEventListener('input', function () {
-            const q = searchInput.value.trim().toLowerCase();
-            tableBody.querySelectorAll('.auditoria-row').forEach(function (row) {
-                const hay = (row.getAttribute('data-search') || '').toLowerCase();
-                row.style.display = !q || hay.indexOf(q) !== -1 ? '' : 'none';
-            });
-        });
-    }
+    /* Búsqueda en página: la gestiona DataTables (datatables-savid.js) */
 
     const btnArch = document.getElementById('btnArchivarAuditoria');
     if (btnArch) {

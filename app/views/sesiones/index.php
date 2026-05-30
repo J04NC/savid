@@ -130,7 +130,7 @@ $sesionesJsV = is_readable($assetSesiones) ? (int)filemtime($assetSesiones) : ti
         </div>
     </form>
 
-    <div class="crud-list-search auditoria-list-meta">
+    <div class="crud-list-search auditoria-list-meta savid-dt-legacy-search">
         <label class="crud-list-search-label" for="sesionesTableSearch">Buscar en página</label>
         <input type="search" id="sesionesTableSearch" class="crud-search" placeholder="Filtrar filas visibles…" autocomplete="off">
         <span class="auditoria-meta-pill">
@@ -139,8 +139,8 @@ $sesionesJsV = is_readable($assetSesiones) ? (int)filemtime($assetSesiones) : ti
         </span>
     </div>
 
-    <div class="crud-table auditoria-table-wrap">
-        <table class="auditoria-table sesiones-table">
+    <div class="crud-table auditoria-table-wrap savid-dt-host">
+        <table class="auditoria-table sesiones-table savid-datatable" data-dt-paging="false">
             <thead>
                 <tr>
                     <th>Estado</th>

@@ -1,0 +1,401 @@
+/* ============================================================
+   SAVID × DataTables 2 — skin avanzado (dark / light)
+============================================================ */
+
+.savid-dt-ready{
+    outline:2px solid rgba(29,209,161,.25);
+    outline-offset:2px;
+}
+
+.savid-dt-shell{
+    border-radius:12px;
+    overflow-x:auto;
+    overflow-y:visible;
+    border:1px solid rgba(255,255,255,.08);
+    background:rgba(0,0,0,.12);
+    margin-top:8px;
+}
+
+.module-container:has(table.savid-dt-active) .crud-list-search.savid-dt-legacy-search{
+    display:none !important;
+}
+
+.light-mode .savid-dt-shell{
+    background:#fff;
+    border-color:#e2e8f0;
+}
+
+.savid-dt-shell,
+.savid-dt-shell .dataTables_wrapper,
+.savid-dt-shell .dt-container{
+    padding:12px 14px 10px;
+    font-size:13px;
+}
+
+.savid-dt-shell .dataTables_wrapper,
+.savid-dt-shell .dt-container{
+    min-width:0;
+}
+
+/* Barras generadas con dom (B=botones, l=mostrar, f=buscar, i=info, p=paginación) */
+.savid-dt-bar-top,
+.savid-dt-bar-top2,
+.savid-dt-bar-bottom,
+.savid-dt-shell .dataTables_wrapper .dataTables_length,
+.savid-dt-shell .dataTables_wrapper .dataTables_filter,
+.savid-dt-shell .dataTables_wrapper .dataTables_info,
+.savid-dt-shell .dataTables_wrapper .dataTables_paginate,
+.savid-dt-shell .dt-length,
+.savid-dt-shell .dt-search,
+.savid-dt-shell .dt-info,
+.savid-dt-shell .dt-paging{
+    margin:0 0 10px;
+}
+
+.savid-dt-bar-top{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    align-items:center;
+}
+
+.savid-dt-bar-top2{
+    display:flex;
+    flex-wrap:wrap;
+    gap:16px;
+    align-items:center;
+    justify-content:space-between;
+}
+
+.savid-dt-bar-bottom{
+    display:flex;
+    flex-wrap:wrap;
+    gap:12px;
+    align-items:center;
+    justify-content:space-between;
+    margin-top:12px;
+    padding-top:10px;
+    border-top:1px solid rgba(255,255,255,.08);
+}
+
+.light-mode .savid-dt-bar-bottom{
+    border-top-color:#e2e8f0;
+}
+
+.savid-dt-shell .dataTables_wrapper .dataTables_length,
+.savid-dt-shell .dataTables_wrapper .dataTables_filter,
+.savid-dt-shell .dt-length,
+.savid-dt-shell .dt-search{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-size:13px;
+}
+
+.savid-dt-shell .dataTables_wrapper .dataTables_length select,
+.savid-dt-shell .dataTables_wrapper .dataTables_filter input,
+.savid-dt-shell .dataTables_wrapper .dataTables_filter label,
+.savid-dt-shell .dt-length select,
+.savid-dt-shell .dt-search input{
+    min-height:36px;
+    padding:6px 10px;
+    border-radius:8px;
+    border:1px solid rgba(255,255,255,.14);
+    background:rgba(255,255,255,.04);
+    color:inherit;
+    font-size:13px;
+}
+
+.light-mode .savid-dt-shell .dataTables_wrapper .dataTables_length select,
+.light-mode .savid-dt-shell .dataTables_wrapper .dataTables_filter input,
+.light-mode .savid-dt-shell .dt-length select,
+.light-mode .savid-dt-shell .dt-search input{
+    background:#fff;
+    border-color:#cbd5e1;
+}
+
+.savid-dt-shell .dataTables_wrapper .dataTables_filter input,
+.savid-dt-shell .dt-search input{
+    min-width:220px;
+}
+
+.savid-dt-shell .dataTables_wrapper .dataTables_info,
+.savid-dt-shell .dt-info{
+    font-size:12px;
+    opacity:.85;
+    margin-bottom:0;
+}
+
+.savid-dt-shell .dataTables_wrapper .dataTables_paginate,
+.savid-dt-shell .dt-paging{
+    display:flex;
+    flex-wrap:wrap;
+    gap:4px;
+    margin-bottom:0;
+}
+
+.savid-dt-shell .dataTables_wrapper .dataTables_paginate .paginate_button,
+.savid-dt-shell .dataTables_wrapper .dataTables_paginate .paginate_button.current,
+.savid-dt-shell .dt-paging .dt-paging-button{
+    min-width:34px;
+    min-height:34px;
+    padding:0 10px !important;
+    margin:0 !important;
+    border-radius:8px !important;
+    border:1px solid rgba(255,255,255,.12) !important;
+    background:rgba(255,255,255,.04) !important;
+    color:inherit !important;
+    cursor:pointer;
+}
+
+.savid-dt-shell .dataTables_wrapper .dataTables_paginate .paginate_button.current,
+.savid-dt-shell .dt-paging .dt-paging-button.current{
+    background:rgba(29,209,161,.25) !important;
+    border-color:rgba(29,209,161,.5) !important;
+    font-weight:700;
+}
+
+.savid-dt-shell .dataTables_wrapper .dataTables_paginate .paginate_button.disabled,
+.savid-dt-shell .dt-paging .dt-paging-button.disabled{
+    opacity:.35;
+    cursor:default;
+}
+
+.savid-dt-shell .dataTables_wrapper .dt-buttons,
+.savid-dt-shell .dt-buttons{
+    display:flex !important;
+    flex-wrap:wrap;
+    gap:6px;
+    margin-bottom:10px;
+}
+
+.savid-dt-shell .dt-layout-row{
+    display:flex;
+    flex-wrap:wrap;
+    align-items:center;
+    gap:10px 14px;
+    margin-bottom:10px;
+}
+
+.savid-dt-shell .dt-layout-row:last-child{
+    margin-bottom:0;
+    margin-top:10px;
+}
+
+.savid-dt-shell .dt-length label,
+.savid-dt-shell .dt-search label{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    font-size:13px;
+    opacity:.85;
+}
+
+.savid-dt-shell .dt-length select,
+.savid-dt-shell .dt-search input{
+    min-height:36px;
+    padding:6px 10px;
+    border-radius:8px;
+    border:1px solid rgba(255,255,255,.14);
+    background:rgba(255,255,255,.04);
+    color:inherit;
+    font-size:13px;
+}
+
+.light-mode .savid-dt-shell .dt-length select,
+.light-mode .savid-dt-shell .dt-search input{
+    background:#fff;
+    border-color:#cbd5e1;
+}
+
+.savid-dt-shell .dt-search input{
+    min-width:220px;
+}
+
+.savid-dt-shell .dt-buttons{
+    display:flex;
+    flex-wrap:wrap;
+    gap:6px;
+}
+
+.savid-dt-btn,
+.savid-dt-shell .dt-button{
+    display:inline-flex !important;
+    align-items:center;
+    gap:6px;
+    padding:7px 12px !important;
+    border-radius:8px !important;
+    border:1px solid rgba(29,209,161,.35) !important;
+    background:rgba(29,209,161,.12) !important;
+    color:inherit !important;
+    font-size:12px !important;
+    font-weight:600 !important;
+    cursor:pointer;
+    transition:.15s ease;
+}
+
+.savid-dt-btn:hover,
+.savid-dt-shell .dt-button:hover{
+    background:rgba(29,209,161,.22) !important;
+    border-color:rgba(29,209,161,.55) !important;
+}
+
+.savid-dt-shell table.dataTable{
+    width:100% !important;
+    border-collapse:collapse;
+    margin:0 !important;
+    min-width:max-content;
+}
+
+.savid-dt-shell table.dataTable thead th{
+    position:relative;
+    padding:10px 12px;
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:.04em;
+    font-weight:700;
+    border-bottom:1px solid rgba(255,255,255,.1);
+    white-space:nowrap;
+}
+
+.dark-mode .savid-dt-shell table.dataTable thead th{
+    background:#1a2332;
+}
+
+.light-mode .savid-dt-shell table.dataTable thead th{
+    background:#f1f5f9;
+    color:#0f172a;
+}
+
+.savid-dt-shell table.dataTable tbody td{
+    padding:9px 12px;
+    border-bottom:1px solid rgba(255,255,255,.06);
+    vertical-align:middle;
+}
+
+.light-mode .savid-dt-shell table.dataTable tbody td{
+    border-bottom-color:#e2e8f0;
+}
+
+.savid-dt-shell table.dataTable tbody tr:hover{
+    background:rgba(29,209,161,.06);
+}
+
+.savid-dt-shell table.dataTable tbody tr.selected,
+.savid-dt-shell table.dataTable tbody tr.crud-row.selected{
+    background:rgba(29,209,161,.16) !important;
+}
+
+.savid-dt-filters th{
+    padding:6px 8px !important;
+    background:rgba(0,0,0,.15) !important;
+    border-bottom:1px solid rgba(255,255,255,.08) !important;
+}
+
+.light-mode .savid-dt-filters th{
+    background:#f8fafc !important;
+}
+
+.savid-dt-col-filter{
+    width:100%;
+    min-width:0;
+    max-width:100%;
+    min-height:32px !important;
+    padding:4px 8px !important;
+    font-size:12px !important;
+}
+
+.savid-dt-shell .dt-info{
+    font-size:12px;
+    opacity:.8;
+}
+
+.savid-dt-shell .dt-paging{
+    display:flex;
+    gap:4px;
+    flex-wrap:wrap;
+}
+
+.savid-dt-shell .dt-paging .dt-paging-button{
+    min-width:34px;
+    min-height:34px;
+    padding:0 10px;
+    border-radius:8px;
+    border:1px solid rgba(255,255,255,.12);
+    background:rgba(255,255,255,.04);
+    color:inherit;
+    cursor:pointer;
+}
+
+.savid-dt-shell .dt-paging .dt-paging-button.current{
+    background:rgba(29,209,161,.25);
+    border-color:rgba(29,209,161,.5);
+    font-weight:700;
+}
+
+.savid-dt-shell .dt-paging .dt-paging-button.disabled{
+    opacity:.35;
+    cursor:default;
+}
+
+/* Integración con tablas CRUD existentes */
+.crud-table.savid-dt-host{
+    overflow:visible;
+    border-radius:0;
+}
+
+.crud-table .savid-dt-shell{
+    margin-top:4px;
+}
+
+/* Responsive child rows */
+table.dataTable.dtr-inline.collapsed > tbody > tr > td.dtr-control{
+    cursor:pointer;
+}
+
+table.dataTable.dtr-inline.collapsed > tbody > tr > td.dtr-control:before{
+    color:#1dd1a1;
+}
+
+/* ColVis dropdown */
+div.dt-button-background{
+    background:rgba(0,0,0,.45);
+}
+
+div.dt-button-collection{
+    border-radius:10px;
+    border:1px solid rgba(255,255,255,.12);
+    background:#1e293b;
+    padding:8px;
+    box-shadow:0 12px 40px rgba(0,0,0,.35);
+}
+
+.light-mode div.dt-button-collection{
+    background:#fff;
+    border-color:#e2e8f0;
+}
+
+div.dt-button-collection button.dt-button{
+    width:100%;
+    text-align:left;
+    border-radius:6px !important;
+    margin:2px 0 !important;
+}
+
+@media(max-width:768px){
+    .savid-dt-shell .dt-layout-row{
+        flex-direction:column;
+        align-items:stretch;
+    }
+
+    .savid-dt-shell .dt-search input{
+        width:100%;
+        min-width:0;
+    }
+}
+
+/* Scroll vertical solo con muchas filas (50+); horizontal siempre si desbordan columnas */
+.savid-dt-shell.savid-dt-scrollable{
+    max-height:calc(100vh - 240px);
+    overflow-y:auto;
+}

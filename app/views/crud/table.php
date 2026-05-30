@@ -159,9 +159,9 @@ foreach ($relationData as $campoRel => $options) {
 <input type="hidden" name="representante_terceroidentificacion_id" id="empresa_rep_terceroidentificacion_id" value="<?= htmlspecialchars((string)($old['representante_terceroidentificacion_id'] ?? ''), ENT_QUOTES, 'UTF-8') ?>">
 <?php endif; ?>
 
-<div class="crud-toolbar">
+<div class="crud-toolbar crud-auto-toolbar">
 
-<div>
+<div class="crud-toolbar-actions sgd-doc-toolbar-actions">
 
 <?php
 $canNuevo = false;
@@ -198,20 +198,16 @@ if ($crudContextTable === 'item') {
 ?>
 
 <?php if($canNuevo): ?>
-<button type="button" id="btnNuevo">➕</button>
+<button type="button" id="btnNuevo" class="sgd-doc-btn" title="Limpiar formulario">➕ <span class="crud-toolbar-btn-text">Limpiar</span></button>
 <?php endif; ?>
 
 <?php if($canGuardar): ?>
-<button type="submit">💾</button>
+<button type="submit" class="sgd-doc-btn sgd-doc-btn-primary" title="Guardar">💾 <span class="crud-toolbar-btn-text">Guardar</span></button>
 <?php endif; ?>
 
 <?php if($canEliminar): ?>
-<button type="button" class="btn-delete">🗑</button>
+<button type="button" class="btn-delete sgd-doc-btn sgd-doc-btn-danger" title="Eliminar">🗑 <span class="crud-toolbar-btn-text">Eliminar</span></button>
 <?php endif; ?>
-
-</div>
-
-<div style="margin-left:auto; display:flex; gap:10px;">
 
 <?php foreach($acciones as $accion): ?>
 
@@ -219,12 +215,22 @@ if ($crudContextTable === 'item') {
     !in_array($accion['codigo'],['ver','limpiar','guardar','eliminar']) &&
     PermisoService::canByItemAccion($accion['item_accion_id'])
 ): ?>
+<?php
+$accionNombre = trim((string)($accion['nombre'] ?? ''));
+if ($accionNombre === '') {
+    $accionNombre = ucfirst((string)($accion['codigo'] ?? 'Acción'));
+}
+$accionIcono = trim((string)($accion['icono'] ?? ''));
+if ($accionIcono === '') {
+    $accionIcono = '⚙️';
+}
+?>
 
-<button type="button" 
-class="btn-accion"
-data-accion="<?= $accion['accion_codigo'] ?>"
-title="<?= $accion['nombre'] ?>">
-<?= $accion['icono'] ?: '⚙️' ?>
+<button type="button"
+class="btn-accion sgd-doc-btn"
+data-accion="<?= htmlspecialchars((string)$accion['accion_codigo'], ENT_QUOTES, 'UTF-8') ?>"
+title="<?= htmlspecialchars($accionNombre, ENT_QUOTES, 'UTF-8') ?>">
+<?= $accionIcono ?> <span class="crud-toolbar-btn-text"><?= htmlspecialchars($accionNombre, ENT_QUOTES, 'UTF-8') ?></span>
 </button>
 
 <?php endif; ?>
@@ -664,12 +670,7 @@ if ($crudContextTable === 'empresa') {
 
 </form>
 
-<div class="crud-list-search">
-<label class="crud-list-search-label" for="crudTableSearch">Buscar</label>
-<input type="search" id="crudTableSearch" placeholder="Buscar en el listado…" class="crud-search" autocomplete="off">
-</div>
-
-<div class="crud-table">
+<div class="crud-table savid-dt-host">
 
 <?php
 // =========================
@@ -684,7 +685,7 @@ foreach($relationData as $campoRel => $options){
 }
 ?>
 
-<table>
+<table class="savid-datatable savid-datatable-crud">
 
 <thead>
 <tr>

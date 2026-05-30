@@ -6,6 +6,7 @@ class SgdController
     private SgdScopeService $scope;
     private SgdConfigService $configService;
     private SgdImportService $importService;
+    private SgdDocumentoService $documentoService;
 
     public function __construct()
     {
@@ -13,6 +14,7 @@ class SgdController
         $this->scope = new SgdScopeService();
         $this->configService = new SgdConfigService();
         $this->importService = new SgdImportService();
+        $this->documentoService = new SgdDocumentoService();
     }
 
     public function index(): void
@@ -176,6 +178,65 @@ class SgdController
         }
         $_SESSION['flash_notice'] = $msg;
         header('Location: ?url=sgd/importar' . $this->empresaQuery());
+
+        exit;
+    }
+
+    public function documentos(): void
+    {
+        if (!PermisoService::can('sgd/documentos', 'ver')) {
+            $this->deny();
+        }
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $this->handleDocumentosPost();
+
+            return;
+        }
+
+        $page = $this->documentoService->getPageData($_GET);
+        $scope = $page['scope'];
+        $empresaId = $page['empresaId'];
+        $documentos = $page['documentos'];
+        $total = $page['total'];
+        $search = $page['search'];
+        $edit = $page['edit'];
+        $catalogos = $page['catalogos'];
+        $catalogosJson = $page['catalogosJson'];
+        $breadcrumb = $this->moduleService->buildBreadcrumbForRuta('sgd/documentos');
+        $canGuardar = PermisoService::can('sgd/documentos', 'guardar');
+        $canEliminar = PermisoService::can('sgd/documentos', 'eliminar');
+
+        $view = BASE_PATH . '/app/views/sgd/documentos.php';
+        require BASE_PATH . '/app/views/layouts/main.php';
+    }
+
+    private function handleDocumentosPost(): void
+    {
+        $action = trim((string)($_POST['_action'] ?? 'save'));
+
+        if ($action === 'delete') {
+            if (!PermisoService::can('sgd/documentos', 'eliminar')) {
+                $this->deny();
+            }
+            $result = $this->documentoService->delete($_GET, $_POST);
+            $_SESSION['flash_notice'] = $result['message'];
+            header('Location: ?url=sgd/documentos' . $this->empresaQuery());
+
+            exit;
+        }
+
+        if (!PermisoService::can('sgd/documentos', 'guardar')) {
+            $this->deny();
+        }
+
+        $result = $this->documentoService->save($_POST, $_GET);
+        $_SESSION['flash_notice'] = $result['message'];
+        $q = $this->empresaQuery();
+        if (!empty($result['id'])) {
+            $q .= ($q === '' ? '&' : '&') . 'id=' . (int)$result['id'];
+        }
+        header('Location: ?url=sgd/documentos' . $q);
 
         exit;
     }

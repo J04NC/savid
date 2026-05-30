@@ -40,8 +40,8 @@ $renderSedeOptions = static function (?int $empresaId, array $sedesPorEmpresa, $
         <p class="modal-form-alert">No hay empresas asociadas a este usuario. Asigne empresas en <strong>Empresa / sede</strong> o use un administrador global para alcance global.</p>
     <?php else: ?>
 
-    <div class="crud-table">
-        <table>
+    <div class="crud-table savid-dt-host">
+        <table class="savid-datatable">
             <thead>
                 <tr>
                     <th>Rol</th>
