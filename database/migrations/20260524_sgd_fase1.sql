@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS `sgd_proceso` (
     `empresa_id` INT UNSIGNED NOT NULL,
     `codigo` VARCHAR(32) NOT NULL COMMENT 'Prefijo proceso|rel:sgd_proceso|label:codigo',
     `nombre` VARCHAR(255) NOT NULL,
-    `tipo_proceso` VARCHAR(64) NULL COMMENT 'Estratégico, misional, apoyo…',
+    `tipoproceso_id` TINYINT UNSIGNED NULL COMMENT 'rel:tipoproceso|label:nombre|title:Tipo de proceso (estratégico, misional, apoyo)',
     `orden` INT NOT NULL DEFAULT 0,
     `estado_id` INT UNSIGNED NOT NULL DEFAULT 1,
     `created_at` DATETIME(3) NULL DEFAULT NULL,
@@ -134,8 +134,7 @@ CREATE TABLE IF NOT EXISTS `sgd_documento` (
     `version_actual` VARCHAR(32) NULL,
     `fecha_primera_aprobacion` DATE NULL,
     `fecha_ultima_aprobacion` DATE NULL,
-    `estado_documental` VARCHAR(32) NOT NULL DEFAULT 'vigente',
-    `estado_id` INT UNSIGNED NOT NULL DEFAULT 1,
+    `estado_id` SMALLINT UNSIGNED NOT NULL DEFAULT 8 COMMENT 'label:Estado documental|reltipo:DOCUMENTAL|title:Ciclo de vida del documento.',
     `created_at` DATETIME(3) NULL DEFAULT NULL,
     `created_by` INT UNSIGNED NULL,
     `updated_at` DATETIME(3) NULL DEFAULT NULL,
@@ -233,6 +232,10 @@ SELECT @mod_sgd_id, 'Importar datos', 'sgd/importar', '📥', 30, @item_sgd_id, 
 WHERE @mod_sgd_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM item WHERE ruta = 'sgd/importar' LIMIT 1);
 
 INSERT INTO item (modulo_id, nombre, ruta, icono, orden, item_padre_id, estado_id)
+SELECT @mod_sgd_id, 'Tipos de proceso', 'tipoproceso', '🏷️', 35, @item_sgd_id, 1
+WHERE @mod_sgd_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM item WHERE ruta = 'tipoproceso' LIMIT 1);
+
+INSERT INTO item (modulo_id, nombre, ruta, icono, orden, item_padre_id, estado_id)
 SELECT @mod_sgd_id, 'Procesos', 'sgd_proceso', '🗂️', 40, @item_sgd_id, 1
 WHERE @mod_sgd_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM item WHERE ruta = 'sgd_proceso' LIMIT 1);
 
@@ -275,7 +278,7 @@ FROM item i
 CROSS JOIN accion a
 WHERE i.ruta IN (
     'sgd', 'sgd/config', 'sgd/importar',
-    'sgd_proceso', 'sgd_tipo_documental', 'sgd_dependencia',
+    'tipoproceso', 'sgd_proceso', 'sgd_tipo_documental', 'sgd_dependencia',
     'sgd_serie', 'sgd_subserie', 'sgd_documento', 'sgd_ccd_entrada'
 )
   AND a.codigo IN ('ver', 'guardar', 'eliminar')
@@ -310,7 +313,7 @@ FROM item_accion ia
 INNER JOIN item i ON i.id = ia.item_id
 WHERE i.ruta IN (
     'sgd', 'sgd/config', 'sgd/importar',
-    'sgd_proceso', 'sgd_tipo_documental', 'sgd_dependencia',
+    'tipoproceso', 'sgd_proceso', 'sgd_tipo_documental', 'sgd_dependencia',
     'sgd_serie', 'sgd_subserie', 'sgd_documento', 'sgd_ccd_entrada'
 )
   AND NOT EXISTS (

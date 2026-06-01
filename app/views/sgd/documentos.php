@@ -7,6 +7,7 @@
 /** @var array<string, mixed>|null $edit */
 /** @var array<string, list<array<string, mixed>>> $catalogos */
 /** @var string $catalogosJson */
+/** @var int $selectedGridId */
 /** @var bool $canGuardar */
 /** @var bool $canEliminar */
 
@@ -25,9 +26,11 @@ $form = $edit ?? [
     'version_actual' => '',
     'fecha_primera_aprobacion' => '',
     'fecha_ultima_aprobacion' => '',
-    'estado_documental' => 'vigente',
+    'estado_id' => (string)SgdRepository::ESTADO_DOC_VIGENTE,
     'codigo_display' => '',
 ];
+
+$estadosDocumentales = $catalogos['estadosDocumentales'] ?? [];
 
 $empresaQuery = $empresaId ? '&empresa_id=' . (int)$empresaId : '';
 $listUrl = '?url=sgd/documentos' . $empresaQuery;
@@ -46,7 +49,7 @@ $formatOption = static function (string $codigo, string $nombre): string {
 
         <div class="crud-toolbar sgd-doc-toolbar">
             <div class="sgd-doc-toolbar-actions">
-                <a href="<?= htmlspecialchars($listUrl, ENT_QUOTES, 'UTF-8') ?>" class="sgd-doc-btn" title="Nuevo documento">➕ Nuevo</a>
+                <a href="<?= htmlspecialchars($listUrl, ENT_QUOTES, 'UTF-8') ?>" id="sgd-doc-btn-nuevo" class="sgd-doc-btn" title="Nuevo documento">➕ Nuevo</a>
                 <?php if ($canGuardar): ?>
                     <button type="submit" form="sgd-doc-form" class="sgd-doc-btn sgd-doc-btn-primary" title="Guardar">💾 Guardar</button>
                 <?php endif; ?>
@@ -54,19 +57,6 @@ $formatOption = static function (string $codigo, string $nombre): string {
                     <button type="submit" form="sgd-doc-delete-form" class="sgd-doc-btn sgd-doc-btn-danger" title="Eliminar">🗑 Eliminar</button>
                 <?php endif; ?>
             </div>
-            <form method="get" class="crud-list-search sgd-doc-search">
-                <input type="hidden" name="url" value="sgd/documentos">
-                <input type="hidden" name="empresa_id" value="<?= (int)$empresaId ?>">
-                <label for="sgd_doc_q" class="crud-list-search-label">Buscar</label>
-                <input
-                    type="search"
-                    id="sgd_doc_q"
-                    name="q"
-                    class="form-input crud-search"
-                    value="<?= htmlspecialchars($search, ENT_QUOTES, 'UTF-8') ?>"
-                    placeholder="Código, nombre, proceso, tipo…"
-                >
-            </form>
         </div>
 
         <div class="sgd-doc-layout">
@@ -98,8 +88,17 @@ $formatOption = static function (string $codigo, string $nombre): string {
                                         $rowUrl .= '&q=' . urlencode($search);
                                     }
                                     $isActive = (int)($form['id'] ?? 0) === (int)$doc['id'];
+                                    $isGridSelected = $selectedGridId > 0 && $selectedGridId === (int)$doc['id'];
                                     ?>
-                                    <tr class="sgd-doc-row<?= $isActive ? ' is-active' : '' ?>">
+                                    <tr
+                                        class="sgd-doc-row<?= $isActive || $isGridSelected ? ' is-active' : '' ?>"
+                                        data-doc-id="<?= (int)$doc['id'] ?>"
+                                        data-proceso-id="<?= (int)($doc['proceso_id'] ?? 0) ?>"
+                                        data-tipo-id="<?= (int)($doc['tipo_documental_id'] ?? 0) ?>"
+                                        tabindex="0"
+                                        role="button"
+                                        aria-label="Seleccionar como documento padre"
+                                    >
                                         <td>
                                             <a href="<?= htmlspecialchars($rowUrl, ENT_QUOTES, 'UTF-8') ?>" class="sgd-doc-code-link">
                                                 <?= htmlspecialchars((string)($doc['codigo_display'] ?? ''), ENT_QUOTES, 'UTF-8') ?>
@@ -131,7 +130,7 @@ $formatOption = static function (string $codigo, string $nombre): string {
                         <?= htmlspecialchars((string)($form['codigo_display'] ?? '—'), ENT_QUOTES, 'UTF-8') ?>
                     </strong>
                     <p class="field-note sgd-doc-code-note" id="sgd-doc-code-note">
-                        Se compone con proceso, tipo, línea (TA), documento padre y consecutivo.
+                        Se compone con proceso, tipo, línea documental (opcional), documento padre y consecutivo.
                     </p>
                 </div>
 
@@ -180,7 +179,7 @@ $formatOption = static function (string $codigo, string $nombre): string {
                                 ><?= $formatOption((string)$l['codigo'], (string)$l['nombre']) ?></option>
                             <?php endforeach; ?>
                         </select>
-                        <p class="field-note">Obligatoria para tipo <strong>TA</strong> cuando el documento es raíz (sin padre).</p>
+                        <p class="field-note">Opcional. Clasificador definido por la empresa (área, disciplina, familia documental, etc.). Solo en documentos raíz; los hijos heredan el código del padre.</p>
                     </div>
 
                     <div class="form-group">
@@ -191,13 +190,15 @@ $formatOption = static function (string $codigo, string $nombre): string {
                                 <?php if (!empty($form['id']) && (int)$form['id'] === (int)$padre['id']) continue; ?>
                                 <option
                                     value="<?= (int)$padre['id'] ?>"
+                                    data-tipo-documental-id="<?= (int)($padre['tipo_documental_id'] ?? 0) ?>"
+                                    data-proceso-id="<?= (int)($padre['proceso_id'] ?? 0) ?>"
                                     data-codigo-display="<?= htmlspecialchars((string)($padre['codigo_display'] ?? ''), ENT_QUOTES, 'UTF-8') ?>"
                                     data-proceso-codigo="<?= htmlspecialchars((string)($padre['proceso_codigo'] ?? ''), ENT_QUOTES, 'UTF-8') ?>"
                                     <?= (int)($form['documento_id'] ?? 0) === (int)$padre['id'] ? 'selected' : '' ?>
                                 ><?= htmlspecialchars((string)($padre['codigo_display'] ?? ''), ENT_QUOTES, 'UTF-8') ?> — <?= htmlspecialchars((string)$padre['nombre'], ENT_QUOTES, 'UTF-8') ?></option>
                             <?php endforeach; ?>
                         </select>
-                        <p class="field-note">Use padre para formatos/registros hijos (ej. F1 bajo un PD o TA).</p>
+                        <p class="field-note" id="sgd-doc-padre-note">Solo documentos del mismo proceso y con tipo padre permitido (Tipos documentales → Padres permitidos).</p>
                     </div>
 
                     <div class="form-group">
@@ -210,10 +211,11 @@ $formatOption = static function (string $codigo, string $nombre): string {
                             required
                             maxlength="64"
                             value="<?= htmlspecialchars((string)($form['consecutivo'] ?? ''), ENT_QUOTES, 'UTF-8') ?>"
-                            placeholder="Ej. 1, 2, F1"
+                            placeholder="Automático: último + 1"
                             data-sgd-doc-field
+                            data-sgd-doc-consecutivo
                         >
-                        <p class="field-note">Número o sufijo del segmento final. En hijos F suele ser <code>1</code> (se muestra como F1).</p>
+                        <p class="field-note">Se asigna el siguiente número en el mismo proceso, padre y tipo (si no hay registros, empieza en <code>1</code>). En hijos F suele ser <code>1</code> (se muestra como F1).</p>
                     </div>
 
                     <div class="form-group crud-form-field-full">
@@ -246,10 +248,16 @@ $formatOption = static function (string $codigo, string $nombre): string {
                     </div>
 
                     <div class="form-group">
-                        <label for="sgd_doc_estado">Estado documental</label>
-                        <select name="estado_documental" id="sgd_doc_estado" class="form-input">
-                            <?php foreach (['vigente' => 'Vigente', 'borrador' => 'Borrador', 'obsoleto' => 'Obsoleto'] as $val => $label): ?>
-                                <option value="<?= $val ?>" <?= ($form['estado_documental'] ?? 'vigente') === $val ? 'selected' : '' ?>><?= $label ?></option>
+                        <label for="sgd_doc_estado_id">Estado documental</label>
+                        <select name="estado_id" id="sgd_doc_estado_id" class="form-input" required>
+                            <?php foreach ($estadosDocumentales as $est): ?>
+                                <?php
+                                $eid = (int)$est['id'];
+                                $selected = (int)($form['estado_id'] ?? SgdRepository::ESTADO_DOC_VIGENTE) === $eid;
+                                ?>
+                                <option value="<?= $eid ?>" <?= $selected ? 'selected' : '' ?>>
+                                    <?= htmlspecialchars((string)$est['nombre'], ENT_QUOTES, 'UTF-8') ?>
+                                </option>
                             <?php endforeach; ?>
                         </select>
                     </div>

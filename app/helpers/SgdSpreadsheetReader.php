@@ -8,7 +8,7 @@ class SgdSpreadsheetReader
     /**
      * @return array{ok: bool, rows?: array<string, array<string, string>>, error?: string}
      */
-    public static function read(string $absolutePath): array
+    public static function read(string $absolutePath, ?string $sheetName = null): array
     {
         if (!is_readable($absolutePath)) {
             return ['ok' => false, 'error' => 'Archivo no legible'];
@@ -20,9 +20,10 @@ class SgdSpreadsheetReader
         }
 
         $cmd = sprintf(
-            'python3 %s %s 2>&1',
+            'python3 %s %s%s 2>&1',
             escapeshellarg($script),
-            escapeshellarg($absolutePath)
+            escapeshellarg($absolutePath),
+            $sheetName !== null && $sheetName !== '' ? ' ' . escapeshellarg($sheetName) : ''
         );
 
         $output = shell_exec($cmd);

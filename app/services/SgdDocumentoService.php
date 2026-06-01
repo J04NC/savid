@@ -22,27 +22,46 @@ class SgdDocumentoService
         $empresaId = $scope['empresaId'] ?? null;
         $search = trim((string)($query['q'] ?? ''));
         $editId = isset($query['id']) && ctype_digit((string)$query['id']) ? (int)$query['id'] : 0;
+        $padreIdFromQuery = isset($query['padre_id']) && ctype_digit((string)$query['padre_id'])
+            ? (int)$query['padre_id']
+            : 0;
 
         $documentos = [];
         $total = 0;
         $edit = null;
+        $consecutivoIndex = [];
+        $padresPermitidosPorTipo = [];
         $catalogos = [
             'procesos' => [],
             'tipos' => [],
             'lineas' => [],
             'padres' => [],
+            'padresPermitidosPorTipo' => [],
+            'estadosDocumentales' => [],
         ];
 
         if ($empresaId) {
+            $consecutivoIndex = $this->repo->buildConsecutivoMaxIndex($empresaId);
+            $padresPermitidosPorTipo = $this->repo->listTiposPadrePermitidosMap($empresaId);
+            $catalogos['padresPermitidosPorTipo'] = $padresPermitidosPorTipo;
             $documentos = $this->repo->listDocumentos($empresaId, $search !== '' ? $search : null);
             $total = $this->repo->countDocumentos($empresaId, $search !== '' ? $search : null);
             $catalogos['procesos'] = $this->repo->listProcesosByEmpresa($empresaId);
             $catalogos['tipos'] = $this->repo->listTiposByEmpresa($empresaId);
             $catalogos['lineas'] = $this->repo->listLineasDocumentales($empresaId);
             $catalogos['padres'] = $this->repo->listDocumentosForSelect($empresaId, $editId > 0 ? $editId : null);
+            $catalogos['estadosDocumentales'] = $this->repo->listEstadosDocumentales();
 
             if ($editId > 0) {
                 $edit = $this->repo->findDocumentoById($empresaId, $editId);
+            } elseif ($padreIdFromQuery > 0) {
+                $edit = $this->buildNewDocumentoForm($empresaId, $padreIdFromQuery);
+            } else {
+                $edit = $this->buildNewDocumentoForm($empresaId, null);
+            }
+
+            if ($edit && empty($edit['id'])) {
+                $edit['consecutivo'] = $this->suggestConsecutivoForForm($empresaId, $edit, $consecutivoIndex);
             }
         }
 
@@ -67,7 +86,8 @@ class SgdDocumentoService
             'search' => $search,
             'edit' => $edit,
             'catalogos' => $catalogos,
-            'catalogosJson' => $this->buildCatalogosJson($catalogos),
+            'catalogosJson' => $this->buildCatalogosJson($catalogos, $consecutivoIndex, $padresPermitidosPorTipo),
+            'selectedGridId' => $editId > 0 ? $editId : $padreIdFromQuery,
         ];
     }
 
@@ -103,29 +123,47 @@ class SgdDocumentoService
         if ($tipoId === null) {
             return ['success' => false, 'message' => 'Seleccione el tipo documental.'];
         }
-        if ($consecutivo === '') {
-            return ['success' => false, 'message' => 'Indique el consecutivo.'];
+
+        if ($documentoPadreId !== null) {
+            $lineaId = null;
         }
 
-        $tipos = $this->repo->mapTiposByCodigo($empresaId);
-        $tipoCodigo = null;
-        foreach ($tipos as $codigo => $tipo) {
-            if ((int)$tipo['id'] === $tipoId) {
-                $tipoCodigo = strtoupper($codigo);
-                break;
-            }
+        if ($consecutivo === '' && $id === 0) {
+            $consecutivo = $this->repo->getNextConsecutivo(
+                $empresaId,
+                $procesoId,
+                $documentoPadreId,
+                $tipoId,
+                $lineaId
+            );
+        }
+        if ($consecutivo === '') {
+            return ['success' => false, 'message' => 'Indique el consecutivo.'];
         }
 
         if ($documentoPadreId !== null && $documentoPadreId === $id) {
             return ['success' => false, 'message' => 'Un documento no puede ser padre de sí mismo.'];
         }
 
-        if ($documentoPadreId !== null) {
-            $lineaId = null;
-        } elseif ($tipoCodigo === 'TA' && $lineaId === null) {
-            return ['success' => false, 'message' => 'Para tipo TA seleccione la línea documental.'];
-        } elseif ($tipoCodigo !== 'TA') {
-            $lineaId = null;
+        if ($documentoPadreId !== null && $documentoPadreId > 0) {
+            $padreRow = $this->repo->findDocumentoById($empresaId, $documentoPadreId);
+            if ($padreRow === null) {
+                return ['success' => false, 'message' => 'El documento padre seleccionado no existe.'];
+            }
+            $padreTipoId = (int)($padreRow['tipo_documental_id'] ?? 0);
+            if (!$this->repo->isTipoPadrePermitidoForHijo($empresaId, $tipoId, $padreTipoId)) {
+                return [
+                    'success' => false,
+                    'message' => 'El documento padre no corresponde a un tipo permitido para este tipo documental. Revise la configuración en Tipos documentales → Padres permitidos.',
+                ];
+            }
+            $padreProcesoId = (int)($padreRow['proceso_id'] ?? 0);
+            if ($padreProcesoId !== $procesoId) {
+                return [
+                    'success' => false,
+                    'message' => 'El documento padre debe pertenecer al mismo proceso seleccionado.',
+                ];
+            }
         }
 
         if ($this->repo->documentoUniqueExists(
@@ -152,7 +190,9 @@ class SgdDocumentoService
             'version_actual' => trim((string)($post['version_actual'] ?? '')) ?: null,
             'fecha_primera_aprobacion' => trim((string)($post['fecha_primera_aprobacion'] ?? '')) ?: null,
             'fecha_ultima_aprobacion' => trim((string)($post['fecha_ultima_aprobacion'] ?? '')) ?: null,
-            'estado_documental' => trim((string)($post['estado_documental'] ?? 'vigente')) ?: 'vigente',
+            'estado_id' => isset($post['estado_id']) && ctype_digit((string)$post['estado_id'])
+                ? (int)$post['estado_id']
+                : SgdRepository::ESTADO_DOC_VIGENTE,
         ]);
 
         return [
@@ -222,13 +262,20 @@ class SgdDocumentoService
 
     /**
      * @param array<string, list<array<string, mixed>>> $catalogos
+     * @param array<string, int> $consecutivoIndex
+     * @param array<int, list<int>> $padresPermitidosPorTipo
      */
-    private function buildCatalogosJson(array $catalogos): string
+    private function buildCatalogosJson(array $catalogos, array $consecutivoIndex = [], array $padresPermitidosPorTipo = []): string
     {
+        if ($padresPermitidosPorTipo === [] && !empty($catalogos['padresPermitidosPorTipo'])) {
+            $padresPermitidosPorTipo = $catalogos['padresPermitidosPorTipo'];
+        }
         $padresById = [];
         foreach ($catalogos['padres'] as $p) {
             $padresById[(int)$p['id']] = [
                 'id' => (int)$p['id'],
+                'proceso_id' => (int)($p['proceso_id'] ?? 0),
+                'tipo_documental_id' => (int)($p['tipo_documental_id'] ?? 0),
                 'codigo_display' => $p['codigo_display'] ?? '',
                 'proceso_codigo' => $p['proceso_codigo'] ?? '',
                 'tipo_codigo' => $p['tipo_codigo'] ?? '',
@@ -239,6 +286,8 @@ class SgdDocumentoService
         }
 
         $payload = [
+            'consecutivoIndex' => $consecutivoIndex,
+            'padresPermitidosPorTipo' => (object)$padresPermitidosPorTipo,
             'procesos' => array_map(static fn($r) => [
                 'id' => (int)$r['id'],
                 'codigo' => (string)$r['codigo'],
@@ -267,5 +316,69 @@ class SgdDocumentoService
         }
 
         return (int)$value;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildNewDocumentoForm(int $empresaId, ?int $padreId): array
+    {
+        $form = [
+            'id' => '',
+            'proceso_id' => '',
+            'documento_id' => '',
+            'tipo_documental_id' => '',
+            'linea_documental_id' => '',
+            'consecutivo' => '',
+            'nombre' => '',
+            'modo' => '',
+            'version_actual' => '',
+            'fecha_primera_aprobacion' => '',
+            'fecha_ultima_aprobacion' => '',
+            'estado_id' => (string)SgdRepository::ESTADO_DOC_VIGENTE,
+            'codigo_display' => '',
+        ];
+
+        if ($padreId === null || $padreId <= 0) {
+            return $form;
+        }
+
+        $padre = $this->repo->findDocumentoById($empresaId, $padreId);
+        if ($padre === null) {
+            return $form;
+        }
+
+        $form['documento_id'] = (string)$padreId;
+        $form['proceso_id'] = (string)($padre['proceso_id'] ?? '');
+
+        return $form;
+    }
+
+    /**
+     * @param array<string, mixed> $form
+     * @param array<string, int> $consecutivoIndex
+     */
+    private function suggestConsecutivoForForm(int $empresaId, array $form, array $consecutivoIndex): string
+    {
+        $procesoId = $this->nullableInt($form['proceso_id'] ?? null);
+        $tipoId = $this->nullableInt($form['tipo_documental_id'] ?? null);
+        if ($procesoId === null || $tipoId === null) {
+            return '';
+        }
+
+        $padreId = $this->nullableInt($form['documento_id'] ?? null);
+        $lineaId = $this->nullableInt($form['linea_documental_id'] ?? null);
+        if ($padreId !== null) {
+            $lineaId = null;
+        }
+
+        return $this->repo->getNextConsecutivo(
+            $empresaId,
+            $procesoId,
+            $padreId,
+            $tipoId,
+            $lineaId,
+            $consecutivoIndex
+        );
     }
 }

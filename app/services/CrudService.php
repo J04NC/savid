@@ -593,7 +593,7 @@ class CrudService
             'username' => 'order:60|title:Código único para iniciar sesión.|placeholder:Usuario',
             'password' => 'order:70|show:form|title:Al editar, deje vacío para no cambiar la contraseña.|placeholder:Contraseña',
             'sesion_idle_minutos' => 'order:90|title:Minutos de inactividad sin usar el sistema antes de cerrar la sesión automáticamente. Vacío = sin cierre por inactividad en el navegador. Ejemplo: 30|placeholder:Ej. 30',
-            'estado_id' => 'order:130|title:Estado de la cuenta de acceso (activo/inactivo).',
+            'estado_id' => 'label:Estado|reltipo:GENERAL|order:130|title:Estado de la cuenta de acceso (activo/inactivo).',
             'tercero_id' => 'show:none|order:9999',
             'terceroidentificacion_id' => 'show:none|order:9999',
             'created_at' => 'show:none|order:9999',
@@ -1704,6 +1704,9 @@ class CrudService
         return (int)$this->pdo->lastInsertId();
     }
 
+    /** Comentario estándar para FK empresa_id (valor = empresa.id, etiqueta = tercero.razon_social). */
+    public const EMPRESA_ID_REL_COMMENT = 'rel:tercero|label:razon_social|title:Razón social de la empresa';
+
     /**
      * Tabla referenciada en COLUMN_COMMENT: rel:sgd_dependencia
      */
@@ -1776,6 +1779,9 @@ class CrudService
             }
 
             $fromComment = $this->extractRelTableFromComment($col['COLUMN_COMMENT'] ?? null);
+            if ($fromComment === null && $field === 'empresa_id') {
+                $fromComment = 'tercero';
+            }
             if ($fromComment !== null) {
                 $relations[$field] = $fromComment;
                 continue;
@@ -1979,6 +1985,13 @@ class CrudService
         $refCol = $this->sqlIdentifierTable($meta['referenced_column']);
         $limit = max(1, min(100, $limit));
 
+        $fkComment = $this->getTableColumnComment($contextTable, $fkColumn);
+        $relTable = $this->extractRelTableFromComment($fkComment) ?? $refTable;
+        $bridge = $this->resolveRelationBridge($fkColumn, $relTable, $fkComment);
+        if ($bridge !== null) {
+            return $this->searchBridgedCatalogOptions($bridge, $fkComment, $qTrim, $limit);
+        }
+
         $stmtCols = $this->pdo->query('SHOW COLUMNS FROM `' . $refTable . '`');
         $refColumns = $stmtCols ? $stmtCols->fetchAll(PDO::FETCH_ASSOC) : [];
         $refFieldNames = array_column($refColumns, 'Field');
@@ -2049,6 +2062,8 @@ class CrudService
             $where[] = '`estado_id` = 1';
         }
 
+        $this->appendEstadoRelTipoFilter($refTable, $fkComment, $where, $params);
+
         SoftDeleteService::pushWhereNotDeleted($this->pdo, $refTable, $where);
 
         $includeCatalogTipo = ($refTable === 'zona') && in_array('tipo', $refFieldNames, true);
@@ -2104,6 +2119,163 @@ class CrudService
     }
 
     /**
+     * Filtra opciones de la tabla estado por tipo (estado_tipo.codigo).
+     * Ej.: reltipo:GENERAL → solo ACTIVO/INACTIVO; reltipo:PERMISO → PERMITIR/DENEGAR.
+     */
+    private function extractRelTipoFromColumnComment(?string $comment): ?string
+    {
+        $comment = trim((string)$comment);
+        if ($comment === '') {
+            return null;
+        }
+
+        foreach (explode('|', $comment) as $part) {
+            $part = trim($part);
+            if ($part === '') {
+                continue;
+            }
+            if (str_starts_with(strtolower($part), 'reltipo:')) {
+                $codigo = strtoupper(trim(substr($part, strlen('reltipo:'))));
+                if ($codigo !== '' && preg_match('/^[A-Z0-9_]+$/', $codigo)) {
+                    return $codigo;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /** @var array<string, list<int>> */
+    private const RELTIPO_ESTADO_IDS = [
+        'GENERAL' => [1, 2],
+        'CONTABLE' => [3, 4],
+        'PERMISO' => [5, 6],
+        'DOCUMENTAL' => [7, 8, 9, 10],
+    ];
+
+    /** @var array{table: string, column: string}|false|null */
+    private $estadoTipoRelation = null;
+
+    /**
+     * @return array{table: string, column: string}|null
+     */
+    private function resolveEstadoTipoRelation(): ?array
+    {
+        if ($this->estadoTipoRelation !== null) {
+            return $this->estadoTipoRelation === false ? null : $this->estadoTipoRelation;
+        }
+
+        $candidates = [
+            ['tipoestado', 'tipoestado_id'],
+            ['estado_tipo', 'estado_tipo_id'],
+        ];
+
+        foreach ($candidates as [$table, $column]) {
+            $tableOk = (int)$this->pdo->query("
+                SELECT COUNT(*) FROM information_schema.TABLES
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = " . $this->pdo->quote($table) . '
+            ')->fetchColumn();
+
+            if ($tableOk === 0) {
+                continue;
+            }
+
+            $colOk = (int)$this->pdo->query("
+                SELECT COUNT(*) FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = 'estado'
+                  AND COLUMN_NAME = " . $this->pdo->quote($column) . '
+            ')->fetchColumn();
+
+            if ($colOk > 0) {
+                return $this->estadoTipoRelation = ['table' => $table, 'column' => $column];
+            }
+        }
+
+        $this->estadoTipoRelation = false;
+
+        return null;
+    }
+
+    private function estadoTipoSchemaReady(): bool
+    {
+        return $this->resolveEstadoTipoRelation() !== null;
+    }
+
+    /**
+     * @param list<string> $where
+     * @param list<scalar> $params
+     */
+    private function appendEstadoRelTipoFilter(string $refTable, ?string $columnComment, array &$where, array &$params): void
+    {
+        if ($this->sqlIdentifierTable($refTable) !== 'estado') {
+            return;
+        }
+
+        $tipoCodigo = $this->extractRelTipoFromColumnComment($columnComment);
+        if ($tipoCodigo === null) {
+            return;
+        }
+
+        $rel = $this->resolveEstadoTipoRelation();
+        if ($rel !== null) {
+            $t = $this->sqlIdentifierTable($rel['table']);
+            $c = $this->sqlIdentifierTable($rel['column']);
+            $where[] = '`' . $c . '` = (SELECT `id` FROM `' . $t . '` WHERE `codigo` = ? LIMIT 1)';
+            $params[] = $tipoCodigo;
+
+            return;
+        }
+
+        $ids = self::RELTIPO_ESTADO_IDS[$tipoCodigo] ?? [];
+        if ($ids !== []) {
+            $where[] = '`id` IN (' . implode(',', array_map('intval', $ids)) . ')';
+        }
+    }
+
+    /**
+     * @param list<scalar> $params
+     */
+    private function sqlEstadoRelTipoFilter(?string $tipoCodigo, array &$params): string
+    {
+        if ($tipoCodigo === null) {
+            return '';
+        }
+
+        $rel = $this->resolveEstadoTipoRelation();
+        if ($rel !== null) {
+            $params[] = $tipoCodigo;
+            $t = $this->sqlIdentifierTable($rel['table']);
+            $c = $this->sqlIdentifierTable($rel['column']);
+
+            return ' AND `' . $c . '` = (SELECT `id` FROM `' . $t . '` WHERE `codigo` = ? LIMIT 1)';
+        }
+
+        $ids = self::RELTIPO_ESTADO_IDS[$tipoCodigo] ?? [];
+        if ($ids === []) {
+            return '';
+        }
+
+        return ' AND `id` IN (' . implode(',', array_map('intval', $ids)) . ')';
+    }
+
+    private function getTableColumnComment(string $table, string $column): ?string
+    {
+        $stmt = $this->pdo->prepare('
+            SELECT COLUMN_COMMENT
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = ?
+              AND COLUMN_NAME = ?
+            LIMIT 1
+        ');
+        $stmt->execute([$table, $column]);
+        $comment = $stmt->fetchColumn();
+
+        return $comment !== false && $comment !== '' ? (string)$comment : null;
+    }
+
+    /**
      * Modo de widget para FK en comentario de columna: relmode:select|autocomplete|auto
      * Vacío = select completo (comportamiento histórico).
      */
@@ -2138,78 +2310,261 @@ class CrudService
         return preg_replace('/[^A-Za-z0-9_]/', '', $tabla) ?: 'invalid_table';
     }
 
-    public function getRelationData($tabla, $column = null, $comment = null)
+    /**
+     * FK almacena id de source_table; la etiqueta se lee en display_table vía link_column.
+     *
+     * @return array{source_table: string, link_column: string, display_table: string}|null
+     */
+    private function resolveRelationBridge(?string $fkColumn, string $displayTable, ?string $comment): ?array
     {
-        $tablaSql = '`' . $this->sqlIdentifierTable($tabla) . '`';
+        if ($fkColumn === null || $fkColumn === '') {
+            return null;
+        }
 
-        $stmt = $this->pdo->query("SHOW COLUMNS FROM $tablaSql");
-        $columns = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $displayTable = $this->sqlIdentifierTable($displayTable);
+        $relFromComment = $this->extractRelTableFromComment($comment);
+        if ($relFromComment !== null) {
+            $displayTable = $relFromComment;
+        }
+
+        $sourceTable = $this->sqlIdentifierTable(str_replace('_id', '', $fkColumn));
+        if ($sourceTable === '' || $sourceTable === $displayTable) {
+            return null;
+        }
+
+        $linkColumn = $displayTable . '_id';
+        if (!$this->tableHasColumn($sourceTable, $linkColumn)) {
+            return null;
+        }
+
+        return [
+            'source_table' => $sourceTable,
+            'link_column' => $linkColumn,
+            'display_table' => $displayTable,
+        ];
+    }
+
+    /**
+     * @return array{displayExpr: string, fieldNames: list<string>}
+     */
+    private function buildTableDisplayMeta(string $table, ?string $comment, bool $useDispAlias = false): array
+    {
+        $tableSql = $this->sqlIdentifierTable($table);
+        $stmt = $this->pdo->query('SHOW COLUMNS FROM `' . $tableSql . '`');
+        $columns = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [];
+        $fieldNames = array_column($columns, 'Field');
 
         $displayColumn = $this->extractRelLabelColumnFromComment($comment);
-
         $preferred = ['nombre', 'razon_social', 'descripcion', 'titulo', 'username', 'email', 'codigo'];
 
         if ($displayColumn === null) {
             foreach ($preferred as $pref) {
-                foreach ($columns as $col) {
-                    if ($col['Field'] === $pref) {
-                        $displayColumn = $pref;
-                        break 2;
-                    }
+                if (in_array($pref, $fieldNames, true)) {
+                    $displayColumn = $pref;
+                    break;
                 }
             }
-        } elseif (!in_array($displayColumn, array_column($columns, 'Field'), true)) {
+        } elseif (!in_array($displayColumn, $fieldNames, true)) {
             $displayColumn = null;
             foreach ($preferred as $pref) {
-                foreach ($columns as $col) {
-                    if ($col['Field'] === $pref) {
-                        $displayColumn = $pref;
-                        break 2;
-                    }
-                }
-            }
-        }
-
-        if (!$displayColumn) {
-            foreach ($columns as $col) {
-                if ($col['Field'] !== 'id') {
-                    $displayColumn = $col['Field'];
+                if (in_array($pref, $fieldNames, true)) {
+                    $displayColumn = $pref;
                     break;
                 }
             }
         }
 
-        if (!$displayColumn) {
+        if ($displayColumn === null) {
+            foreach ($fieldNames as $fn) {
+                if ($fn !== 'id') {
+                    $displayColumn = $fn;
+                    break;
+                }
+            }
+        }
+
+        if ($displayColumn === null) {
+            return ['displayExpr' => "''", 'fieldNames' => $fieldNames];
+        }
+
+        $pfx = $useDispAlias ? 'disp.' : '';
+        if ($table === 'tercero' && in_array('nombres', $fieldNames, true) && in_array('apellidos', $fieldNames, true)) {
+            $displayExpr = "COALESCE(NULLIF(TRIM(CONCAT_WS(' ', NULLIF(TRIM(COALESCE({$pfx}`nombres`,'')), ''), NULLIF(TRIM(COALESCE({$pfx}`apellidos`,'')), ''))), ''), NULLIF(TRIM(COALESCE({$pfx}`razon_social`,'')), ''), CONCAT('Tercero #', {$pfx}`id`))";
+        } else {
+            $col = str_replace('`', '', $displayColumn);
+            $displayExpr = "{$pfx}`{$col}`";
+        }
+
+        return ['displayExpr' => $displayExpr, 'fieldNames' => $fieldNames];
+    }
+
+    /**
+     * @param array{source_table: string, link_column: string, display_table: string} $bridge
+     * @return list<array<string, mixed>>
+     */
+    private function fetchBridgedRelationData(array $bridge, ?string $comment): array
+    {
+        $src = $this->sqlIdentifierTable($bridge['source_table']);
+        $disp = $this->sqlIdentifierTable($bridge['display_table']);
+        $link = preg_replace('/[^A-Za-z0-9_]/', '', $bridge['link_column']);
+
+        $meta = $this->buildTableDisplayMeta($disp, $comment, true);
+        $displayExpr = $meta['displayExpr'];
+
+        $sql = "SELECT src.`id` AS id, ({$displayExpr}) AS nombre
+            FROM `{$src}` src
+            INNER JOIN `{$disp}` disp ON disp.`id` = src.`{$link}`";
+        $params = [];
+
+        $filterList = $this->extractRelFilterListFromColumnComment($comment);
+        $where = ['1=1'];
+
+        if ($filterList !== null && $filterList !== '') {
+            $this->appendRelFilterConditions($filterList, $displayExpr, $where, $params);
+        }
+
+        SoftDeleteService::pushWhereNotDeleted($this->pdo, $src, $where, 'src');
+        SoftDeleteService::pushWhereNotDeleted($this->pdo, $disp, $where, 'disp');
+
+        $sql .= ' WHERE ' . implode(' AND ', $where) . ' ORDER BY nombre';
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    /**
+     * @param array{source_table: string, link_column: string, display_table: string} $bridge
+     * @return list<array{id: int, nombre: string}>
+     */
+    private function searchBridgedCatalogOptions(array $bridge, ?string $comment, string $qTrim, int $limit): array
+    {
+        $src = $this->sqlIdentifierTable($bridge['source_table']);
+        $disp = $this->sqlIdentifierTable($bridge['display_table']);
+        $link = preg_replace('/[^A-Za-z0-9_]/', '', $bridge['link_column']);
+
+        $meta = $this->buildTableDisplayMeta($disp, $comment, true);
+        $displayExpr = $meta['displayExpr'];
+
+        $where = ['1=1'];
+        $params = [];
+
+        if ($qTrim !== '') {
+            $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $qTrim) . '%';
+            $where[] = '(' . $displayExpr . ' LIKE ?)';
+            $params[] = $like;
+        }
+
+        if ($disp === 'tercero' && $this->tableHasColumn($src, 'estado_id')) {
+            $where[] = 'src.`estado_id` = 1';
+        }
+
+        SoftDeleteService::pushWhereNotDeleted($this->pdo, $src, $where, 'src');
+        SoftDeleteService::pushWhereNotDeleted($this->pdo, $disp, $where, 'disp');
+
+        $sql = "SELECT src.`id` AS id, ({$displayExpr}) AS nombre
+            FROM `{$src}` src
+            INNER JOIN `{$disp}` disp ON disp.`id` = src.`{$link}`
+            WHERE " . implode(' AND ', $where) . "
+            ORDER BY ({$displayExpr}) ASC
+            LIMIT " . (int)$limit;
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+
+        $out = [];
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $out[] = [
+                'id' => (int)$row['id'],
+                'nombre' => (string)($row['nombre'] ?? ''),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param list<string> $where
+     * @param list<scalar> $params
+     */
+    private function appendRelFilterConditions(string $filterList, string $displayExpr, array &$where, array &$params): void
+    {
+        $items = array_map('trim', explode(',', $filterList));
+        $includeIds = [];
+        $excludeIds = [];
+        $includeNames = [];
+        $excludeNames = [];
+
+        foreach ($items as $item) {
+            if ($item === '') {
+                continue;
+            }
+            $isExclude = str_starts_with($item, '!');
+            if ($isExclude) {
+                $item = substr($item, 1);
+            }
+            if (is_numeric($item)) {
+                if ($isExclude) {
+                    $excludeIds[] = $item;
+                } else {
+                    $includeIds[] = $item;
+                }
+            } elseif ($isExclude) {
+                $excludeNames[] = $item;
+            } else {
+                $includeNames[] = $item;
+            }
+        }
+
+        $conditions = [];
+        if ($includeIds !== []) {
+            $conditions[] = 'src.`id` IN (' . implode(',', array_fill(0, count($includeIds), '?')) . ')';
+            $params = array_merge($params, $includeIds);
+        }
+        if ($includeNames !== []) {
+            $conditions[] = "({$displayExpr}) IN (" . implode(',', array_fill(0, count($includeNames), '?')) . ')';
+            $params = array_merge($params, $includeNames);
+        }
+        if ($excludeIds !== []) {
+            $conditions[] = 'src.`id` NOT IN (' . implode(',', array_fill(0, count($excludeIds), '?')) . ')';
+            $params = array_merge($params, $excludeIds);
+        }
+        if ($excludeNames !== []) {
+            $conditions[] = "({$displayExpr}) NOT IN (" . implode(',', array_fill(0, count($excludeNames), '?')) . ')';
+            $params = array_merge($params, $excludeNames);
+        }
+
+        if ($conditions !== []) {
+            $where[] = implode(' AND ', $conditions);
+        }
+    }
+
+    public function getRelationData($tabla, $column = null, $comment = null)
+    {
+        $bridge = $this->resolveRelationBridge($column, $tabla, $comment);
+        if ($bridge !== null) {
+            return $this->fetchBridgedRelationData($bridge, $comment);
+        }
+
+        $tablaSql = '`' . $this->sqlIdentifierTable($tabla) . '`';
+
+        $meta = $this->buildTableDisplayMeta($tabla, $comment);
+        if ($meta['displayExpr'] === "''") {
             return [];
         }
 
-        $isTercero = ($tabla === 'tercero');
-        $hasNombres = false;
-        $hasApellidos = false;
-        foreach ($columns as $col) {
-            if ($col['Field'] === 'nombres') {
-                $hasNombres = true;
-            }
-            if ($col['Field'] === 'apellidos') {
-                $hasApellidos = true;
-            }
-        }
+        $displayExpr = $meta['displayExpr'];
+        $fieldNames = $meta['fieldNames'];
 
-        if ($isTercero && $hasNombres && $hasApellidos) {
-            $displayExpr = "COALESCE(NULLIF(TRIM(CONCAT_WS(' ', NULLIF(TRIM(COALESCE(`nombres`,'')), ''), NULLIF(TRIM(COALESCE(`apellidos`,'')), ''))), ''), NULLIF(TRIM(COALESCE(`razon_social`,'')), ''), CONCAT('Tercero #', `id`))";
-        } else {
-            $displayExpr = '`' . str_replace('`', '', $displayColumn) . '`';
-        }
-
-        $includeTipo = ($this->sqlIdentifierTable($tabla) === 'zona')
-            && in_array('tipo', array_column($columns, 'Field'), true);
+        $includeTipo = ($this->sqlIdentifierTable($tabla) === 'zona') && in_array('tipo', $fieldNames, true);
         $tipoSql = $includeTipo ? ', `tipo`' : '';
 
         $includeCodigoTipodoc = ($this->sqlIdentifierTable($tabla) === 'tipodocumento')
-            && in_array('codigo', array_column($columns, 'Field'), true);
+            && in_array('codigo', $fieldNames, true);
         $codigoSql = $includeCodigoTipodoc ? ', `codigo`' : '';
 
-        $sql = "SELECT `id`{$tipoSql}{$codigoSql}, ($displayExpr) AS nombre FROM $tablaSql";
+        $sql = "SELECT `id`{$tipoSql}{$codigoSql}, ({$displayExpr}) AS nombre FROM $tablaSql";
         $params = [];
 
         $filterList = $this->extractRelFilterListFromColumnComment($comment);
@@ -2284,9 +2639,19 @@ class CrudService
             $sql .= ' WHERE 1=1';
         }
 
+        $estadoTipoParams = [];
+        $estadoTipoSql = '';
+        if ($this->sqlIdentifierTable($tabla) === 'estado') {
+            $tipoCodigo = $this->extractRelTipoFromColumnComment($comment);
+            $estadoTipoSql = $this->sqlEstadoRelTipoFilter($tipoCodigo, $estadoTipoParams);
+        }
+
         if (SoftDeleteService::supports($this->pdo, $tabla)) {
             $sql .= SoftDeleteService::sqlAndNotDeleted($this->pdo, $tabla);
         }
+
+        $sql .= $estadoTipoSql;
+        $params = array_merge($params, $estadoTipoParams);
 
         $sql .= ' ORDER BY nombre';
 

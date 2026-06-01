@@ -290,6 +290,97 @@ class SgdImportService
         ];
     }
 
+    /**
+     * Importa series y subseries desde la hoja CCD1 del libro general (GI-PD1-F11).
+     * Columnas: B=serie, C=nombre serie, D=código subserie, E=nombre subserie.
+     *
+     * @return array{success: bool, message: string, stats?: array<string, int>}
+     */
+    public function importSubseriesCcd1(int $empresaId, string $filePath): array
+    {
+        $seriesCatalog = $this->readSeriesCatalogFromCcdSheet($filePath);
+
+        $read = SgdSpreadsheetReader::read($filePath, 'CCD1');
+        if (!$read['ok']) {
+            return ['success' => false, 'message' => $read['error'] ?? 'Error leyendo hoja CCD1'];
+        }
+
+        $stats = ['series' => 0, 'subseries' => 0, 'actualizadas' => 0, 'omitidas' => 0];
+        $currentSerieCodigo = '';
+        $currentSerieNombre = '';
+
+        foreach ($read['rows'] as $cols) {
+            $serieCodigo = trim($this->cell($cols, 'B'));
+            $serieNombre = trim($this->cell($cols, 'C'));
+            $subCodigo = trim($this->cell($cols, 'D'));
+            $subNombre = trim($this->cell($cols, 'E'));
+
+            if ($serieCodigo !== '' && preg_match('/^\d+$/', $serieCodigo)) {
+                $currentSerieCodigo = $serieCodigo;
+            }
+            if ($serieNombre !== '') {
+                $currentSerieNombre = $serieNombre;
+            }
+
+            if ($subCodigo === '' || $subNombre === '' || $currentSerieCodigo === '') {
+                continue;
+            }
+
+            $nombreSerie = $currentSerieNombre !== ''
+                ? $currentSerieNombre
+                : ($seriesCatalog[$currentSerieCodigo] ?? 'Serie ' . $currentSerieCodigo);
+
+            $serieId = $this->ensureSerieByEmpresa($empresaId, $currentSerieCodigo, $nombreSerie, $stats);
+            $this->ensureSubserie($empresaId, $serieId, $subCodigo, $subNombre, $stats);
+        }
+
+        $this->repo->insertImportLog($empresaId, 'ccd1_subseries', basename($filePath), $stats);
+
+        return [
+            'success' => true,
+            'message' => 'Subseries CCD1 importadas.',
+            'stats' => $stats,
+        ];
+    }
+
+    /**
+     * @return array<string, string> codigo => nombre
+     */
+    private function readSeriesCatalogFromCcdSheet(string $filePath): array
+    {
+        $read = SgdSpreadsheetReader::read($filePath, 'CCD');
+        if (!$read['ok']) {
+            return [];
+        }
+
+        $catalog = [];
+        foreach ($read['rows'] as $cols) {
+            $codigo = trim($this->cell($cols, 'B'));
+            $nombre = trim($this->cell($cols, 'C'));
+            if ($codigo !== '' && preg_match('/^\d+$/', $codigo) && $nombre !== '') {
+                $catalog[$codigo] = $nombre;
+            }
+        }
+
+        return $catalog;
+    }
+
+    /**
+     * @param array<string, int> $stats
+     */
+    private function ensureSerieByEmpresa(int $empresaId, string $codigo, string $nombre, array &$stats): int
+    {
+        $id = $this->repo->findSerieId($empresaId, $codigo);
+        if ($id) {
+            $this->repo->updateSerieNombre($id, $nombre);
+
+            return $id;
+        }
+        $stats['series']++;
+
+        return $this->repo->insertSerie($empresaId, $codigo, $nombre);
+    }
+
     private function findCcdHeaderRow(array $rows): ?int
     {
         foreach ($rows as $rowNum => $cols) {
@@ -349,13 +440,13 @@ class SgdImportService
      */
     private function ensureSerie(int $empresaId, int $depId, string $codigo, string $nombre, array &$stats): int
     {
-        $id = $this->repo->findSerieId($depId, $codigo);
+        $id = $this->repo->findSerieId($empresaId, $codigo);
         if ($id) {
             return $id;
         }
         $stats['series']++;
 
-        return $this->repo->insertSerie($empresaId, $depId, $codigo, $nombre);
+        return $this->repo->insertSerie($empresaId, $codigo, $nombre);
     }
 
     /**
@@ -365,6 +456,9 @@ class SgdImportService
     {
         $id = $this->repo->findSubserieId($serieId, $codigo);
         if ($id) {
+            $this->repo->updateSubserieNombre($id, $nombre);
+            $stats['actualizadas']++;
+
             return $id;
         }
         $stats['subseries']++;
@@ -379,7 +473,7 @@ class SgdImportService
         int $empresaId,
         string $codigo,
         string $nombre,
-        ?string $tipoProceso,
+        ?string $tipoProcesoLabel,
         array &$stats
     ): int {
         $id = $this->repo->findProcesoId($empresaId, $codigo);
@@ -387,8 +481,9 @@ class SgdImportService
             return $id;
         }
         $stats['procesos']++;
+        $tipoId = $this->repo->findTipoprocesoIdByLabel($empresaId, $tipoProcesoLabel);
 
-        return $this->repo->insertProceso($empresaId, $codigo, $nombre, $tipoProceso);
+        return $this->repo->insertProceso($empresaId, $codigo, $nombre, $tipoId);
     }
 
     /**

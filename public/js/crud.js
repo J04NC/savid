@@ -2008,6 +2008,18 @@ window.usuarioEmpresaSedeOnLostVisibility = function (usuarioId) {
 
 function initCrudAcciones() {
 
+    function crudSelectedRowEmpresaQuery() {
+        const row = document.querySelector(".crud-row.selected");
+        if (!row) return "";
+        const td = row.querySelector('td[data-field="empresa_id"]');
+        if (!td) return "";
+        const val = (td.getAttribute("data-value") || "").trim();
+        if (val !== "" && /^\d+$/.test(val)) {
+            return "&empresa_id=" + encodeURIComponent(val);
+        }
+        return "";
+    }
+
     document.querySelectorAll(".btn-accion").forEach(btn => {
 
         btn.addEventListener("click", function () {
@@ -2080,13 +2092,19 @@ function initCrudAcciones() {
                     "item/acciones/" + selectedId,
                     "lg",
                     "Cargando acciones del ítem..."
+                ],
+                sgd_tipo_padres: [
+                    "sgd/tipoDocumentalPadres/" + selectedId,
+                    "lg",
+                    "Cargando padres permitidos..."
                 ]
             };
 
             const cfg = modales[accion];
 
             if (cfg) {
-                openModalGod(cfg[0], cfg[1], cfg[2]);
+                const url = cfg[0] + (accion === "sgd_tipo_padres" ? crudSelectedRowEmpresaQuery() : "");
+                openModalGod(url, cfg[1], cfg[2]);
             } else {
                 alert("Acción sin handler en crud.js: " + (raw || "(vacío)") +
                     "\nNormalizada: " + accion);

@@ -7,6 +7,7 @@ class SgdController
     private SgdConfigService $configService;
     private SgdImportService $importService;
     private SgdDocumentoService $documentoService;
+    private SgdTipoDocumentalPadreService $tipoPadreService;
 
     public function __construct()
     {
@@ -15,6 +16,7 @@ class SgdController
         $this->configService = new SgdConfigService();
         $this->importService = new SgdImportService();
         $this->documentoService = new SgdDocumentoService();
+        $this->tipoPadreService = new SgdTipoDocumentalPadreService();
     }
 
     public function index(): void
@@ -203,6 +205,7 @@ class SgdController
         $edit = $page['edit'];
         $catalogos = $page['catalogos'];
         $catalogosJson = $page['catalogosJson'];
+        $selectedGridId = (int)($page['selectedGridId'] ?? 0);
         $breadcrumb = $this->moduleService->buildBreadcrumbForRuta('sgd/documentos');
         $canGuardar = PermisoService::can('sgd/documentos', 'guardar');
         $canEliminar = PermisoService::can('sgd/documentos', 'eliminar');
@@ -239,6 +242,54 @@ class SgdController
         header('Location: ?url=sgd/documentos' . $q);
 
         exit;
+    }
+
+    /**
+     * Modal: padres permitidos por tipo documental.
+     * Ruta: ?url=sgd/tipoDocumentalPadres/{tipoId}
+     */
+    public function tipoDocumentalPadres($tipoId = null): void
+    {
+        if (!PermisoService::can('sgd_tipo_documental', 'ver')) {
+            $this->renderTipoPadresModalError('No tiene permiso para ver tipos documentales.');
+            return;
+        }
+
+        $tid = $tipoId !== null && $tipoId !== '' ? (int)$tipoId : 0;
+        if ($tid <= 0) {
+            $this->renderTipoPadresModalError('Seleccione un tipo documental en la tabla y vuelva a abrir la acción.');
+            return;
+        }
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            if (!PermisoService::can('sgd_tipo_documental', 'guardar')) {
+                $this->jsonResponse(['success' => false, 'message' => 'No tiene permiso para guardar.']);
+                return;
+            }
+
+            $padreIds = $_POST['padre_tipo_ids'] ?? [];
+            if (!is_array($padreIds)) {
+                $padreIds = $padreIds !== '' && $padreIds !== null ? [(string)$padreIds] : [];
+            }
+
+            $result = $this->tipoPadreService->save($tid, $padreIds, $_GET);
+            $this->jsonResponse($result);
+            return;
+        }
+
+        $data = $this->tipoPadreService->getModalData($tid, $_GET);
+        if ($data === null) {
+            $this->renderTipoPadresModalError('Tipo documental no encontrado o empresa no válida.');
+            return;
+        }
+
+        $tipo = $data['tipo'];
+        $tipos = $data['tipos'];
+        $padresPermitidosIds = $data['padresPermitidosIds'];
+        $canGuardar = PermisoService::can('sgd_tipo_documental', 'guardar');
+        $endpoint = '?url=sgd/tipoDocumentalPadres/' . $tid . $this->empresaQuery();
+
+        require BASE_PATH . '/app/views/sgd/tipo_documental_padres_modal.php';
     }
 
     private function resolveUploadPath(int $empresaId): ?string
@@ -280,6 +331,27 @@ class SgdController
     {
         $_SESSION['flash_notice'] = 'No tiene permiso para esta acción SGD.';
         header('Location: ?url=dashboard');
+        exit;
+    }
+
+    private function renderTipoPadresModalError(string $message): void
+    {
+        echo '<div class="sgd-tipo-padres-modal modal-inner">'
+            . '<header class="modal-form-head"><h3 class="modal-form-title">Padres permitidos</h3>'
+            . '<p class="modal-form-alert">' . htmlspecialchars($message, ENT_QUOTES, 'UTF-8') . '</p>'
+            . '</header>'
+            . '<footer class="sgd-tipo-padres-footer">'
+            . '<button type="button" class="btn-cancel" onclick="closeModalGod()">Cerrar</button>'
+            . '</footer></div>';
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    private function jsonResponse(array $payload): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode($payload, JSON_UNESCAPED_UNICODE);
         exit;
     }
 }

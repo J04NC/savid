@@ -40,10 +40,8 @@ class SgdDocumentoCodigoService
 
         if ($padreCodigo !== '') {
             $code = $padreCodigo . '-' . $this->buildChildSuffix($tipo, $n);
-        } elseif ($tipo === 'TA') {
-            $code = $this->buildTaRootCode($proceso, $linea, $n);
         } else {
-            $code = $proceso . '-' . $tipo . $n;
+            $code = $this->buildRootCode($proceso, $tipo, $linea, $n);
         }
 
         if ($id > 0) {
@@ -99,16 +97,21 @@ class SgdDocumentoCodigoService
         return strtoupper($consecutivo);
     }
 
-    private function buildTaRootCode(string $proceso, string $linea, string $consecutivo): string
+    /**
+     * Documento raíz (sin padre): proceso-tipo[+línea]-consecutivo.
+     * La línea documental es opcional y aplica a cualquier tipo (catálogo por empresa).
+     */
+    private function buildRootCode(string $proceso, string $tipo, string $linea, string $consecutivo): string
     {
-        if ($proceso === '' || $consecutivo === '') {
+        if ($proceso === '' || $tipo === '' || $consecutivo === '') {
             return '';
         }
 
-        if ($linea === '') {
-            return $proceso . '-TA' . $consecutivo;
+        $base = $proceso . '-' . $tipo;
+        if ($linea !== '') {
+            return $base . $linea . '-' . $consecutivo;
         }
 
-        return $proceso . '-TA' . $linea . '-' . $consecutivo;
+        return $base . $consecutivo;
     }
 }

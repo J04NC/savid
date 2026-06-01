@@ -13,7 +13,24 @@ def col_letters(ref):
     return m.group(1) if m else ""
 
 
-def read_xlsx(path):
+def xlsx_sheet_path(z, sheet_name=None):
+    ns = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    rel_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    wb = ET.fromstring(z.read("xl/workbook.xml"))
+    rels = ET.fromstring(z.read("xl/_rels/workbook.xml.rels"))
+    rid_map = {r.get("Id"): r.get("Target") for r in rels}
+    sheets = wb.findall("m:sheets/m:sheet", ns)
+    if sheet_name:
+        for sh in sheets:
+            if sh.get("name", "").strip().lower() == sheet_name.strip().lower():
+                target = rid_map.get(sh.get(f"{{{rel_ns}}}id"))
+                if target:
+                    return "xl/" + target.lstrip("/")
+        raise ValueError(f"Hoja no encontrada: {sheet_name}")
+    return "xl/" + rid_map.get(sheets[0].get(f"{{{rel_ns}}}id"), "worksheets/sheet1.xml").lstrip("/")
+
+
+def read_xlsx(path, sheet_name=None):
     ns = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
     with zipfile.ZipFile(path) as z:
         sst = ET.fromstring(z.read("xl/sharedStrings.xml"))
@@ -24,7 +41,8 @@ def read_xlsx(path):
                 strings.append(t.text or "")
             else:
                 strings.append("".join(x.text or "" for x in si.findall(".//m:t", ns)))
-        sheet = ET.fromstring(z.read("xl/worksheets/sheet1.xml"))
+        sheet_path = xlsx_sheet_path(z, sheet_name)
+        sheet = ET.fromstring(z.read(sheet_path))
         rows = defaultdict(dict)
         for c in sheet.findall(".//m:c", ns):
             ref = c.get("r", "")
@@ -78,15 +96,16 @@ def read_xls(path, sheet_names=None):
 
 def main():
     if len(sys.argv) < 2:
-        print(json.dumps({"error": "usage: sgd_read_sheet.py <file>"}))
+        print(json.dumps({"error": "usage: sgd_read_sheet.py <file> [sheet_name]"}))
         sys.exit(1)
     path = sys.argv[1]
+    sheet_name = sys.argv[2] if len(sys.argv) > 2 else None
     try:
         if path.lower().endswith(".xlsx"):
-            data = read_xlsx(path)
+            data = read_xlsx(path, sheet_name)
         else:
-            data = read_xls(path)
-        print(json.dumps({"ok": True, "rows": data}, ensure_ascii=False))
+            data = read_xls(path, [sheet_name] if sheet_name else None)
+        print(json.dumps({"ok": True, "rows": data, "sheet": sheet_name}, ensure_ascii=False))
     except Exception as e:
         print(json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False))
         sys.exit(2)

@@ -12,6 +12,10 @@ ALTER TABLE `sgd_proceso`
     MODIFY COLUMN `empresa_id` INT NOT NULL,
     MODIFY COLUMN `estado_id` SMALLINT UNSIGNED NOT NULL DEFAULT 1;
 
+ALTER TABLE `tipoproceso`
+    MODIFY COLUMN `empresa_id` INT NOT NULL,
+    MODIFY COLUMN `estado_id` SMALLINT UNSIGNED NOT NULL DEFAULT 1;
+
 ALTER TABLE `sgd_tipo_documental`
     MODIFY COLUMN `empresa_id` INT NOT NULL,
     MODIFY COLUMN `estado_id` SMALLINT UNSIGNED NOT NULL DEFAULT 1;
@@ -50,13 +54,24 @@ ALTER TABLE `sgd_empresa_config`
         FOREIGN KEY (`estado_id`) REFERENCES `estado` (`id`)
         ON DELETE RESTRICT ON UPDATE CASCADE;
 
+ALTER TABLE `tipoproceso`
+    ADD CONSTRAINT `fk_tipoproceso_empresa`
+        FOREIGN KEY (`empresa_id`) REFERENCES `empresa` (`id`)
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+    ADD CONSTRAINT `fk_tipoproceso_estado`
+        FOREIGN KEY (`estado_id`) REFERENCES `estado` (`id`)
+        ON DELETE RESTRICT ON UPDATE CASCADE;
+
 ALTER TABLE `sgd_proceso`
     ADD CONSTRAINT `fk_sgd_proceso_empresa`
         FOREIGN KEY (`empresa_id`) REFERENCES `empresa` (`id`)
         ON DELETE RESTRICT ON UPDATE CASCADE,
     ADD CONSTRAINT `fk_sgd_proceso_estado`
         FOREIGN KEY (`estado_id`) REFERENCES `estado` (`id`)
-        ON DELETE RESTRICT ON UPDATE CASCADE;
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+    ADD CONSTRAINT `fk_sgd_proceso_tipoproceso`
+        FOREIGN KEY (`tipoproceso_id`) REFERENCES `tipoproceso` (`id`)
+        ON DELETE SET NULL ON UPDATE CASCADE;
 
 ALTER TABLE `sgd_tipo_documental`
     ADD CONSTRAINT `fk_sgd_tipo_documental_empresa`

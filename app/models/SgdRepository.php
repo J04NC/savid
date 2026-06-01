@@ -2,6 +2,12 @@
 
 class SgdRepository
 {
+    /** Estado documental VIGENTE (tabla estado, tipo DOCUMENTAL). */
+    public const ESTADO_DOC_VIGENTE = 8;
+
+    /** @var list<int> */
+    private const ESTADO_DOC_IDS = [7, 8, 9, 10];
+
     private PDO $pdo;
     private ?string $documentoCodeColumn = null;
 
@@ -101,6 +107,103 @@ class SgdRepository
         return $map;
     }
 
+    public function findTipoDocumentalById(int $empresaId, int $id): ?array
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_tipo_documental');
+        $stmt = $this->pdo->prepare("
+            SELECT id, empresa_id, codigo, nombre, modo, orden
+            FROM sgd_tipo_documental
+            WHERE empresa_id = ? AND id = ? {$nd}
+            LIMIT 1
+        ");
+        $stmt->execute([$empresaId, $id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row ?: null;
+    }
+
+    /**
+     * @return list<int>
+     */
+    public function listTiposPadrePermitidosIds(int $empresaId, int $tipoDocumentalId): array
+    {
+        $stmt = $this->pdo->prepare('
+            SELECT tipo_padre_id
+            FROM sgd_tipo_documental_padre
+            WHERE empresa_id = ? AND tipo_documental_id = ? AND estado_id = 1
+            ORDER BY tipo_padre_id
+        ');
+        $stmt->execute([$empresaId, $tipoDocumentalId]);
+
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
+    }
+
+    /**
+     * @return array<int, list<int>> tipo hijo => tipos padre permitidos
+     */
+    public function listTiposPadrePermitidosMap(int $empresaId): array
+    {
+        $stmt = $this->pdo->prepare('
+            SELECT tipo_documental_id, tipo_padre_id
+            FROM sgd_tipo_documental_padre
+            WHERE empresa_id = ? AND estado_id = 1
+            ORDER BY tipo_documental_id, tipo_padre_id
+        ');
+        $stmt->execute([$empresaId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        $map = [];
+        foreach ($rows as $row) {
+            $hijo = (int)$row['tipo_documental_id'];
+            $map[$hijo][] = (int)$row['tipo_padre_id'];
+        }
+
+        return $map;
+    }
+
+    public function isTipoPadrePermitidoForHijo(int $empresaId, int $tipoHijoId, int $tipoPadreId): bool
+    {
+        if ($tipoHijoId <= 0 || $tipoPadreId <= 0) {
+            return false;
+        }
+
+        $allowed = $this->listTiposPadrePermitidosIds($empresaId, $tipoHijoId);
+
+        return $allowed !== [] && in_array($tipoPadreId, $allowed, true);
+    }
+
+    /**
+     * @param list<int> $padreTipoIds
+     */
+    public function replaceTiposPadrePermitidos(int $empresaId, int $tipoDocumentalId, array $padreTipoIds): void
+    {
+        $this->pdo->beginTransaction();
+        try {
+            $del = $this->pdo->prepare('
+                DELETE FROM sgd_tipo_documental_padre
+                WHERE empresa_id = ? AND tipo_documental_id = ?
+            ');
+            $del->execute([$empresaId, $tipoDocumentalId]);
+
+            if ($padreTipoIds !== []) {
+                $ins = $this->pdo->prepare('
+                    INSERT INTO sgd_tipo_documental_padre
+                        (empresa_id, tipo_documental_id, tipo_padre_id, estado_id, created_at, created_by)
+                    VALUES (?, ?, ?, 1, NOW(3), ?)
+                ');
+                $userId = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : null;
+                foreach ($padreTipoIds as $padreId) {
+                    $ins->execute([$empresaId, $tipoDocumentalId, (int)$padreId, $userId]);
+                }
+            }
+
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            $this->pdo->rollBack();
+            throw $e;
+        }
+    }
+
     public function findProcesoId(int $empresaId, string $codigo): ?int
     {
         $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_proceso');
@@ -115,13 +218,37 @@ class SgdRepository
         return $id !== false ? (int)$id : null;
     }
 
-    public function insertProceso(int $empresaId, string $codigo, string $nombre, ?string $tipoProceso = null): int
+    public function findTipoprocesoIdByLabel(int $empresaId, ?string $label): ?int
     {
+        $label = trim((string)$label);
+        if ($label === '' || $empresaId < 1) {
+            return null;
+        }
+
+        $norm = strtoupper(preg_replace('/\s+/', ' ', $label));
         $stmt = $this->pdo->prepare('
-            INSERT INTO sgd_proceso (empresa_id, codigo, nombre, tipo_proceso, estado_id, created_at)
+            SELECT id FROM tipoproceso
+            WHERE empresa_id = ?
+              AND (UPPER(TRIM(nombre)) = ? OR UPPER(TRIM(codigo)) = ?)
+            LIMIT 1
+        ');
+        $stmt->execute([$empresaId, $norm, $norm]);
+        $id = $stmt->fetchColumn();
+
+        return $id !== false ? (int)$id : null;
+    }
+
+    public function insertProceso(
+        int $empresaId,
+        string $codigo,
+        string $nombre,
+        ?int $tipoprocesoId = null
+    ): int {
+        $stmt = $this->pdo->prepare('
+            INSERT INTO sgd_proceso (empresa_id, codigo, nombre, tipoproceso_id, estado_id, created_at)
             VALUES (?, ?, ?, ?, 1, NOW(3))
         ');
-        $stmt->execute([$empresaId, $codigo, $nombre, $tipoProceso]);
+        $stmt->execute([$empresaId, $codigo, $nombre, $tipoprocesoId]);
 
         return (int)$this->pdo->lastInsertId();
     }
@@ -151,29 +278,45 @@ class SgdRepository
         return (int)$this->pdo->lastInsertId();
     }
 
-    public function findSerieId(int $dependenciaId, string $codigo): ?int
+    public function findSerieId(int $empresaId, string $codigo): ?int
     {
         $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_serie');
         $stmt = $this->pdo->prepare("
             SELECT id FROM sgd_serie
-            WHERE dependencia_id = ? AND codigo = ? {$nd}
+            WHERE empresa_id = ? AND codigo = ? {$nd}
             LIMIT 1
         ");
-        $stmt->execute([$dependenciaId, $codigo]);
+        $stmt->execute([$empresaId, $codigo]);
         $id = $stmt->fetchColumn();
 
         return $id !== false ? (int)$id : null;
     }
 
-    public function insertSerie(int $empresaId, int $dependenciaId, string $codigo, string $nombre): int
+    public function insertSerie(int $empresaId, string $codigo, string $nombre): int
     {
         $stmt = $this->pdo->prepare('
-            INSERT INTO sgd_serie (empresa_id, dependencia_id, codigo, nombre, estado_id, created_at)
-            VALUES (?, ?, ?, ?, 1, NOW(3))
+            INSERT INTO sgd_serie (empresa_id, codigo, nombre, estado_id, created_at)
+            VALUES (?, ?, ?, 1, NOW(3))
         ');
-        $stmt->execute([$empresaId, $dependenciaId, $codigo, $nombre]);
+        $stmt->execute([$empresaId, $codigo, $nombre]);
 
         return (int)$this->pdo->lastInsertId();
+    }
+
+    public function updateSerieNombre(int $serieId, string $nombre): void
+    {
+        $stmt = $this->pdo->prepare('
+            UPDATE sgd_serie SET nombre = ?, updated_at = NOW(3) WHERE id = ?
+        ');
+        $stmt->execute([$nombre, $serieId]);
+    }
+
+    public function updateSubserieNombre(int $subserieId, string $nombre): void
+    {
+        $stmt = $this->pdo->prepare('
+            UPDATE sgd_subserie SET nombre = ?, updated_at = NOW(3) WHERE id = ?
+        ');
+        $stmt->execute([$nombre, $subserieId]);
     }
 
     public function findSubserieId(int $serieId, string $codigo): ?int
@@ -246,8 +389,8 @@ class SgdRepository
             INSERT INTO sgd_documento (
                 empresa_id, ' . $codeColumn . ', nombre, proceso_id, tipo_documental_id,
                 version_actual, fecha_primera_aprobacion, fecha_ultima_aprobacion,
-                estado_documental, estado_id, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(3))
+                estado_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3))
         ');
         $stmt->execute([
             $empresaId,
@@ -258,7 +401,7 @@ class SgdRepository
             $row['version_actual'] ?? null,
             $row['fecha_primera_aprobacion'] ?? null,
             $row['fecha_ultima_aprobacion'] ?? null,
-            $row['estado_documental'] ?? 'vigente',
+            $this->normalizeEstadoDocumentalId(isset($row['estado_id']) ? (int)$row['estado_id'] : null),
         ]);
 
         return (int)$this->pdo->lastInsertId();
@@ -402,12 +545,13 @@ class SgdRepository
      */
     public function listProcesosByEmpresa(int $empresaId): array
     {
-        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_proceso');
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_proceso', 'p');
         $stmt = $this->pdo->prepare("
-            SELECT id, codigo, nombre, tipo_proceso
-            FROM sgd_proceso
-            WHERE empresa_id = ? {$nd}
-            ORDER BY orden, codigo
+            SELECT p.id, p.codigo, p.nombre, p.tipoproceso_id, tp.nombre AS tipoproceso_nombre
+            FROM sgd_proceso p
+            LEFT JOIN tipoproceso tp ON tp.id = p.tipoproceso_id
+            WHERE p.empresa_id = ? {$nd}
+            ORDER BY p.orden, p.codigo
         ");
         $stmt->execute([$empresaId]);
 
@@ -441,6 +585,9 @@ class SgdRepository
             SELECT
                 d.id,
                 d.documento_id,
+                d.proceso_id,
+                d.tipo_documental_id,
+                d.linea_documental_id,
                 d.consecutivo,
                 d.nombre,
                 p.codigo AS proceso_codigo,
@@ -451,7 +598,6 @@ class SgdRepository
             LEFT JOIN sgd_tipo_documental t ON t.id = d.tipo_documental_id
             LEFT JOIN sgd_linea_documental ld ON ld.id = d.linea_documental_id
             WHERE d.empresa_id = ? {$nd}
-              AND d.documento_id IS NULL
         ";
         $params = [$empresaId];
         if ($excludeId !== null && $excludeId > 0) {
@@ -493,8 +639,8 @@ class SgdRepository
                 d.nombre,
                 d.modo,
                 d.version_actual,
-                d.estado_documental,
                 d.estado_id,
+                e.nombre AS estado_nombre,
                 p.codigo AS proceso_codigo,
                 p.nombre AS proceso_nombre,
                 t.codigo AS tipo_codigo,
@@ -504,6 +650,7 @@ class SgdRepository
                 pad.consecutivo AS padre_consecutivo,
                 pad.nombre AS padre_nombre
             FROM sgd_documento d
+            LEFT JOIN estado e ON e.id = d.estado_id
             LEFT JOIN sgd_proceso p ON p.id = d.proceso_id
             LEFT JOIN sgd_tipo_documental t ON t.id = d.tipo_documental_id
             LEFT JOIN sgd_linea_documental ld ON ld.id = d.linea_documental_id
@@ -599,6 +746,79 @@ class SgdRepository
         return (bool)$stmt->fetchColumn();
     }
 
+    /**
+     * Clave de ámbito para consecutivo (proceso|padre|tipo|línea).
+     */
+    public function makeConsecutivoScopeKey(?int $procesoId, ?int $documentoId, ?int $tipoId, ?int $lineaId): string
+    {
+        return implode('|', [
+            (int)($procesoId ?? 0),
+            (int)($documentoId ?? 0),
+            (int)($tipoId ?? 0),
+            (int)($lineaId ?? 0),
+        ]);
+    }
+
+    /**
+     * @return array<string, int> máximo consecutivo numérico por ámbito
+     */
+    public function buildConsecutivoMaxIndex(int $empresaId): array
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_documento', 'd');
+        $stmt = $this->pdo->prepare("
+            SELECT d.proceso_id, d.documento_id, d.tipo_documental_id, d.linea_documental_id, d.consecutivo
+            FROM sgd_documento d
+            WHERE d.empresa_id = ? {$nd}
+        ");
+        $stmt->execute([$empresaId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        $index = [];
+        foreach ($rows as $row) {
+            $num = $this->parseNumericConsecutivo((string)($row['consecutivo'] ?? ''));
+            if ($num === null) {
+                continue;
+            }
+            $key = $this->makeConsecutivoScopeKey(
+                isset($row['proceso_id']) ? (int)$row['proceso_id'] : null,
+                isset($row['documento_id']) && $row['documento_id'] !== null ? (int)$row['documento_id'] : null,
+                isset($row['tipo_documental_id']) ? (int)$row['tipo_documental_id'] : null,
+                isset($row['linea_documental_id']) && $row['linea_documental_id'] !== null ? (int)$row['linea_documental_id'] : null
+            );
+            if ($num > ($index[$key] ?? 0)) {
+                $index[$key] = $num;
+            }
+        }
+
+        return $index;
+    }
+
+    public function getNextConsecutivo(
+        int $empresaId,
+        ?int $procesoId,
+        ?int $documentoId,
+        ?int $tipoId,
+        ?int $lineaId,
+        ?array $index = null
+    ): string {
+        $key = $this->makeConsecutivoScopeKey($procesoId, $documentoId, $tipoId, $lineaId);
+        if ($index === null) {
+            $index = $this->buildConsecutivoMaxIndex($empresaId);
+        }
+
+        return (string)(($index[$key] ?? 0) + 1);
+    }
+
+    private function parseNumericConsecutivo(string $raw): ?int
+    {
+        $raw = trim($raw);
+        if ($raw === '' || !ctype_digit($raw)) {
+            return null;
+        }
+
+        return (int)$raw;
+    }
+
     public function saveDocumento(int $empresaId, array $data): int
     {
         $id = (int)($data['id'] ?? 0);
@@ -613,7 +833,9 @@ class SgdRepository
             'version_actual' => $data['version_actual'] ?? null,
             'fecha_primera_aprobacion' => $data['fecha_primera_aprobacion'] ?? null,
             'fecha_ultima_aprobacion' => $data['fecha_ultima_aprobacion'] ?? null,
-            'estado_documental' => $data['estado_documental'] ?? 'vigente',
+            'estado_id' => $this->normalizeEstadoDocumentalId(
+                isset($data['estado_id']) ? (int)$data['estado_id'] : null
+            ),
         ];
 
         if ($id > 0) {
@@ -622,7 +844,7 @@ class SgdRepository
                 SET proceso_id = ?, documento_id = ?, tipo_documental_id = ?, linea_documental_id = ?,
                     consecutivo = ?, nombre = ?, modo = ?, version_actual = ?,
                     fecha_primera_aprobacion = ?, fecha_ultima_aprobacion = ?,
-                    estado_documental = ?, updated_at = NOW(3)
+                    estado_id = ?, updated_at = NOW(3)
                 WHERE id = ? AND empresa_id = ?
             ');
             $stmt->execute([
@@ -636,7 +858,7 @@ class SgdRepository
                 $fields['version_actual'],
                 $fields['fecha_primera_aprobacion'],
                 $fields['fecha_ultima_aprobacion'],
-                $fields['estado_documental'],
+                $fields['estado_id'],
                 $id,
                 $empresaId,
             ]);
@@ -649,8 +871,8 @@ class SgdRepository
                 empresa_id, proceso_id, documento_id, tipo_documental_id, linea_documental_id,
                 consecutivo, nombre, modo, version_actual,
                 fecha_primera_aprobacion, fecha_ultima_aprobacion,
-                estado_documental, estado_id, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(3))
+                estado_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3))
         ');
         $stmt->execute([
             $empresaId,
@@ -664,10 +886,35 @@ class SgdRepository
             $fields['version_actual'],
             $fields['fecha_primera_aprobacion'],
             $fields['fecha_ultima_aprobacion'],
-            $fields['estado_documental'],
+            $fields['estado_id'],
         ]);
 
         return (int)$this->pdo->lastInsertId();
+    }
+
+    /**
+     * @return list<array{id: int, nombre: string}>
+     */
+    public function listEstadosDocumentales(): array
+    {
+        $ids = implode(',', self::ESTADO_DOC_IDS);
+        $stmt = $this->pdo->query("
+            SELECT id, nombre
+            FROM estado
+            WHERE id IN ({$ids})
+            ORDER BY id ASC
+        ");
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    public function normalizeEstadoDocumentalId(?int $estadoId): int
+    {
+        if ($estadoId !== null && in_array($estadoId, self::ESTADO_DOC_IDS, true)) {
+            return $estadoId;
+        }
+
+        return self::ESTADO_DOC_VIGENTE;
     }
 
     public function softDeleteDocumento(int $empresaId, int $id, ?int $userId = null): bool

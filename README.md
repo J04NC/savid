@@ -253,7 +253,10 @@ En MySQL, el comentario de cada columna (`COLUMN_COMMENT`) puede llevar **varias
 |-----------|---------|--------|
 | **`type:`** *valor* | `type:email` | Define el control en el formulario. Valores especiales: **`password`** (input dedicado, hash al guardar en servidor, ver mas abajo); **`textarea`**. Cualquier otro valor se usa como **`type` del `<input>` HTML** (p. ej. `text`, `email`, `number`, `date`…); el navegador puede aplicar validacion nativa (`email`, etc.). |
 | **`relmode:`** *modo* | `relmode:autocomplete` | Solo en columnas **clave foranea** (`*_id` con relacion declarada). **`select`**: lista completa (comportamiento por defecto si no pones `relmode`). **`autocomplete`**: siempre widget de busqueda con API `catalogSearch`. **`auto`**: catalogo solo si la tabla referenciada supera **~250 filas** (`ModuleService::CRUD_CATALOG_AUTO_THRESHOLD` y `CrudService::getApproxTableRows`); si no, lista tipo `select`. En `getConfigFromComment` los tres valores se guardan tal cual en configuracion de la vista; la decision catalogo vs select para `auto` ocurre al armar datos en `ModuleService`. |
-| **`relfilter:`** *lista* | `relfilter:1,2,3` o `relfilter:!5,Bogota` | Restringe las filas que alimentan el **combo relacion** en `getRelationData` (opciones del `<select>`). Lista separada por comas: numeros se interpretan como **`id`**; texto como coincidencia por **etiqueta mostrada** (`nombre`, etc.). Prefijo **`!`** en un elemento → **excluir** ese id o ese nombre (se generan condiciones `NOT IN`). Si no usas `relfilter`, no se añade filtro SQL extra. **Nota:** la busqueda del **catalogo** (`searchCatalogOptions`) **no** reaplica hoy esta lista; el filtro aplica de forma fiable al listado del modo `select` y a datos auxiliares cargados con la misma funcion. |
+| **`rel:`** *tabla* | `rel:tercero` | Tabla desde la que se toma la **etiqueta** del combo (puede diferir de la FK). Si la columna es **`empresa_id`** (valor = `empresa.id`) y pones **`rel:tercero`**, el CRUD hace `JOIN empresa → tercero` y muestra **`razon_social`** sin confundir el id del tercero con el de la empresa. |
+| **`label:`** *columna* | `label:razon_social` | Columna de la tabla **`rel:`** usada como texto visible (junto con `rel:`). |
+| **`relfilter:`** *lista* | `relfilter:1,2,3` o `relfilter:!5,Bogota` | Restringe las filas que alimentan el **combo relacion** en `getRelationData` (opciones del `<select>`). Lista separada por comas: numeros se interpretan como **`id`** de la tabla origen de la FK (`empresa.id` si la columna es `empresa_id`); texto como coincidencia por **etiqueta mostrada**. Prefijo **`!`** en un elemento → **excluir** ese id o ese nombre (se generan condiciones `NOT IN`). Si no usas `relfilter`, no se añade filtro SQL extra. **Nota:** la busqueda del **catalogo** (`searchCatalogOptions`) **no** reaplica hoy esta lista; el filtro aplica de forma fiable al listado del modo `select` y a datos auxiliares cargados con la misma funcion. |
+| **`reltipo:`** *codigo* | `reltipo:GENERAL` | Solo en FK a **`estado`**. Filtra por `estado_tipo.codigo`: **GENERAL** (activo/inactivo), **CONTABLE**, **PERMISO** (permitir/denegar), **DOCUMENTAL** (borrador, vigente, obsoleto, firmado). Preferir `reltipo` frente a `relfilter:1,2` cuando el combo sea de estados. |
 | **`show:`** *vistas* | `show:none`, `show:form`, `show:table`, `show:form,table` | **`none`**: oculta la columna en **formulario y tabla**. Sin `none`: puedes combinar **`form`** y **`table`** separados por coma para mostrar solo en formulario, solo en grilla, o en ambos. |
 | **`order:`** *n* | `order:10` | Entero para **ordenar** columnas en formulario y cabecera de grilla (menor numero = mas arriba). Por defecto interno `999` si no se indica. |
 | **`placeholder:`** *texto* | `placeholder:Buscar…` | Texto de **marcador de posicion** en inputs/selects del formulario. Evita el caracter `|` dentro del texto (partiria la directiva). |
@@ -271,6 +274,12 @@ COMMENT 'type:text|uppercase|order:15|placeholder:Numero de documento'
 
 ```sql
 COMMENT 'type:email|relmode:autocomplete|order:40|placeholder:Correo de contacto'
+```
+
+**Ejemplo empresa** (catálogos SGD y cualquier `empresa_id`):
+
+```sql
+COMMENT 'label:Empresa|rel:tercero|label:razon_social|title:Razón social de la empresa'
 ```
 
 **Referencia de codigo:** `getConfigFromComment` en `app/views/crud/table.php`; `extractRelModeFromComment`, `extractRelFilterListFromColumnComment`, `columnCommentIsPasswordType`, `columnCommentIsUppercaseOnly` y uso de `relfilter` en `getRelationData` en `app/services/CrudService.php` (`save` aplica mayusculas antes de persistir); umbral `relmode:auto` en `ModuleService::CRUD_CATALOG_AUTO_THRESHOLD`; `initCrudUppercaseFields` / `crudNormalizeUppercaseField` en `public/js/crud.js`.
@@ -422,7 +431,7 @@ En cada **INSERT** y **UPDATE** vía PDO, `TrackableColumnsService` rellena auto
 
 El usuario de sesión (`$_SESSION['user_id']`) se usa para `*_by`. Scripts CLI sin sesión dejan `*_by` en NULL pero sí marcan `*_at`.
 
-El CRUD no permite editar estos campos desde el formulario (se excluyen en `CrudService::save`).
+El CRUD no permite editar estos campos desde el formulario (se excluyen en `CrudService::save`). En la base de datos, cada columna de auditoría y soft delete debe llevar **`COMMENT 'show:none'`** (u `show:none|…` si ya hay otras directivas) para ocultarla también en formulario y grilla. Plantilla para tablas nuevas: `database/snippets/trackable_columns.sql`. Para actualizar tablas existentes: `php scripts/apply_trackable_column_comments.php`.
 
 ---
 
