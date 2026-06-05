@@ -88,7 +88,15 @@ function initModalSystem() {
         modal.classList.remove("hidden");
         document.body.classList.add("modal-open");
 
-        box.className = "modal-content modal-" + size;
+        const isPermisosModal = /(^|\/)(rol\/permisos|usuario\/permisos)/.test(url);
+        const modalSize = isPermisosModal ? "xl" : size;
+
+        box.className = "modal-content modal-" + modalSize;
+        if (isPermisosModal) {
+            box.classList.add("modal-permisos");
+        } else {
+            box.classList.remove("modal-permisos");
+        }
 
         container.innerHTML =
             `<div class="modal-loader">${loading}</div>`;
@@ -132,6 +140,7 @@ function initModalSystem() {
 
             container.innerHTML = "";
             box.className = "modal-content";
+            box.classList.remove("modal-permisos");
 
             if (!silent) {
                 document.activeElement?.blur();

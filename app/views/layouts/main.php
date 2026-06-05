@@ -138,10 +138,10 @@ autocomplete="off"
 <!-- MODAL CONTEXTO -->
 <div id="contextModal" class="modal hidden">
 <div class="modal-content">
-<span class="close-modal" id="closeContextModal">&times;</span>
-
+<div class="modal-header-bar">
+<span class="close-modal" id="closeContextModal" role="button" tabindex="0" aria-label="Cerrar">&times;</span>
+</div>
 <div id="contextContainer"></div>
-
 </div>
 </div>
 

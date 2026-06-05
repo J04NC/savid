@@ -1,9 +1,3 @@
-<script>
-document.addEventListener("DOMContentLoaded", function () {
-    const modal = document.querySelector(".modal-content");
-    if (modal) modal.classList.add("modal-xl");
-});
-</script>
 
 <form id="formUsuarioPermisos">
 
