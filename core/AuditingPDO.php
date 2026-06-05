@@ -5,6 +5,9 @@
  */
 class AuditingPDO extends PDO
 {
+    /** ID devuelto por el último INSERT de negocio (la auditoría inserta después y pisa LAST_INSERT_ID). */
+    private ?string $pendingLastInsertId = null;
+
     /**
      * prepare nativo (sin envoltorio) para re-preparar SQL modificado en execute().
      */
@@ -31,6 +34,37 @@ class AuditingPDO extends PDO
         return new AuditingPDOStatement($stmt, (string)$query, $this);
     }
 
+    /**
+     * Conserva el autoincrement del INSERT de negocio antes de que persistLog escriba en auditoria.
+     */
+    public function rememberBusinessLastInsertId(string $id): void
+    {
+        if ($id !== '' && $id !== '0') {
+            $this->pendingLastInsertId = $id;
+        }
+    }
+
+    /**
+     * LAST_INSERT_ID() real de MySQL (sin cola de negocio para el llamador).
+     */
+    public function nativeLastInsertId(): string
+    {
+        return (string) parent::lastInsertId();
+    }
+
+    #[\ReturnTypeWillChange]
+    public function lastInsertId($name = null)
+    {
+        if ($this->pendingLastInsertId !== null) {
+            $id = $this->pendingLastInsertId;
+            $this->pendingLastInsertId = null;
+
+            return $id;
+        }
+
+        return parent::lastInsertId($name);
+    }
+
     public function exec($statement): int|false
     {
         $sql = trim((string)$statement);
@@ -39,10 +73,17 @@ class AuditingPDO extends PDO
             AuditService::recordBeforeExec($this, $sql);
         }
 
-        $result = parent::exec($statement);
+        $capturedInsertId = null;
+        if ($result !== false && preg_match('/^INSERT\b/i', $sql)) {
+            $capturedInsertId = parent::lastInsertId();
+        }
 
         if ($result !== false && AuditService::isEnabled() && AuditService::isMutatingSql($sql)) {
             AuditService::recordAfterExec($this, $sql);
+        }
+
+        if ($capturedInsertId !== null && $capturedInsertId !== '' && $capturedInsertId !== '0') {
+            $this->rememberBusinessLastInsertId((string)$capturedInsertId);
         }
 
         return $result;

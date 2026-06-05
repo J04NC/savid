@@ -7,6 +7,7 @@ class SgdController
     private SgdConfigService $configService;
     private SgdImportService $importService;
     private SgdDocumentoService $documentoService;
+    private SgdCcdService $ccdService;
     private SgdTipoDocumentalPadreService $tipoPadreService;
 
     public function __construct()
@@ -16,6 +17,7 @@ class SgdController
         $this->configService = new SgdConfigService();
         $this->importService = new SgdImportService();
         $this->documentoService = new SgdDocumentoService();
+        $this->ccdService = new SgdCcdService();
         $this->tipoPadreService = new SgdTipoDocumentalPadreService();
     }
 
@@ -212,6 +214,73 @@ class SgdController
 
         $view = BASE_PATH . '/app/views/sgd/documentos.php';
         require BASE_PATH . '/app/views/layouts/main.php';
+    }
+
+    public function ccd(): void
+    {
+        if (!PermisoService::can('sgd/ccd', 'ver')) {
+            $this->deny();
+        }
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $this->handleCcdPost();
+
+            return;
+        }
+
+        $page = $this->ccdService->getPageData($_GET);
+        $scope = $page['scope'];
+        $empresaId = $page['empresaId'];
+        $entradas = $page['entradas'];
+        $total = $page['total'];
+        $filterDependenciaId = $page['filterDependenciaId'];
+        $edit = $page['edit'];
+        $config = $page['config'];
+        $catalogos = $page['catalogos'];
+        $catalogosJson = $page['catalogosJson'];
+        $selectedGridId = (int)($page['selectedGridId'] ?? 0);
+        $breadcrumb = $this->moduleService->buildBreadcrumbForRuta('sgd/ccd');
+        $canGuardar = PermisoService::can('sgd/ccd', 'guardar');
+        $canEliminar = PermisoService::can('sgd/ccd', 'eliminar');
+        $canImportar = PermisoService::can('sgd/importar', 'importar')
+            || PermisoService::can('sgd/importar', 'guardar');
+
+        $view = BASE_PATH . '/app/views/sgd/ccd.php';
+        require BASE_PATH . '/app/views/layouts/main.php';
+    }
+
+    private function handleCcdPost(): void
+    {
+        $action = trim((string)($_POST['_action'] ?? 'save'));
+
+        if ($action === 'delete') {
+            if (!PermisoService::can('sgd/ccd', 'eliminar')) {
+                $this->deny();
+            }
+            $result = $this->ccdService->delete($_GET, $_POST);
+            $_SESSION['flash_notice'] = $result['message'];
+            header('Location: ?url=sgd/ccd' . $this->empresaQuery());
+
+            exit;
+        }
+
+        if (!PermisoService::can('sgd/ccd', 'guardar')) {
+            $this->deny();
+        }
+
+        $result = $this->ccdService->save($_POST, $_GET);
+        $_SESSION['flash_notice'] = $result['message'];
+        $q = $this->empresaQuery();
+        if (!empty($result['id'])) {
+            $q .= ($q === '' ? '&' : '&') . 'id=' . (int)$result['id'];
+        }
+        $dep = (int)($_POST['dependencia_id'] ?? $_GET['dependencia_id'] ?? 0);
+        if ($dep > 0) {
+            $q .= ($q === '' ? '&' : '&') . 'dependencia_id=' . $dep;
+        }
+        header('Location: ?url=sgd/ccd' . $q);
+
+        exit;
     }
 
     private function handleDocumentosPost(): void

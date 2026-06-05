@@ -163,6 +163,67 @@ class UsuarioFormValidationService
     }
 
     /**
+     * Validaciones según modo resuelto en servidor (spec §5).
+     *
+     * @param array<string, mixed> $data
+     * @param list<string> $columnNames
+     */
+    public function validateForMode(array &$data, UsuarioSaveContext $ctx, array $columnNames): void
+    {
+        if ($ctx->isLinkOnly()) {
+            return;
+        }
+
+        $id = $ctx->usuarioId;
+
+        if ($ctx->isEdicion() && $id !== null) {
+            $this->assertUsuarioGestionableEnSesion($id);
+        }
+
+        $this->validatePersonaDocumentoFields($data);
+        $this->validateBeforeSave($data, $id, $columnNames);
+    }
+
+    /**
+     * S10/S11: el POST debe traer tipo válido si hay número de documento.
+     *
+     * @param array<string, mixed> $data
+     */
+    private function validatePersonaDocumentoFields(array $data): void
+    {
+        $numero = trim((string)($data['numero_documento'] ?? ''));
+        if ($numero === '') {
+            return;
+        }
+
+        $tipoRaw = $data['tipodocumento_id'] ?? '';
+        if ($tipoRaw === '' || $tipoRaw === null || (int)$tipoRaw <= 0) {
+            throw new Exception(json_encode([
+                'tipodocumento_id' => 'Seleccione el tipo de documento (ej. Cédula de Ciudadanía). El formulario no envió ese valor al guardar.',
+            ], JSON_UNESCAPED_UNICODE));
+        }
+
+        $tipoId = (int)$tipoRaw;
+        if (!$this->tipodocumentoRowExists($tipoId)) {
+            throw new Exception(json_encode([
+                'tipodocumento_id' => 'El tipo de documento no es válido. Vuelva a elegir «Cédula de Ciudadanía» en la lista.',
+            ], JSON_UNESCAPED_UNICODE));
+        }
+    }
+
+    private function tipodocumentoRowExists(int $tipodocumentoId): bool
+    {
+        if ($tipodocumentoId <= 0 || !$this->tableExists('tipodocumento')) {
+            return false;
+        }
+
+        $stmt = $this->pdo->prepare('SELECT 1 FROM tipodocumento WHERE id = ? LIMIT 1');
+        $stmt->execute([$tipodocumentoId]);
+
+        return (bool)$stmt->fetchColumn();
+    }
+
+    /**
      * Tras resolver/crear tercero e identificación (ensureTercero).
      *
      * @param array<string, mixed> $data
@@ -698,7 +759,8 @@ class UsuarioFormValidationService
      */
     public function isSuperAdminViewer(): bool
     {
-        return !empty($_SESSION['es_super_admin']);
+        return !empty($_SESSION['es_super_admin'])
+            || (int)($_SESSION['rol_id'] ?? 0) === self::SUPER_ADMIN_ROL_ID;
     }
 
     /**

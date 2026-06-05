@@ -1193,6 +1193,24 @@ function showCrudFlashMessage(msg) {
    CLICK FILAS
 ===================================================== */
 
+function crudSelectHasOption(sel, value) {
+    const v = String(value);
+    return Array.prototype.some.call(sel.options, function (opt) {
+        return String(opt.value) === v;
+    });
+}
+
+function crudSetSelectValueSafely(sel, value) {
+    if (!sel || sel.tagName !== "SELECT") return;
+    if (value === null || value === undefined || value === "") {
+        return;
+    }
+    const v = String(value);
+    if (crudSelectHasOption(sel, v)) {
+        sel.value = v;
+    }
+}
+
 function crudSetFieldValue(form, field, value, displayLabel) {
     const input = form.querySelector('[name="' + field + '"]');
     if (!input) return;
@@ -1203,6 +1221,12 @@ function crudSetFieldValue(form, field, value, displayLabel) {
     }
 
     const val = value === null || value === undefined ? "" : String(value);
+
+    if (input.tagName === "SELECT") {
+        crudSetSelectValueSafely(input, val);
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+        return;
+    }
 
     if (input.classList.contains("crud-catalog-id")) {
         input.value = val;
@@ -1480,6 +1504,11 @@ function initCrudNuevo() {
             if (ovEl) ovEl.value = "0";
             const acEl = usuarioForm.querySelector('#usuario_identificacion_accion');
             if (acEl) acEl.value = "update_principal";
+            try {
+                sessionStorage.removeItem("savid_usuario_crud_form_draft_v1");
+            } catch (e) {
+                /* noop */
+            }
         }
 
         const empresaForm = document.querySelector('form[data-crud-context="empresa"]');
@@ -2126,11 +2155,18 @@ function initCrudValidation() {
 
     if (!form) return;
 
+    if (form.getAttribute("data-crud-context") === "usuario") {
+        return;
+    }
+
     form.addEventListener("submit", function (e) {
 
         let errores = 0;
 
-        document.querySelectorAll(".form-input[required]").forEach(input => {
+        form.querySelectorAll(".form-input[required]").forEach(function (input) {
+            if (input.disabled || input.offsetParent === null) {
+                return;
+            }
 
             if (!input.value.trim()) {
 

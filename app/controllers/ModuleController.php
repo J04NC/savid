@@ -143,21 +143,42 @@ class ModuleController
                     }
                 }
 
-                $this->moduleService->save($currentItem['ruta'],$_POST);
+                $saved = $this->moduleService->save($currentItem['ruta'], $_POST);
+
+                if ($saved === false) {
+                    throw new Exception(json_encode([
+                        'general' => 'No se pudo guardar el registro. Revise los datos obligatorios e intente de nuevo.',
+                    ], JSON_UNESCAPED_UNICODE));
+                }
+
+                if (!empty($_SESSION['flash_notice'])) {
+                    // Mensaje ya definido (p. ej. vinculación sin alta nueva en usuario).
+                } elseif ($currentItem['ruta'] === 'usuario' && empty($_POST['id'])) {
+                    $_SESSION['flash_notice'] = 'Usuario guardado correctamente.';
+                }
+
+                if ($currentItem['ruta'] === 'usuario') {
+                    unset($_SESSION['usuario_crud_form_draft']);
+                }
 
                 $modQ = !empty($currentItem['modulo_id']) ? '&modulo=' . (int)$currentItem['modulo_id'] : '';
                 header('Location: ?url=' . $ruta . $modQ . '&success=1');
                 exit;
 
-            }catch(Exception $e){
+            }catch(Throwable $e){
 
-                $errors = json_decode($e->getMessage(),true);
+                $errors = json_decode($e->getMessage(), true);
 
-                if(!is_array($errors)){
-                    $errors = ['general'=>$e->getMessage()];
+                if (!is_array($errors)) {
+                    $errors = ['general' => $this->formatCrudSaveErrorMessage($e, $currentItem['ruta'] ?? '')];
                 }
 
                 $old = $_POST;
+
+                if ($currentItem['ruta'] === 'usuario') {
+                    $old = (new CrudService())->sanitizeUsuarioFormPostForDisplay($_POST);
+                    $_SESSION['usuario_crud_form_draft'] = $old;
+                }
             }
         }
 
@@ -239,5 +260,30 @@ class ModuleController
     public function __call($method,$params)
     {
         $this->index();
+    }
+
+    private function formatCrudSaveErrorMessage(Throwable $e, string $ruta): string
+    {
+        $msg = $e->getMessage();
+
+        if (str_contains($msg, 'fk_tercero_identificacion_tipodocumento')) {
+            return 'El tipo de documento no es válido. Vuelva a elegir «Cédula de Ciudadanía» (u otro) en el formulario y guarde de nuevo.';
+        }
+
+        if (str_contains($msg, 'fk_tercero_identificacion_tercero')) {
+            return UsuarioSaveMessages::PERSONA_NOT_FOUND
+                . ' Detalle: referencia interna de persona incorrecta; pulse Limpiar y guarde de nuevo.';
+        }
+
+        if ($ruta === 'usuario' && str_contains($msg, 'uq_tercero_identificacion_doc')) {
+            return 'Ya existe otra persona con ese mismo tipo y número de documento. '
+                . 'Busque el documento en el formulario o use otro número.';
+        }
+
+        if ($ruta === 'usuario' && str_contains($msg, 'terceroidentificacion')) {
+            return 'No se pudo registrar la identificación de la persona. Use Limpiar, complete tipo y número de documento, y guarde de nuevo.';
+        }
+
+        return $msg;
     }
 }

@@ -46,8 +46,17 @@ class AuditingPDOStatement
 
         $ok = $this->inner->execute($effective);
 
+        $capturedInsertId = null;
+        if ($ok && preg_match('/^INSERT\b/i', ltrim($sql))) {
+            $capturedInsertId = $this->connection->nativeLastInsertId();
+        }
+
         if ($ok && AuditService::isEnabled() && AuditService::isMutatingSql($sql)) {
             AuditService::recordAfterMutation($this->connection, $sql, $effective, $snapshot);
+        }
+
+        if ($capturedInsertId !== null && $capturedInsertId !== '' && $capturedInsertId !== '0') {
+            $this->connection->rememberBusinessLastInsertId((string)$capturedInsertId);
         }
 
         return $ok;

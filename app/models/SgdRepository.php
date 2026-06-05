@@ -359,6 +359,99 @@ class SgdRepository
         return $id !== false ? (int)$id : null;
     }
 
+    /**
+     * Resuelve código SGC del CCD (ej. GE-PD3-F1) al documento del listado maestro.
+     */
+    public function findDocumentoIdByCodigoCalidad(int $empresaId, string $codigoCalidad): ?int
+    {
+        $codigoCalidad = strtoupper(trim($codigoCalidad));
+        if ($codigoCalidad === '') {
+            return null;
+        }
+
+        $direct = $this->findDocumentoId($empresaId, $codigoCalidad);
+        if ($direct) {
+            return $direct;
+        }
+
+        $tipoCodigos = array_map(
+            static fn(array $t) => (string)$t['codigo'],
+            $this->listTiposByEmpresa($empresaId)
+        );
+        if ($tipoCodigos === []) {
+            return null;
+        }
+
+        $parser = new SgdCodigoParserService();
+        $parsed = $parser->parse($codigoCalidad, $tipoCodigos);
+        if ($parsed['proceso'] === '' || $parsed['tipo'] === null || $parsed['numero'] === null) {
+            return null;
+        }
+
+        $ndP = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_proceso', 'p');
+        $stmt = $this->pdo->prepare("
+            SELECT p.id FROM sgd_proceso p
+            WHERE p.empresa_id = ? AND p.codigo = ? {$ndP}
+            LIMIT 1
+        ");
+        $stmt->execute([$empresaId, $parsed['proceso']]);
+        $procesoId = $stmt->fetchColumn();
+        if ($procesoId === false) {
+            return null;
+        }
+        $procesoId = (int)$procesoId;
+
+        $tipoMap = $this->mapTiposByCodigo($empresaId);
+        $tipoPadre = strtoupper($parsed['tipo']);
+        if (!isset($tipoMap[$tipoPadre])) {
+            return null;
+        }
+        $tipoPadreId = (int)$tipoMap[$tipoPadre]['id'];
+
+        $ndD = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_documento', 'd');
+        $stmt = $this->pdo->prepare("
+            SELECT d.id FROM sgd_documento d
+            WHERE d.empresa_id = ? AND d.proceso_id = ?
+              AND d.tipo_documental_id = ? AND d.consecutivo = ?
+              AND (d.documento_id IS NULL OR d.documento_id = 0)
+            {$ndD}
+            LIMIT 1
+        ");
+        $stmt->execute([$empresaId, $procesoId, $tipoPadreId, (string)$parsed['numero']]);
+        $padreId = $stmt->fetchColumn();
+
+        $sufijo = trim((string)($parsed['sufijo'] ?? ''));
+        if ($sufijo !== '' && preg_match('/^([A-Z]+)(\d+)$/i', $sufijo, $sm)) {
+            if ($padreId === false) {
+                return null;
+            }
+            $childTipo = strtoupper($sm[1]);
+            if (!isset($tipoMap[$childTipo])) {
+                return null;
+            }
+            $stmt = $this->pdo->prepare("
+                SELECT d.id FROM sgd_documento d
+                WHERE d.empresa_id = ? AND d.proceso_id = ?
+                  AND d.documento_id = ? AND d.tipo_documental_id = ?
+                  AND d.consecutivo = ?
+                {$ndD}
+                LIMIT 1
+            ");
+            $stmt->execute([
+                $empresaId,
+                $procesoId,
+                (int)$padreId,
+                (int)$tipoMap[$childTipo]['id'],
+                $sm[2],
+            ]);
+            $childId = $stmt->fetchColumn();
+
+            return $childId !== false ? (int)$childId : null;
+        }
+
+        return $padreId !== false ? (int)$padreId : null;
+    }
+
     public function upsertDocumento(int $empresaId, array $row): int
     {
         $existingId = $this->findDocumentoId($empresaId, $row['codigo']);
@@ -409,39 +502,47 @@ class SgdRepository
 
     public function linkDocumentoToCcdByCodigoCalidad(int $empresaId, string $codigoCalidad): int
     {
-        $docId = $this->findDocumentoId($empresaId, $codigoCalidad);
+        $docId = $this->findDocumentoIdByCodigoCalidad($empresaId, $codigoCalidad);
         if (!$docId) {
             return 0;
         }
 
-        $stmt = $this->pdo->prepare('
-            UPDATE sgd_ccd_entrada
-            SET documento_id = ?
-            WHERE empresa_id = ? AND codigo_calidad = ? AND (documento_id IS NULL OR documento_id = 0)
-        ');
-        $stmt->execute([$docId, $empresaId, $codigoCalidad]);
+        if ($this->ccdEntradaHasColumn('codigo_calidad')) {
+            $stmt = $this->pdo->prepare('
+                UPDATE sgd_ccd_entrada
+                SET documento_id = ?
+                WHERE empresa_id = ? AND codigo_calidad = ? AND (documento_id IS NULL OR documento_id = 0)
+            ');
+            $stmt->execute([$docId, $empresaId, $codigoCalidad]);
 
-        return $stmt->rowCount();
+            return $stmt->rowCount();
+        }
+
+        return 0;
     }
 
     public function linkAllDocumentosCcd(int $empresaId): int
     {
-        $codeColumn = $this->getDocumentoCodeColumn();
-        $stmt = $this->pdo->prepare('
-            UPDATE sgd_ccd_entrada e
-            INNER JOIN sgd_documento d
-                ON d.empresa_id = e.empresa_id
-               AND d.' . $codeColumn . ' = e.codigo_calidad
-               AND d.deleted_at IS NULL
-            SET e.documento_id = d.id
-            WHERE e.empresa_id = ?
-              AND e.codigo_calidad IS NOT NULL
-              AND TRIM(e.codigo_calidad) <> ""
-              AND (e.documento_id IS NULL OR e.documento_id = 0)
-        ');
-        $stmt->execute([$empresaId]);
+        if ($this->ccdEntradaHasColumn('codigo_calidad')) {
+            $codeColumn = $this->getDocumentoCodeColumn();
+            $stmt = $this->pdo->prepare('
+                UPDATE sgd_ccd_entrada e
+                INNER JOIN sgd_documento d
+                    ON d.empresa_id = e.empresa_id
+                   AND d.' . $codeColumn . ' = e.codigo_calidad
+                   AND d.deleted_at IS NULL
+                SET e.documento_id = d.id
+                WHERE e.empresa_id = ?
+                  AND e.codigo_calidad IS NOT NULL
+                  AND TRIM(e.codigo_calidad) <> ""
+                  AND (e.documento_id IS NULL OR e.documento_id = 0)
+            ');
+            $stmt->execute([$empresaId]);
 
-        return $stmt->rowCount();
+            return $stmt->rowCount();
+        }
+
+        return 0;
     }
 
     private function getDocumentoCodeColumn(): string
@@ -459,45 +560,73 @@ class SgdRepository
 
     public function insertCcdEntrada(int $empresaId, array $row): int
     {
-        $stmt = $this->pdo->prepare('
-            INSERT INTO sgd_ccd_entrada (
-                empresa_id, dependencia_id, serie_id, subserie_id,
-                codigo_carpeta, nombre_serie, nombre_subserie, soporte_formato,
-                codigo_calidad, documento_id, ccd_vigencia, ccd_anio, estado_id, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(3))
-        ');
-        $stmt->execute([
-            $empresaId,
-            $row['dependencia_id'],
-            $row['serie_id'] ?? null,
-            $row['subserie_id'] ?? null,
-            $row['codigo_carpeta'],
-            $row['nombre_serie'] ?? null,
-            $row['nombre_subserie'] ?? null,
-            $row['soporte_formato'] ?? null,
-            $row['codigo_calidad'] ?? null,
-            $row['documento_id'] ?? null,
-            $row['ccd_vigencia'] ?? null,
-            $row['ccd_anio'] ?? null,
-        ]);
+        $data = [
+            'dependencia_id' => (int)$row['dependencia_id'],
+            'serie_id' => $row['serie_id'] ?? null,
+            'subserie_id' => $row['subserie_id'] ?? null,
+            'documento_id' => $row['documento_id'] ?? null,
+            'orden' => (int)($row['orden'] ?? 0),
+            'estado_id' => (int)($row['estado_id'] ?? 1),
+        ];
+        foreach (['codigo_carpeta', 'nombre_serie', 'nombre_subserie', 'soporte_formato', 'codigo_calidad', 'ccd_vigencia', 'ccd_anio'] as $col) {
+            if (array_key_exists($col, $row)) {
+                $data[$col] = $row[$col];
+            }
+        }
 
-        return (int)$this->pdo->lastInsertId();
+        return $this->saveCcdEntrada($empresaId, $data);
     }
 
     public function ccdEntradaExists(int $empresaId, string $codigoCarpeta, ?string $codigoCalidad, ?string $nombreSubserie): bool
     {
-        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_ccd_entrada');
-        $stmt = $this->pdo->prepare("
-            SELECT 1 FROM sgd_ccd_entrada
-            WHERE empresa_id = ? AND codigo_carpeta = ?
-              AND COALESCE(codigo_calidad, '') = COALESCE(?, '')
-              AND COALESCE(nombre_subserie, '') = COALESCE(?, '')
-            {$nd}
-            LIMIT 1
-        ");
-        $stmt->execute([$empresaId, $codigoCarpeta, $codigoCalidad, $nombreSubserie]);
+        if ($this->ccdEntradaHasColumn('codigo_carpeta')) {
+            $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_ccd_entrada');
+            $stmt = $this->pdo->prepare("
+                SELECT 1 FROM sgd_ccd_entrada
+                WHERE empresa_id = ? AND codigo_carpeta = ?
+                  AND COALESCE(codigo_calidad, '') = COALESCE(?, '')
+                  AND COALESCE(nombre_subserie, '') = COALESCE(?, '')
+                {$nd}
+                LIMIT 1
+            ");
+            $stmt->execute([$empresaId, $codigoCarpeta, $codigoCalidad, $nombreSubserie]);
 
-        return (bool)$stmt->fetchColumn();
+            return (bool)$stmt->fetchColumn();
+        }
+
+        return false;
+    }
+
+    /**
+     * @return list<string> nombres de archivo CCD por dependencia (excluye GENERAL y listado maestro).
+     */
+    public function listCcdDependenciaFiles(string $dir): array
+    {
+        if (!is_dir($dir)) {
+            return [];
+        }
+
+        $out = [];
+        foreach (scandir($dir) ?: [] as $f) {
+            if ($f === '.' || $f === '..') {
+                continue;
+            }
+            $ext = strtolower(pathinfo($f, PATHINFO_EXTENSION));
+            if (!in_array($ext, ['xls', 'xlsx'], true)) {
+                continue;
+            }
+            $upper = strtoupper($f);
+            if (!str_contains($upper, 'CCD')) {
+                continue;
+            }
+            if (str_contains($upper, 'GENERAL') || str_contains($upper, 'LISTADO MAESTRO')) {
+                continue;
+            }
+            $out[] = $f;
+        }
+        sort($out);
+
+        return $out;
     }
 
     public function insertTipoDocumental(int $empresaId, array $tipo): void
@@ -974,5 +1103,317 @@ class SgdRepository
         $out['subseries'] = (int)$stmt->fetchColumn();
 
         return $out;
+    }
+
+    /** @var list<string>|null */
+    private ?array $ccdEntradaColumns = null;
+
+    public function ccdEntradaHasColumn(string $column): bool
+    {
+        if ($this->ccdEntradaColumns === null) {
+            $stmt = $this->pdo->query('SHOW COLUMNS FROM sgd_ccd_entrada');
+            $this->ccdEntradaColumns = array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'Field');
+        }
+
+        return in_array($column, $this->ccdEntradaColumns, true);
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function listDependenciasByEmpresa(int $empresaId): array
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_dependencia');
+        $stmt = $this->pdo->prepare("
+            SELECT id, codigo, nombre
+            FROM sgd_dependencia
+            WHERE empresa_id = ? {$nd}
+            ORDER BY codigo
+        ");
+        $stmt->execute([$empresaId]);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    public function findDependenciaById(int $empresaId, int $id): ?array
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_dependencia');
+        $stmt = $this->pdo->prepare("
+            SELECT id, codigo, nombre FROM sgd_dependencia
+            WHERE empresa_id = ? AND id = ? {$nd}
+            LIMIT 1
+        ");
+        $stmt->execute([$empresaId, $id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row ?: null;
+    }
+
+    public function dependenciaBelongsToEmpresa(int $empresaId, int $dependenciaId): bool
+    {
+        return $this->findDependenciaById($empresaId, $dependenciaId) !== null;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function listSeriesByEmpresa(int $empresaId): array
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_serie');
+        $stmt = $this->pdo->prepare("
+            SELECT id, codigo, nombre
+            FROM sgd_serie
+            WHERE empresa_id = ? {$nd}
+            ORDER BY codigo
+        ");
+        $stmt->execute([$empresaId]);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    public function findSerieById(int $empresaId, int $id): ?array
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_serie');
+        $stmt = $this->pdo->prepare("
+            SELECT id, codigo, nombre FROM sgd_serie
+            WHERE empresa_id = ? AND id = ? {$nd}
+            LIMIT 1
+        ");
+        $stmt->execute([$empresaId, $id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row ?: null;
+    }
+
+    public function serieBelongsToEmpresa(int $empresaId, int $serieId): bool
+    {
+        return $this->findSerieById($empresaId, $serieId) !== null;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function listSubseriesByEmpresa(int $empresaId): array
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_subserie', 'ss');
+        $stmt = $this->pdo->prepare("
+            SELECT ss.id, ss.serie_id, ss.codigo, ss.nombre
+            FROM sgd_subserie ss
+            INNER JOIN sgd_serie s ON s.id = ss.serie_id AND s.empresa_id = ?
+            WHERE ss.empresa_id = ? {$nd}
+            ORDER BY ss.serie_id, ss.codigo
+        ");
+        $stmt->execute([$empresaId, $empresaId]);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    public function findSubserieById(int $empresaId, int $id): ?array
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_subserie', 'ss');
+        $stmt = $this->pdo->prepare("
+            SELECT ss.id, ss.serie_id, ss.codigo, ss.nombre
+            FROM sgd_subserie ss
+            INNER JOIN sgd_serie s ON s.id = ss.serie_id AND s.empresa_id = ?
+            WHERE ss.empresa_id = ? AND ss.id = ? {$nd}
+            LIMIT 1
+        ");
+        $stmt->execute([$empresaId, $empresaId, $id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row ?: null;
+    }
+
+    public function subserieBelongsToSerie(int $empresaId, int $serieId, int $subserieId): bool
+    {
+        $row = $this->findSubserieById($empresaId, $subserieId);
+
+        return $row !== null && (int)$row['serie_id'] === $serieId;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function listCcdEntradas(int $empresaId, ?int $dependenciaId = null): array
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_ccd_entrada', 'e');
+        $where = 'e.empresa_id = ?' . $nd;
+        $params = [$empresaId];
+        if ($dependenciaId !== null && $dependenciaId > 0) {
+            $where .= ' AND e.dependencia_id = ?';
+            $params[] = $dependenciaId;
+        }
+
+        $stmt = $this->pdo->prepare("
+            SELECT
+                e.id,
+                e.empresa_id,
+                e.dependencia_id,
+                e.serie_id,
+                e.subserie_id,
+                e.documento_id,
+                e.orden,
+                e.estado_id,
+                d.codigo AS dependencia_codigo,
+                d.nombre AS dependencia_nombre,
+                s.codigo AS serie_codigo,
+                s.nombre AS serie_nombre,
+                ss.codigo AS subserie_codigo,
+                ss.nombre AS subserie_nombre
+            FROM sgd_ccd_entrada e
+            INNER JOIN sgd_dependencia d ON d.id = e.dependencia_id
+            LEFT JOIN sgd_serie s ON s.id = e.serie_id
+            LEFT JOIN sgd_subserie ss ON ss.id = e.subserie_id
+            WHERE {$where}
+            ORDER BY d.codigo, s.codigo, ss.codigo, e.orden, e.id
+        ");
+        $stmt->execute($params);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    public function findCcdEntradaById(int $empresaId, int $id): ?array
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_ccd_entrada', 'e');
+        $stmt = $this->pdo->prepare("
+            SELECT
+                e.id,
+                e.empresa_id,
+                e.dependencia_id,
+                e.serie_id,
+                e.subserie_id,
+                e.documento_id,
+                e.orden,
+                e.estado_id,
+                d.codigo AS dependencia_codigo,
+                d.nombre AS dependencia_nombre,
+                s.codigo AS serie_codigo,
+                s.nombre AS serie_nombre,
+                ss.codigo AS subserie_codigo,
+                ss.nombre AS subserie_nombre
+            FROM sgd_ccd_entrada e
+            INNER JOIN sgd_dependencia d ON d.id = e.dependencia_id
+            LEFT JOIN sgd_serie s ON s.id = e.serie_id
+            LEFT JOIN sgd_subserie ss ON ss.id = e.subserie_id
+            WHERE e.empresa_id = ? AND e.id = ? {$nd}
+            LIMIT 1
+        ");
+        $stmt->execute([$empresaId, $id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row ?: null;
+    }
+
+    public function ccdEntradaDuplicate(
+        int $empresaId,
+        int $dependenciaId,
+        int $serieId,
+        ?int $subserieId,
+        ?int $documentoId,
+        ?int $excludeId = null
+    ): bool {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_ccd_entrada');
+        $sql = "
+            SELECT 1 FROM sgd_ccd_entrada
+            WHERE empresa_id = ?
+              AND dependencia_id = ?
+              AND serie_id = ?
+              AND COALESCE(subserie_id, 0) = COALESCE(?, 0)
+              AND COALESCE(documento_id, 0) = COALESCE(?, 0)
+              {$nd}
+        ";
+        $params = [$empresaId, $dependenciaId, $serieId, $subserieId, $documentoId];
+        if ($excludeId !== null && $excludeId > 0) {
+            $sql .= ' AND id <> ?';
+            $params[] = $excludeId;
+        }
+        $sql .= ' LIMIT 1';
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+
+        return (bool)$stmt->fetchColumn();
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    public function saveCcdEntrada(int $empresaId, array $data): int
+    {
+        $id = isset($data['id']) ? (int)$data['id'] : 0;
+        $base = [
+            'dependencia_id' => (int)$data['dependencia_id'],
+            'serie_id' => isset($data['serie_id']) ? (int)$data['serie_id'] : null,
+            'subserie_id' => $data['subserie_id'] ?? null,
+            'documento_id' => $data['documento_id'] ?? null,
+            'orden' => (int)($data['orden'] ?? 0),
+            'estado_id' => (int)($data['estado_id'] ?? 1),
+        ];
+
+        $optional = ['codigo_carpeta', 'nombre_serie', 'nombre_subserie', 'soporte_formato', 'codigo_calidad', 'ccd_vigencia', 'ccd_anio'];
+        foreach ($optional as $col) {
+            if ($this->ccdEntradaHasColumn($col) && array_key_exists($col, $data)) {
+                $base[$col] = $data[$col];
+            }
+        }
+
+        if ($id > 0) {
+            $sets = [];
+            $params = [];
+            foreach ($base as $col => $val) {
+                $sets[] = "`{$col}` = ?";
+                $params[] = $val;
+            }
+            if ($this->ccdEntradaHasColumn('updated_at')) {
+                $sets[] = 'updated_at = NOW(3)';
+            }
+            $params[] = $id;
+            $params[] = $empresaId;
+            $stmt = $this->pdo->prepare('
+                UPDATE sgd_ccd_entrada SET ' . implode(', ', $sets) . '
+                WHERE id = ? AND empresa_id = ?
+            ');
+            $stmt->execute($params);
+
+            return $id;
+        }
+
+        $cols = ['empresa_id'];
+        $placeholders = ['?'];
+        $params = [$empresaId];
+        foreach ($base as $col => $val) {
+            $cols[] = $col;
+            $placeholders[] = '?';
+            $params[] = $val;
+        }
+        if ($this->ccdEntradaHasColumn('created_at')) {
+            $cols[] = 'created_at';
+            $placeholders[] = 'NOW(3)';
+        }
+
+        $stmt = $this->pdo->prepare('
+            INSERT INTO sgd_ccd_entrada (`' . implode('`,`', $cols) . '`)
+            VALUES (' . implode(',', $placeholders) . ')
+        ');
+        $stmt->execute($params);
+
+        return (int)$this->pdo->lastInsertId();
+    }
+
+    public function softDeleteCcdEntrada(int $empresaId, int $id, ?int $userId = null): bool
+    {
+        if (!SoftDeleteService::supports($this->pdo, 'sgd_ccd_entrada')) {
+            $stmt = $this->pdo->prepare('DELETE FROM sgd_ccd_entrada WHERE id = ? AND empresa_id = ?');
+
+            return $stmt->execute([$id, $empresaId]);
+        }
+
+        $stmt = $this->pdo->prepare('
+            UPDATE sgd_ccd_entrada
+            SET deleted_at = NOW(3), deleted_by = ?
+            WHERE id = ? AND empresa_id = ? AND deleted_at IS NULL
+        ');
+
+        return $stmt->execute([$userId, $id, $empresaId]);
     }
 }

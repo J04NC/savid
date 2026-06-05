@@ -52,7 +52,7 @@ $sgdConfigJsV = is_readable($sgdConfigJs) ? (int)filemtime($sgdConfigJs) : time(
                                 <input type="radio" name="tipo_import" value="ccd" checked data-sgd-tipo-import>
                                 <span class="sgd-option-body">
                                     <span class="sgd-option-title">Cuadro de clasificación (CCD)</span>
-                                    <span class="sgd-option-desc">Dependencias, series, subseries y vínculos archivísticos.</span>
+                                    <span class="sgd-option-desc">Dependencias, series, subseries y ubicaciones con código de documento de calidad (columna E).</span>
                                 </span>
                             </label>
                             <label class="sgd-option">

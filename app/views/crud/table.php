@@ -144,7 +144,11 @@ foreach ($relationData as $campoRel => $options) {
 
 <div class="module-container">
 
-<form method="POST" data-crud-context="<?= htmlspecialchars($crudContextTable, ENT_QUOTES, 'UTF-8') ?>"<?= !empty($crudZonaUbicacionToggle) ? ' data-crud-zona-ubicacion-toggle="1"' : '' ?>>
+<?php
+$crudRestoreDraft = ($crudContextTable === 'usuario')
+    && ($_SERVER['REQUEST_METHOD'] === 'POST' || !empty($errors));
+?>
+<form method="POST" data-crud-context="<?= htmlspecialchars($crudContextTable, ENT_QUOTES, 'UTF-8') ?>"<?= !empty($crudZonaUbicacionToggle) ? ' data-crud-zona-ubicacion-toggle="1"' : '' ?><?= $crudRestoreDraft ? ' data-crud-restore-draft="1"' : '' ?>>
 
 <input type="hidden" name="id" id="crud_id" value="<?= $old['id'] ?? '' ?>">
 <?php if ($crudContextTable === 'usuario'): ?>
@@ -240,6 +244,17 @@ title="<?= htmlspecialchars($accionNombre, ENT_QUOTES, 'UTF-8') ?>">
 </div>
 
 </div>
+
+<?php if (!empty($errors['general'])): ?>
+<div class="error-message crud-form-general-error" role="alert" style="margin-bottom:16px;">
+<?= htmlspecialchars((string)$errors['general'], ENT_QUOTES, 'UTF-8') ?>
+</div>
+<?php endif; ?>
+<?php if ($crudContextTable === 'usuario' && !empty($old['usuario_form_stale_notice'])): ?>
+<div class="error-message crud-form-general-error" role="status" style="margin-bottom:16px;background:#3d2a00;color:#ffe8b3;">
+<?= htmlspecialchars(UsuarioSaveMessages::PERSONA_STALE_CLEARED, ENT_QUOTES, 'UTF-8') ?>
+</div>
+<?php endif; ?>
 
 <div class="crud-form<?= $crudContextTable === 'usuario' ? ' crud-form-usuario' : '' ?><?= $crudContextTable === 'empresa' ? ' crud-form-empresa' : '' ?>">
 
@@ -506,7 +521,7 @@ class="form-input <?= $error ? 'input-error' : '' ?>">
 $optCodigo = isset($opt['codigo']) ? strtoupper(trim((string)$opt['codigo'])) : '';
 $optNombre = isset($opt['nombre']) ? (string)$opt['nombre'] : '';
 ?>
-<option value="<?= $opt['id'] ?>" <?= ($value == $opt['id']) ? 'selected' : '' ?>
+<option value="<?= $opt['id'] ?>" <?= ((string)$value !== '' && (string)$value === (string)$opt['id']) ? 'selected' : '' ?>
 data-doc-codigo="<?= htmlspecialchars($optCodigo, ENT_QUOTES, 'UTF-8') ?>"
 data-doc-nombre="<?= htmlspecialchars($optNombre, ENT_QUOTES, 'UTF-8') ?>"
 <?php if ($campo === 'zona_id' && isset($opt['tipo']) && $opt['tipo'] !== '' && $opt['tipo'] !== null): ?>

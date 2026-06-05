@@ -4,6 +4,9 @@
 (function () {
     const FACTORS = [3, 7, 13, 17, 19, 23, 29, 37, 41, 43, 47, 53, 59, 67, 71];
     const LOOKUP_DEBOUNCE_MS = 450;
+    const PASSWORD_RULES_MSG =
+        "Mínimo 8 caracteres, al menos una mayúscula, una minúscula y un número.";
+    const USUARIO_FORM_DRAFT_KEY = "savid_usuario_crud_form_draft_v1";
 
     let lookupLock = false;
     let skipTipoNumeroLookup = false;
@@ -169,12 +172,116 @@
         });
     }
 
+    function selectHasOption(sel, value) {
+        const v = String(value);
+        return Array.prototype.some.call(sel.options, function (opt) {
+            return String(opt.value) === v;
+        });
+    }
+
+    /** No vacía un &lt;select&gt; si el valor no existe en las opciones cargadas. */
+    function setSelectValueSafely(sel, value) {
+        if (!sel || sel.tagName !== "SELECT") return;
+        if (value == null || value === "") {
+            sel.value = "";
+            return;
+        }
+        const v = String(value);
+        if (selectHasOption(sel, v)) {
+            sel.value = v;
+        }
+    }
+
+    function isFormSubmitting(form) {
+        return !!(form && form.dataset.crudSubmitting === "1");
+    }
+
+    function clearSubmitTimers() {
+        Object.keys(debounceTimers).forEach(function (key) {
+            clearTimeout(debounceTimers[key]);
+        });
+    }
+
+    function isNewUsuarioForm(form) {
+        const hid = form.querySelector("#crud_id") || form.querySelector('[name="id"]');
+        const v = hid ? String(hid.value || "").trim() : "";
+        return v === "";
+    }
+
+    function snapshotUsuarioFormDraft(form) {
+        const draft = {};
+        const isNew = isNewUsuarioForm(form);
+        form.querySelectorAll("input, select, textarea").forEach(function (el) {
+            const name = el.name;
+            if (!name || el.type === "file" || el.disabled) return;
+            if (name === "id" && !el.value) return;
+            if (isNew && (name === "tercero_id" || name === "terceroidentificacion_id")) {
+                return;
+            }
+            draft[name] = el.value;
+        });
+        try {
+            sessionStorage.setItem(USUARIO_FORM_DRAFT_KEY, JSON.stringify(draft));
+        } catch (e) {
+            /* quota / privado */
+        }
+    }
+
+    function restoreUsuarioFormDraft(form) {
+        let draft;
+        try {
+            draft = JSON.parse(sessionStorage.getItem(USUARIO_FORM_DRAFT_KEY) || "null");
+        } catch (e) {
+            return;
+        }
+        if (!draft || typeof draft !== "object") return;
+
+        const isNew = isNewUsuarioForm(form);
+
+        Object.keys(draft).forEach(function (name) {
+            if (name === "id") {
+                return;
+            }
+            if (isNew && (name === "tercero_id" || name === "terceroidentificacion_id")) {
+                return;
+            }
+
+            const el = form.querySelector('[name="' + name + '"]');
+            if (!el || el.disabled) return;
+            const saved = draft[name];
+            if (saved == null) return;
+
+            if (el.tagName === "SELECT") {
+                const cur = String(el.value || "");
+                const want = String(saved);
+                if (want !== "" && (cur === "" || cur !== want)) {
+                    setSelectValueSafely(el, want);
+                }
+                return;
+            }
+
+            if (el.type === "password" || el.dataset.password === "1") {
+                if (String(saved) !== "") {
+                    el.value = String(saved);
+                }
+                return;
+            }
+
+            if (String(el.value || "").trim() === "" && String(saved).trim() !== "") {
+                el.value = String(saved);
+            }
+        });
+    }
+
     function setField(form, name, value) {
         const el = form.querySelector('[name="' + name + '"]');
         if (!el) return;
         if (el.type === "password") return;
         if (el.tagName === "SELECT") {
-            el.value = value == null || value === "" ? "" : String(value);
+            if (value == null || value === "") {
+                return;
+            }
+            setSelectValueSafely(el, value);
         } else {
             el.value = value == null ? "" : String(value);
         }
@@ -189,7 +296,7 @@
     }
 
     function applyTerceroPayload(form, payload, usuario) {
-        if (!payload) return;
+        if (!payload || isFormSubmitting(form)) return;
 
         lookupLock = true;
         try {
@@ -411,7 +518,7 @@
     }
 
     function lookupTipoNumero(form) {
-        if (skipTipoNumeroLookup || lookupLock) return;
+        if (skipTipoNumeroLookup || lookupLock || isFormSubmitting(form)) return;
 
         const tipo = form.querySelector('[name="tipodocumento_id"]');
         const num = form.querySelector('[name="numero_documento"]');
@@ -456,7 +563,7 @@
     }
 
     function lookupUsername(form) {
-        if (skipUsernameLookup || lookupLock) return;
+        if (skipUsernameLookup || lookupLock || isFormSubmitting(form)) return;
 
         const userEl = form.querySelector('[name="username"]');
         if (!userEl) return;
@@ -511,7 +618,7 @@
     }
 
     function lookupEmailTercero(form) {
-        if (skipEmailTerceroLookup || lookupLock) return;
+        if (skipEmailTerceroLookup || lookupLock || isFormSubmitting(form)) return;
 
         const tid = getTerceroId(form);
         const emailEl = form.querySelector('[name="email"]');
@@ -551,7 +658,7 @@
     }
 
     function lookupIdentificacion(form) {
-        if (skipIdentLookup || lookupLock) return;
+        if (skipIdentLookup || lookupLock || isFormSubmitting(form)) return;
 
         const tid = getTerceroId(form);
         const tipo = form.querySelector('[name="tipodocumento_id"]');
@@ -592,26 +699,171 @@
         }).catch(function () { /* silencioso */ });
     }
 
-    function validatePasswordClient(form) {
+    function isPasswordStrong(value) {
+        const v = String(value || "");
+        return (
+            v.length >= 8 &&
+            /[a-záéíóúñ]/i.test(v) &&
+            /[A-ZÁÉÍÓÚÑ]/.test(v) &&
+            /\d/.test(v)
+        );
+    }
+
+    function ensurePasswordHintEl(form, fieldName) {
+        const el = form.querySelector('[name="' + fieldName + '"]');
+        if (!el) return null;
+        const group = el.closest(".form-group");
+        if (!group) return null;
+        let hint = group.querySelector(
+            '.crud-password-hint[data-for="' + fieldName + '"]'
+        );
+        if (!hint) {
+            hint = document.createElement("span");
+            hint.className = "error-text crud-password-hint";
+            hint.dataset.for = fieldName;
+            hint.setAttribute("role", "alert");
+            hint.hidden = true;
+            group.appendChild(hint);
+        }
+        return hint;
+    }
+
+    function setPasswordHint(form, fieldName, message) {
+        const hint = ensurePasswordHintEl(form, fieldName);
+        if (!hint) return;
+        const msg = String(message || "").trim();
+        hint.textContent = msg;
+        hint.hidden = msg === "";
+    }
+
+    /**
+     * Valida contraseña y confirmación. En blur muestra mensaje bajo el campo; en submit también toast.
+     *
+     * @param {{ showToast?: boolean }} opts
+     */
+    function validatePasswordFields(form, opts) {
+        const showToastOnFail = !!(opts && opts.showToast);
         const pwd = form.querySelector('[name="password"]');
+        const pwd2 = form.querySelector('[name="password_confirm"]');
         if (!pwd) return true;
-        const v = String(pwd.value || "");
+
         const uid = getUsuarioId(form);
-        if (uid && v === "") return true;
+        const v = String(pwd.value || "");
+        const v2 = pwd2 ? String(pwd2.value || "") : "";
+        let valid = true;
+        let firstMsg = "";
+
+        function note(field, msg) {
+            if (!firstMsg && msg) firstMsg = msg;
+            if (msg) valid = false;
+            markFieldError(form, field, !!msg);
+            setPasswordHint(form, field, msg);
+        }
+
+        if (uid && v === "" && v2 === "") {
+            note("password", "");
+            note("password_confirm", "");
+            if (showToastOnFail) {
+                /* sin cambio de contraseña al editar */
+            }
+            return true;
+        }
+
         if (!uid && v === "") {
-            markFieldError(form, "password", true);
-            return false;
+            note("password", "La contraseña es obligatoria al crear el usuario.");
+        } else if (v !== "" && !isPasswordStrong(v)) {
+            note("password", PASSWORD_RULES_MSG);
+        } else {
+            note("password", "");
         }
-        const ok = v.length >= 8 && /[a-záéíóúñ]/i.test(v) && /[A-ZÁÉÍÓÚÑ]/.test(v) && /\d/.test(v);
-        markFieldError(form, "password", !ok);
-        if (!ok) {
-            showToast("Contraseña: mínimo 8 caracteres, mayúscula, minúscula y número.", true);
+
+        const mustConfirm = !uid || v !== "" || v2 !== "";
+        if (mustConfirm) {
+            if (v !== "" && v2 === "") {
+                note("password_confirm", "Confirme la contraseña.");
+            } else if (v2 !== "" && v !== v2) {
+                note("password_confirm", "No coincide con la contraseña.");
+            } else if (!uid && v === "" && v2 !== "") {
+                note("password_confirm", "Indique primero la contraseña.");
+            } else {
+                note("password_confirm", "");
+            }
+        } else {
+            note("password_confirm", "");
         }
-        return ok;
+
+        if (!valid) {
+            if (showToastOnFail) {
+                showToast(firstMsg || PASSWORD_RULES_MSG, true);
+            }
+            let focusName = "password";
+            if (pwd && pwd.classList.contains("input-error")) {
+                focusName = "password";
+            } else if (pwd2 && pwd2.classList.contains("input-error")) {
+                focusName = "password_confirm";
+            }
+            const focusEl = form.querySelector('[name="' + focusName + '"]');
+            if (focusEl && typeof focusEl.focus === "function") {
+                window.setTimeout(function () {
+                    focusEl.focus();
+                }, 0);
+            }
+        }
+
+        return valid;
+    }
+
+    function validatePasswordClient(form) {
+        return validatePasswordFields(form, { showToast: true });
+    }
+
+    function bindPasswordFields(form) {
+        const pwd = form.querySelector('[name="password"]');
+        const pwd2 = form.querySelector('[name="password_confirm"]');
+
+        function onPasswordBlur() {
+            validatePasswordFields(form, { showToast: false });
+        }
+
+        if (pwd) {
+            pwd.addEventListener("blur", onPasswordBlur);
+            pwd.addEventListener("input", function () {
+                if (pwd.classList.contains("input-error")) {
+                    validatePasswordFields(form, { showToast: false });
+                }
+            });
+        }
+        if (pwd2) {
+            pwd2.addEventListener("blur", onPasswordBlur);
+            pwd2.addEventListener("input", function () {
+                if (
+                    pwd2.classList.contains("input-error") ||
+                    (pwd && pwd.classList.contains("input-error"))
+                ) {
+                    validatePasswordFields(form, { showToast: false });
+                }
+            });
+        }
+    }
+
+    function syncPasswordErrorsFromServer(form) {
+        ["password", "password_confirm"].forEach(function (name) {
+            const el = form.querySelector('[name="' + name + '"]');
+            const group = el && el.closest(".form-group");
+            if (!group) return;
+            const serverErr = group.querySelector(
+                ".error-text:not(.crud-password-hint)"
+            );
+            if (serverErr && String(serverErr.textContent || "").trim() !== "") {
+                markFieldError(form, name, true);
+                serverErr.hidden = true;
+                setPasswordHint(form, name, serverErr.textContent.trim());
+            }
+        });
     }
 
     function lookupNumeroOnly(form) {
-        if (skipNumeroOnlyLookup || lookupLock) return;
+        if (skipNumeroOnlyLookup || lookupLock || isFormSubmitting(form)) return;
 
         const tipo = form.querySelector('[name="tipodocumento_id"]');
         const num = form.querySelector('[name="numero_documento"]');
@@ -669,7 +921,7 @@
     }
 
     function lookupEmail(form) {
-        if (skipEmailLookup || lookupLock) return;
+        if (skipEmailLookup || lookupLock || isFormSubmitting(form)) return;
 
         const emailEl = form.querySelector('[name="email"]');
         if (!emailEl) return;
@@ -824,27 +1076,90 @@
         syncEmailBaseline(form);
     });
 
+    function clearStalePersonaLinksForNewForm(form) {
+        if (!isNewUsuarioForm(form)) {
+            return;
+        }
+        const tEl = form.querySelector('[name="tercero_id"]');
+        if (tEl) {
+            tEl.value = "";
+        }
+        const iEl = form.querySelector('[name="terceroidentificacion_id"]');
+        if (iEl) {
+            iEl.value = "";
+        }
+    }
+
     function initForm(form) {
         bindTipoAndNumero(form);
         bindLookups(form);
+        bindPasswordFields(form);
         syncDvVisibility(form);
         syncEmailBaseline(form);
+        syncPasswordErrorsFromServer(form);
 
-        form.addEventListener("submit", function (ev) {
-            if (!validatePasswordClient(form)) {
-                ev.preventDefault();
-                return;
-            }
-            if (formSaveBlocked) {
-                ev.preventDefault();
-                showToast("Corrija las validaciones antes de guardar.", true);
-            }
-        }, true);
+        form.addEventListener(
+            "submit",
+            function (ev) {
+                clearSubmitTimers();
+                form.dataset.crudSubmitting = "1";
+
+                if (!validatePasswordClient(form)) {
+                    delete form.dataset.crudSubmitting;
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    return;
+                }
+                if (formSaveBlocked) {
+                    delete form.dataset.crudSubmitting;
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    showToast("Corrija las validaciones antes de guardar.", true);
+                    return;
+                }
+
+                const tipoEl = form.querySelector('[name="tipodocumento_id"]');
+                const numEl = form.querySelector('[name="numero_documento"]');
+                const tipoVal = tipoEl ? String(tipoEl.value || "").trim() : "";
+                const numVal = numEl ? String(numEl.value || "").trim() : "";
+                if (numVal !== "" && tipoVal === "") {
+                    delete form.dataset.crudSubmitting;
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    markFieldError(form, "tipodocumento_id", true);
+                    showToast(
+                        "Seleccione el tipo de documento (Cédula de Ciudadanía, etc.) antes de guardar.",
+                        true
+                    );
+                    if (tipoEl && typeof tipoEl.focus === "function") {
+                        tipoEl.focus();
+                    }
+                    return;
+                }
+
+                snapshotUsuarioFormDraft(form);
+            },
+            true
+        );
     }
 
     document.addEventListener("DOMContentLoaded", function () {
         const form = document.querySelector('form[data-crud-context="usuario"]');
         if (!form) return;
+
+        try {
+            const url = new URL(window.location.href);
+            if (url.searchParams.get("success") === "1") {
+                sessionStorage.removeItem(USUARIO_FORM_DRAFT_KEY);
+            } else if (form.getAttribute("data-crud-restore-draft") === "1") {
+                restoreUsuarioFormDraft(form);
+            }
+        } catch (e) {
+            /* noop */
+        }
+
+        clearStalePersonaLinksForNewForm(form);
+
         initForm(form);
     });
 })();

@@ -891,49 +891,43 @@ class CrudService
         $usuarioTx = ($tabla === 'usuario');
         $empresaTx = ($tabla === 'empresa');
 
-        $usuarioLinkOnlyExisting = false;
+        $usuarioSaveCtx = null;
 
         if ($empresaTx) {
             $this->pdo->beginTransaction();
         }
 
         if ($usuarioTx) {
+            $modeResolver = new UsuarioSaveModeResolver($this->pdo);
+            $usuarioSaveCtx = $modeResolver->resolve($data);
+            $id = $usuarioSaveCtx->usuarioId;
+
             $this->validateUsuarioPasswordConfirm($data, $id);
             $validator = new UsuarioFormValidationService($this->pdo);
-            if ($id) {
-                /*
-                 * Si el usuario destino existe pero está fuera del ámbito del operador
-                 * (no comparte empresa con la sesión y no es super admin) NO bloqueamos
-                 * el guardado. En su lugar entramos en modo "link-only": no se actualizan
-                 * sus datos, solo se crea la relación con la empresa/sede en sesión.
-                 */
-                if (!$validator->isSuperAdminViewer()
-                    && !$validator->isSuperAdminUsuario((int)$id)
-                    && !$validator->usuarioVisibleInSessionScope((int)$id)
-                ) {
-                    $usuarioLinkOnlyExisting = true;
-                } else {
-                    $validator->assertUsuarioGestionableEnSesion((int)$id);
-                }
+            $validator->validateForMode($data, $usuarioSaveCtx, $columnNames);
+
+            if ($usuarioSaveCtx->isAlta()) {
+                $this->assertUsuarioCreateAllowedInSessionScope();
             }
-            if (!$usuarioLinkOnlyExisting) {
-                $validator->validateBeforeSave($data, $id, $columnNames);
-            }
+
             $this->pdo->beginTransaction();
         }
 
         try {
 
-            if ($usuarioLinkOnlyExisting && $id) {
+            if ($usuarioTx && $usuarioSaveCtx !== null && $usuarioSaveCtx->isLinkOnly() && $id) {
                 $this->linkNewUsuarioToSessionScope((int)$id);
-                if ($usuarioTx) {
-                    $this->pdo->commit();
-                }
+                $this->pdo->commit();
+                $_SESSION['flash_notice'] = UsuarioSaveMessages::linkOnlyNotice();
+
                 return true;
             }
 
-            if ($usuarioTx && $this->usuarioRequiresTerceroPersonaSave($columnNames) && $this->tableExists('tercero')) {
-                $this->ensureTerceroAndPersonaForUsuarioSave($data, $id, $columnNames);
+            if ($usuarioTx && $usuarioSaveCtx !== null
+                && $this->usuarioRequiresTerceroPersonaSave($columnNames)
+                && $this->tableExists('tercero')
+            ) {
+                (new UsuarioPersonaResolver($this->pdo))->resolveAndPersist($data, $usuarioSaveCtx, $columnNames);
                 $validator->validateAfterTerceroResolved($data, $id, $columnNames);
             }
 
@@ -958,6 +952,7 @@ class CrudService
                     if ($usuarioTx) {
                         $this->pdo->commit();
                     }
+                    $_SESSION['flash_notice'] = UsuarioSaveMessages::usernameLinkNotice();
 
                     return true;
                 }
@@ -1073,6 +1068,12 @@ class CrudService
 
             $stmt = $this->pdo->prepare($sql);
             $ok = $stmt->execute($values);
+
+            if ($ok && $id && $tabla === 'usuario' && $stmt->rowCount() === 0) {
+                UsuarioSaveMessages::throwJson([
+                    'general' => 'No se encontró el usuario a actualizar. Pulse Limpiar y complete el formulario de nuevo.',
+                ]);
+            }
 
             /*
             =========================
@@ -1451,261 +1452,19 @@ class CrudService
             || in_array('tercero_id', $columnNames, true);
     }
 
-    /**
-     * Crea o actualiza `tercero` y la identificación en `terceroidentificacion`;
-     * asigna `terceroidentificacion_id` (o `tercero_id` legado) en $data.
-     *
-     * @param array<string, mixed> $data
-     * @param list<string> $columnNames
-     */
-    private function ensureTerceroAndPersonaForUsuarioSave(array &$data, $id, array $columnNames): void
-    {
-        $nombres = trim((string)($data['nombres'] ?? ''));
-        $apellidos = trim((string)($data['apellidos'] ?? ''));
-        $email = trim((string)($data['email'] ?? ''));
-        $foto = trim((string)($data['foto_ruta'] ?? ''));
-        $firma = trim((string)($data['firma_ruta'] ?? ''));
-        $tipoDoc = isset($data['tipodocumento_id']) && $data['tipodocumento_id'] !== ''
-            ? (int)$data['tipodocumento_id']
-            : null;
-        $numero = trim((string)($data['numero_documento'] ?? ''));
-        $dvRaw = trim((string)($data['documento_dv'] ?? ''));
-        $dv = $dvRaw === '' ? null : (int)$dvRaw;
-
-        $tipoCodigo = null;
-        $tipoNombre = null;
-
-        if ($tipoDoc !== null && $tipoDoc > 0 && $this->tableExists('tipodocumento')) {
-            $stc = $this->pdo->prepare('SELECT UPPER(TRIM(codigo)), nombre FROM tipodocumento WHERE id = ? LIMIT 1');
-            $stc->execute([$tipoDoc]);
-            $rowTipo = $stc->fetch(PDO::FETCH_NUM);
-            if ($rowTipo) {
-                $tipoCodigo = $rowTipo[0] !== null && $rowTipo[0] !== '' ? (string)$rowTipo[0] : null;
-                $tipoNombre = isset($rowTipo[1]) ? (string)$rowTipo[1] : null;
-            }
-        }
-
-        $esNit = ($tipoCodigo === 'NIT')
-            || ($tipoNombre !== null && stripos($tipoNombre, 'NIT') !== false);
-
-        if ($esNit && $numero !== '') {
-            $dvCalc = self::colombianNitDvFromNumber($numero);
-            $data['documento_dv'] = (string)$dvCalc;
-            $dv = $dvCalc;
-        } elseif ($tipoDoc !== null && $tipoDoc > 0 && !$esNit) {
-            $data['documento_dv'] = '';
-            $dv = null;
-        }
-
-        $personaLink = new UsuarioPersonaLinkService($this->pdo);
-        $tid = 0;
-        if (isset($data['tercero_id']) && $data['tercero_id'] !== '' && $data['tercero_id'] !== null) {
-            $tid = (int)$data['tercero_id'];
-        }
-        if ($tid <= 0) {
-            $resolved = $personaLink->resolveTerceroIdFromData($data, $columnNames);
-            $tid = $resolved ?? 0;
-        }
-
-        $tCols = $this->getTableColumnNames('tercero');
-
-        if ($tid <= 0) {
-            $nombreFallback = trim((string)($data['username'] ?? ''));
-            if ($nombreFallback === '') {
-                $nombreFallback = 'Usuario';
-            }
-            if ($nombres === '') {
-                $nombres = $nombreFallback;
-            }
-
-            $insertCols = ['tipopersona_id', 'estado_id'];
-            $insertVals = [1, 1];
-
-            if (in_array('nombres', $tCols, true)) {
-                $insertCols[] = 'nombres';
-                $insertVals[] = $nombres !== '' ? $nombres : null;
-            }
-            if (in_array('apellidos', $tCols, true)) {
-                $insertCols[] = 'apellidos';
-                $insertVals[] = $apellidos !== '' ? $apellidos : null;
-            }
-            if (in_array('email', $tCols, true)) {
-                $insertCols[] = 'email';
-                $insertVals[] = $email !== '' ? $email : null;
-            }
-            if (in_array('foto_ruta', $tCols, true)) {
-                $insertCols[] = 'foto_ruta';
-                $insertVals[] = $foto !== '' ? $foto : null;
-            }
-            if (in_array('firma_ruta', $tCols, true)) {
-                $insertCols[] = 'firma_ruta';
-                $insertVals[] = $firma !== '' ? $firma : null;
-            }
-
-            $quoted = array_map(fn ($c) => '`' . str_replace('`', '', $c) . '`', $insertCols);
-            $sqlIns = 'INSERT INTO `tercero` (' . implode(',', $quoted) . ') VALUES (' . implode(',', array_fill(0, count($insertVals), '?')) . ')';
-            $st = $this->pdo->prepare($sqlIns);
-            $st->execute($insertVals);
-            $tid = (int)$this->pdo->lastInsertId();
-            $data['tercero_id'] = $tid;
-        } else {
-            $sets = [];
-            $updParams = [];
-
-            if (in_array('nombres', $tCols, true)) {
-                $sets[] = '`nombres`=?';
-                $updParams[] = $nombres !== '' ? $nombres : null;
-            }
-            if (in_array('apellidos', $tCols, true)) {
-                $sets[] = '`apellidos`=?';
-                $updParams[] = $apellidos !== '' ? $apellidos : null;
-            }
-            if (in_array('email', $tCols, true)) {
-                $overwriteOk = trim((string)($data['usuario_email_overwrite_ok'] ?? '')) === '1';
-                $currentEmail = null;
-                if ($this->tableExists('tercero')) {
-                    $stEm = $this->pdo->prepare('SELECT email FROM tercero WHERE id = ? LIMIT 1');
-                    $stEm->execute([$tid]);
-                    $currentEmail = $stEm->fetchColumn();
-                    $currentEmail = $currentEmail !== false && $currentEmail !== null ? trim((string)$currentEmail) : '';
-                }
-                $maySetEmail = $email === ''
-                    || $currentEmail === ''
-                    || strcasecmp($currentEmail, $email) === 0
-                    || $overwriteOk;
-                if ($maySetEmail) {
-                    $sets[] = '`email`=?';
-                    $updParams[] = $email !== '' ? $email : null;
-                }
-            }
-            if (in_array('foto_ruta', $tCols, true)) {
-                $sets[] = '`foto_ruta`=?';
-                $updParams[] = $foto !== '' ? $foto : null;
-            }
-            if (in_array('firma_ruta', $tCols, true)) {
-                $sets[] = '`firma_ruta`=?';
-                $updParams[] = $firma !== '' ? $firma : null;
-            }
-
-            if ($sets !== []) {
-                $updParams[] = $tid;
-                $this->pdo->prepare('UPDATE `tercero` SET ' . implode(',', $sets) . ' WHERE `id`=?')->execute($updParams);
-            }
-        }
-
-        $resolvedIdentId = $this->syncTerceroIdentificacionForUsuario($data, $tid, $tipoDoc, $numero, $dv);
-
-        if ($resolvedIdentId > 0) {
-            $personaLink = new UsuarioPersonaLinkService($this->pdo);
-            $personaLink->assignPersonaLink($data, $resolvedIdentId, $columnNames);
-        }
-    }
-
-    /**
-     * Crea o actualiza la fila de identificación y devuelve su id.
-     *
-     * @param array<string, mixed> $data
-     */
-    private function syncTerceroIdentificacionForUsuario(
-        array $data,
-        int $terceroId,
-        ?int $tipoDoc,
-        string $numero,
-        ?int $dv
-    ): int {
-        if (!$this->tableExists('terceroidentificacion')) {
-            return 0;
-        }
-
-        $tiCols = $this->getTableColumnNames('terceroidentificacion');
-        if (!in_array('tercero_id', $tiCols, true) || !in_array('tipodocumento_id', $tiCols, true) || !in_array('numero', $tiCols, true)) {
-            return 0;
-        }
-
-        if ($tipoDoc === null || $tipoDoc <= 0) {
-            if ($numero !== '') {
-                throw new Exception(json_encode([
-                    'tipodocumento_id' => 'Indique el tipo de documento si informa el número.',
-                ], JSON_UNESCAPED_UNICODE));
-            }
-
-            return 0;
-        }
-
-        $tipoVal = $tipoDoc;
-        $numVal = $numero !== '' ? $numero : null;
-
-        $identId = 0;
-        if ($numVal !== null) {
-            $stMatch = $this->pdo->prepare('
-                SELECT `id` FROM `terceroidentificacion`
-                WHERE `tercero_id`=? AND `tipodocumento_id`=? AND TRIM(`numero`)=TRIM(?)
-                ORDER BY `principal` DESC, `id` ASC
-                LIMIT 1
-            ');
-            $stMatch->execute([$terceroId, $tipoVal, $numVal]);
-            $identId = (int)($stMatch->fetchColumn() ?: 0);
-        }
-
-        if ($identId <= 0) {
-            $stFind = $this->pdo->prepare('SELECT `id` FROM `terceroidentificacion` WHERE `tercero_id`=? AND `principal`=1 LIMIT 1');
-            $stFind->execute([$terceroId]);
-            $identId = (int)($stFind->fetchColumn() ?: 0);
-        }
-
-        $identAccion = trim((string)($data['usuario_identificacion_accion'] ?? 'update_principal'));
-
-        if ($identId > 0 && $identAccion === 'new_row') {
-            if (in_array('principal', $tiCols, true)) {
-                $this->pdo->prepare('UPDATE `terceroidentificacion` SET `principal`=0 WHERE `tercero_id`=?')->execute([$terceroId]);
-            }
-            $insC = ['tercero_id', 'tipodocumento_id', 'numero', 'principal', 'estado_id'];
-            $insV = [$terceroId, $tipoVal, $numVal, 1, 1];
-            if (in_array('dv', $tiCols, true)) {
-                $insC[] = 'dv';
-                $insV[] = $dv;
-            }
-            $qc = array_map(fn ($c) => '`' . str_replace('`', '', $c) . '`', $insC);
-            $this->pdo->prepare(
-                'INSERT INTO `terceroidentificacion` (' . implode(',', $qc) . ') VALUES (' . implode(',', array_fill(0, count($insV), '?')) . ')'
-            )->execute($insV);
-
-            return (int)$this->pdo->lastInsertId();
-        }
-
-        if ($identId > 0) {
-            $uSets = ['`tipodocumento_id`=?', '`numero`=?'];
-            $uPar = [$tipoVal, $numVal];
-            if (in_array('dv', $tiCols, true)) {
-                $uSets[] = '`dv`=?';
-                $uPar[] = $dv;
-            }
-            $uPar[] = $identId;
-            $this->pdo->prepare('UPDATE `terceroidentificacion` SET ' . implode(',', $uSets) . ' WHERE `id`=?')->execute($uPar);
-
-            return $identId;
-        }
-
-        if ($numVal === null) {
-            return 0;
-        }
-
-        $insC = ['tercero_id', 'tipodocumento_id', 'numero', 'principal', 'estado_id'];
-        $insV = [$terceroId, $tipoVal, $numVal, 1, 1];
-        if (in_array('dv', $tiCols, true)) {
-            $insC[] = 'dv';
-            $insV[] = $dv;
-        }
-        $qc = array_map(fn ($c) => '`' . str_replace('`', '', $c) . '`', $insC);
-        $this->pdo->prepare(
-            'INSERT INTO `terceroidentificacion` (' . implode(',', $qc) . ') VALUES (' . implode(',', array_fill(0, count($insV), '?')) . ')'
-        )->execute($insV);
-
-        return (int)$this->pdo->lastInsertId();
-    }
-
     /** Comentario estándar para FK empresa_id (valor = empresa.id, etiqueta = tercero.razon_social). */
     public const EMPRESA_ID_REL_COMMENT = 'rel:tercero|label:razon_social|title:Razón social de la empresa';
+
+    /**
+     * Limpia referencias huérfanas del POST tras error de guardado.
+     *
+     * @param array<string, mixed> $post
+     * @return array<string, mixed>
+     */
+    public function sanitizeUsuarioFormPostForDisplay(array $post): array
+    {
+        return (new UsuarioSaveModeResolver($this->pdo))->sanitizeFormPostForDisplay($post);
+    }
 
     /**
      * Tabla referenciada en COLUMN_COMMENT: rel:sgd_dependencia
@@ -2753,6 +2512,26 @@ class CrudService
         $this->linkNewUsuarioToSessionScope($existingId);
 
         return true;
+    }
+
+    /**
+     * Operadores sin alcance global deben tener empresa en sesión antes de crear usuarios.
+     *
+     * @throws Exception
+     */
+    private function assertUsuarioCreateAllowedInSessionScope(): void
+    {
+        $validator = new UsuarioFormValidationService($this->pdo);
+        if ($validator->isSuperAdminViewer()) {
+            return;
+        }
+
+        $eid = $_SESSION['empresa_id'] ?? null;
+        if ($eid === null || $eid === '') {
+            UsuarioSaveMessages::throwJson([
+                'general' => 'Seleccione empresa y sede en el contexto (arriba a la derecha) antes de crear usuarios.',
+            ]);
+        }
     }
 
     private function linkNewUsuarioToSessionScope(int $usuarioId): void

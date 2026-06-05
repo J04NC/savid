@@ -4982,6 +4982,35 @@ AGREGAR AL FINAL DE public/css/app.css
     }
 }
 
+/* CCD SGD */
+.sgd-ccd-page .sgd-ccd-lead{
+    margin-bottom:12px;
+}
+
+.sgd-ccd-filter-form{
+    display:flex;
+    flex-wrap:wrap;
+    align-items:flex-end;
+    gap:10px;
+    padding:0 0 12px;
+}
+
+.sgd-ccd-filter-form .sgd-local-catalog-wrap{
+    flex:1;
+    min-width:220px;
+    max-width:420px;
+}
+
+.sgd-ccd-filter-label{
+    font-size:13px;
+    opacity:.85;
+}
+
+.sgd-ccd-filter-select{
+    min-width:220px;
+    max-width:100%;
+}
+
 /* CRUD Documentos SGD */
 .sgd-documentos-page .sgd-doc-toolbar{
     display:flex;

@@ -33,6 +33,8 @@ class SgdImportService
             'subseries' => 0,
             'entradas' => 0,
             'omitidas' => 0,
+            'omitidas_sin_calidad' => 0,
+            'sin_documento_maestro' => 0,
         ];
 
         $dependenciaNombre = '';
@@ -147,7 +149,7 @@ class SgdImportService
                 continue;
             }
 
-            if ($textoD !== '' && $lastCodigoCarpeta !== '' && $dependenciaCodigo !== null) {
+            if ($codigoCalidad !== '' && $textoD !== '' && $lastCodigoCarpeta !== '' && $dependenciaCodigo !== null) {
                 $depId = $this->ensureDependencia(
                     $empresaId,
                     $dependenciaCodigo,
@@ -457,7 +459,6 @@ class SgdImportService
         $id = $this->repo->findSubserieId($serieId, $codigo);
         if ($id) {
             $this->repo->updateSubserieNombre($id, $nombre);
-            $stats['actualizadas']++;
 
             return $id;
         }
@@ -503,15 +504,25 @@ class SgdImportService
         ?int $anio,
         array &$stats
     ): void {
-        if ($this->repo->ccdEntradaExists($empresaId, $codigoCarpeta, $codigoCalidad ?: null, $nombreSubserie)) {
-            $stats['omitidas']++;
+        $codigoCalidad = trim((string)$codigoCalidad);
+        if ($codigoCalidad === '') {
+            $stats['omitidas_sin_calidad']++;
 
             return;
         }
 
-        $docId = null;
-        if ($codigoCalidad !== '') {
-            $docId = $this->repo->findDocumentoId($empresaId, $codigoCalidad);
+        $docId = $this->repo->findDocumentoIdByCodigoCalidad($empresaId, $codigoCalidad);
+        if ($docId === null) {
+            $stats['sin_documento_maestro']++;
+
+            return;
+        }
+
+        if ($this->repo->ccdEntradaExists($empresaId, $codigoCarpeta, $codigoCalidad, $nombreSubserie)
+            || $this->repo->ccdEntradaDuplicate($empresaId, $depId, $serieId ?? 0, $subserieId, $docId, null)) {
+            $stats['omitidas']++;
+
+            return;
         }
 
         $this->repo->insertCcdEntrada($empresaId, [
@@ -522,7 +533,7 @@ class SgdImportService
             'nombre_serie' => $nombreSerie,
             'nombre_subserie' => $nombreSubserie,
             'soporte_formato' => $soporte,
-            'codigo_calidad' => $codigoCalidad ?: null,
+            'codigo_calidad' => $codigoCalidad,
             'documento_id' => $docId,
             'ccd_vigencia' => $vigencia,
             'ccd_anio' => $anio,
