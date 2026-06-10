@@ -2126,13 +2126,18 @@ function initCrudAcciones() {
                     "sgd/tipoDocumentalPadres/" + selectedId,
                     "lg",
                     "Cargando padres permitidos..."
+                ],
+                sgd_tipo_secciones: [
+                    "sgd/tipoDocumentalSecciones/" + selectedId,
+                    "lg",
+                    "Cargando perfil de secciones..."
                 ]
             };
 
             const cfg = modales[accion];
 
             if (cfg) {
-                const url = cfg[0] + (accion === "sgd_tipo_padres" ? crudSelectedRowEmpresaQuery() : "");
+                const url = cfg[0] + ((accion === "sgd_tipo_padres" || accion === "sgd_tipo_secciones") ? crudSelectedRowEmpresaQuery() : "");
                 openModalGod(url, cfg[1], cfg[2]);
             } else {
                 alert("Acción sin handler en crud.js: " + (raw || "(vacío)") +

@@ -132,8 +132,185 @@ $patronesCarpetaSugeridos = [
                 require BASE_PATH . '/app/views/sgd/_form_field.php';
                 ?>
 
+                <div class="sgd-section-title-inline" style="margin-top:24px;">
+                    <span>Formato PDF — documentos internos</span>
+                </div>
+                <p class="field-note">Márgenes en centímetros. El logo se toma del registro de la empresa.</p>
+
+                <?php
+                $margenes = $formatoPdf['margenes'] ?? [];
+                foreach (['superior' => 'Superior', 'inferior' => 'Inferior', 'izquierdo' => 'Izquierdo', 'derecho' => 'Derecho'] as $mk => $mlabel):
+                    $name = 'margen_' . $mk;
+                    $label = 'Margen ' . $mlabel . ' (cm)';
+                    $type = 'number';
+                    $value = (string)($margenes[$mk] ?? '');
+                    $helpId = 'margen-' . $mk;
+                    $helpLabel = 'Margen ' . $mlabel;
+                    $helpBody = 'Margen ' . strtolower($mlabel) . ' del documento interno en el PDF generado.';
+                    $helpExample = '3.0';
+                    $fieldNote = '';
+                    $datalistId = '';
+                    $datalistOptions = [];
+                    $groupClass = 'sgd-margen-group';
+                    $inputAttrs = ['step' => '0.1', 'min' => '0', 'max' => '10'];
+                    require BASE_PATH . '/app/views/sgd/_form_field.php';
+                endforeach;
+
+                $titulosConfig = SgdSeccionService::normalizeTitulosConfig($formatoPdf['titulos'] ?? null);
+                $titulosNiveles = $titulosConfig['niveles'];
+                $flagLabels = SgdSeccionService::tituloFlagKeys();
+
+                $name = 'fuente_documento';
+                $label = 'Fuente (cuerpo y títulos)';
+                $type = 'text';
+                $value = (string)($formatoPdf['fuente_cuerpo'] ?? 'Arial');
+                $helpId = 'fuente-doc';
+                $helpLabel = 'Fuente';
+                $helpBody = 'Tipografía del cuerpo y de los niveles de título en el PDF.';
+                $helpExample = 'Arial';
+                $fieldNote = '';
+                $datalistId = '';
+                $datalistOptions = [];
+                $groupClass = 'sgd-fuente-group';
+                $inputAttrs = ['maxlength' => '40'];
+                require BASE_PATH . '/app/views/sgd/_form_field.php';
+
+                $name = 'tamano_documento';
+                $label = 'Tamaño (pt)';
+                $type = 'number';
+                $value = (string)($formatoPdf['tamano_cuerpo'] ?? '11');
+                $helpId = 'tamano-doc';
+                $helpLabel = 'Tamaño';
+                $helpBody = 'Tamaño en puntos para cuerpo y títulos.';
+                $helpExample = '11';
+                $groupClass = 'sgd-tamano-group';
+                $inputAttrs = ['min' => '8', 'max' => '24'];
+                require BASE_PATH . '/app/views/sgd/_form_field.php';
+                ?>
+
+                <div class="sgd-section-title-inline" style="margin-top:16px;">
+                    <span>Jerarquía de títulos</span>
+                </div>
+                <p class="field-note">Defina los niveles de título y el formato de cada uno. Puede agregar o quitar niveles según la norma documental de su organización.</p>
+
+                <input type="hidden" name="titulo_nivel_count" id="sgd-titulo-count" value="<?= count($titulosNiveles) ?>">
+
+                <?php if ($titulosNiveles === []): ?>
+                    <p class="field-note sgd-titulos-empty" id="sgd-titulos-empty">Sin niveles de título configurados. Use el botón inferior para agregar el primero.</p>
+                <?php endif; ?>
+
+                <div class="crud-table-wrapper sgd-titulos-table-wrap<?= $titulosNiveles === [] ? ' is-empty' : '' ?>">
+                    <table class="crud-table sgd-titulos-table" id="sgd-titulos-table">
+                        <thead>
+                            <tr>
+                                <th class="sgd-titulos-orden-col">#</th>
+                                <th>Nombre del nivel</th>
+                                <th>Ejemplo de numeración</th>
+                                <?php foreach ($flagLabels as $flabel): ?>
+                                    <th class="sgd-titulos-flag-col"><?= htmlspecialchars($flabel, ENT_QUOTES, 'UTF-8') ?></th>
+                                <?php endforeach; ?>
+                                <th class="sgd-titulos-actions-col"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="sgd-titulos-tbody">
+                            <?php foreach ($titulosNiveles as $i => $nivelCfg): ?>
+                                <tr class="sgd-titulo-row" data-index="<?= (int)$i ?>">
+                                    <td class="sgd-titulos-orden-col"><?= (int)$i + 1 ?></td>
+                                    <td>
+                                        <input type="text"
+                                               name="titulo_nombre[<?= (int)$i ?>]"
+                                               class="form-input sgd-titulo-nombre"
+                                               maxlength="80"
+                                               value="<?= htmlspecialchars((string)($nivelCfg['nombre'] ?? ''), ENT_QUOTES, 'UTF-8') ?>"
+                                               placeholder="Ej. Capítulo, Sección…">
+                                    </td>
+                                    <td>
+                                        <input type="text"
+                                               name="titulo_ejemplo[<?= (int)$i ?>]"
+                                               class="form-input sgd-titulo-ejemplo"
+                                               maxlength="80"
+                                               value="<?= htmlspecialchars((string)($nivelCfg['ejemplo'] ?? ''), ENT_QUOTES, 'UTF-8') ?>"
+                                               placeholder="Ej. 1, 1.1, 1.1.1…">
+                                    </td>
+                                    <?php foreach (array_keys($flagLabels) as $flag): ?>
+                                        <td class="sgd-titulos-flag-col">
+                                            <label class="sgd-check-row sgd-titulos-check">
+                                                <input type="hidden" name="titulo_<?= htmlspecialchars($flag, ENT_QUOTES, 'UTF-8') ?>[<?= (int)$i ?>]" value="0">
+                                                <input type="checkbox"
+                                                       name="titulo_<?= htmlspecialchars($flag, ENT_QUOTES, 'UTF-8') ?>[<?= (int)$i ?>]"
+                                                       value="1"
+                                                       <?= !empty($nivelCfg[$flag]) ? 'checked' : '' ?>>
+                                            </label>
+                                        </td>
+                                    <?php endforeach; ?>
+                                    <td class="sgd-titulos-actions-col">
+                                        <button type="button" class="sgd-titulo-remove" title="Quitar nivel">✕</button>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="sgd-titulos-toolbar">
+                    <button type="button" class="sgd-titulo-add" id="sgd-titulo-add">+ Agregar nivel</button>
+                </div>
+
+                <template id="sgd-titulo-row-tpl">
+                    <tr class="sgd-titulo-row" data-index="__INDEX__">
+                        <td class="sgd-titulos-orden-col">__ORDEN__</td>
+                        <td>
+                            <input type="text" name="titulo_nombre[__INDEX__]" class="form-input sgd-titulo-nombre" maxlength="80" placeholder="Ej. Capítulo, Sección…">
+                        </td>
+                        <td>
+                            <input type="text" name="titulo_ejemplo[__INDEX__]" class="form-input sgd-titulo-ejemplo" maxlength="80" placeholder="Ej. 1, 1.1, 1.1.1…">
+                        </td>
+                        <?php foreach (array_keys($flagLabels) as $flag): ?>
+                            <td class="sgd-titulos-flag-col">
+                                <label class="sgd-check-row sgd-titulos-check">
+                                    <input type="hidden" name="titulo_<?= htmlspecialchars($flag, ENT_QUOTES, 'UTF-8') ?>[__INDEX__]" value="0">
+                                    <input type="checkbox" name="titulo_<?= htmlspecialchars($flag, ENT_QUOTES, 'UTF-8') ?>[__INDEX__]" value="1">
+                                </label>
+                            </td>
+                        <?php endforeach; ?>
+                        <td class="sgd-titulos-actions-col">
+                            <button type="button" class="sgd-titulo-remove" title="Quitar nivel">✕</button>
+                        </td>
+                    </tr>
+                </template>
+
+                <?php
+                $name = 'pie_pagina';
+                ?>
+                <div class="form-group crud-form-field-full">
+                    <label class="sgd-label-with-help" for="sgd_pie_pagina">
+                        <span>Pie de página legal</span>
+                        <?php
+                        $helpId = 'pie-pagina';
+                        $helpLabel = 'Pie de página';
+                        $helpBody = 'Texto legal en el pie de cada página del PDF.';
+                        $helpExample = 'Este documento es propiedad de la organización…';
+                        require BASE_PATH . '/app/views/sgd/_field_help.php';
+                        ?>
+                    </label>
+                    <textarea id="sgd_pie_pagina" name="pie_pagina" class="form-input" rows="3"><?= htmlspecialchars((string)($formatoPdf['pie_pagina'] ?? ''), ENT_QUOTES, 'UTF-8') ?></textarea>
+                </div>
+                <?php
+                unset($name);
+                ?>
+
             </fieldset>
         </form>
+
+        <?php if ($canConfigurar): ?>
+            <div class="crud-toolbar" style="margin-top:20px;">
+                <form method="post" action="?url=sgd/cargarSeccionesPlantilla&empresa_id=<?= (int)$scope['empresaId'] ?>">
+                    <button type="submit" title="Importar catálogo de secciones y perfiles para tipos maestro"
+                            onclick="return confirm('¿Importar plantilla de secciones? Actualiza secciones existentes por código.');">
+                        📑 Importar plantilla de secciones
+                    </button>
+                </form>
+            </div>
+        <?php endif; ?>
 
         <div class="crud-list-search sgd-patrones-ayuda">
             <span class="crud-list-search-label">Referencia rápida — patrón documento</span>

@@ -2,8 +2,11 @@
 
 class SgdRepository
 {
-    /** Estado documental VIGENTE (tabla estado, tipo DOCUMENTAL). */
+    /** Estados documentales (tabla estado, tipo DOCUMENTAL). */
+    public const ESTADO_DOC_BORRADOR = 7;
     public const ESTADO_DOC_VIGENTE = 8;
+    public const ESTADO_DOC_OBSOLETO = 9;
+    public const ESTADO_DOC_FIRMADO = 10;
 
     /** @var list<int> */
     private const ESTADO_DOC_IDS = [7, 8, 9, 10];
@@ -1001,7 +1004,7 @@ class SgdRepository
                 consecutivo, nombre, modo, version_actual,
                 fecha_primera_aprobacion, fecha_ultima_aprobacion,
                 estado_id, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3))
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3))
         ');
         $stmt->execute([
             $empresaId,
@@ -1019,6 +1022,419 @@ class SgdRepository
         ]);
 
         return (int)$this->pdo->lastInsertId();
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function listDocumentoVersiones(int $empresaId, int $documentoId): array
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_documento_version', 'v');
+        $stmt = $this->pdo->prepare("
+            SELECT
+                v.id,
+                v.documento_id,
+                v.numero,
+                v.notas,
+                v.archivo_ruta,
+                v.estado_id,
+                v.fecha_aprobacion,
+                v.es_vigente,
+                v.created_at,
+                e.nombre AS estado_nombre
+            FROM sgd_documento_version v
+            LEFT JOIN estado e ON e.id = v.estado_id
+            WHERE v.empresa_id = ? AND v.documento_id = ? {$nd}
+            ORDER BY CAST(v.numero AS DECIMAL(10,2)) ASC, v.id ASC
+        ");
+        $stmt->execute([$empresaId, $documentoId]);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    public function findDocumentoVersionById(int $empresaId, int $versionId): ?array
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_documento_version', 'v');
+        $stmt = $this->pdo->prepare("
+            SELECT v.*
+            FROM sgd_documento_version v
+            WHERE v.empresa_id = ? AND v.id = ? {$nd}
+            LIMIT 1
+        ");
+        $stmt->execute([$empresaId, $versionId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row ?: null;
+    }
+
+    public function documentoVersionNumeroExists(
+        int $empresaId,
+        int $documentoId,
+        string $numero,
+        ?int $excludeId = null
+    ): bool {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_documento_version');
+        $sql = "
+            SELECT 1 FROM sgd_documento_version
+            WHERE empresa_id = ? AND documento_id = ? AND numero = ? {$nd}
+        ";
+        $params = [$empresaId, $documentoId, $numero];
+        if ($excludeId !== null && $excludeId > 0) {
+            $sql .= ' AND id <> ?';
+            $params[] = $excludeId;
+        }
+        $sql .= ' LIMIT 1';
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+
+        return (bool)$stmt->fetchColumn();
+    }
+
+    public function suggestNextVersionNumero(int $empresaId, int $documentoId): string
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_documento_version');
+        $stmt = $this->pdo->prepare("
+            SELECT numero FROM sgd_documento_version
+            WHERE empresa_id = ? AND documento_id = ? {$nd}
+        ");
+        $stmt->execute([$empresaId, $documentoId]);
+        $max = 0;
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $n = $this->parseNumericConsecutivo((string)($row['numero'] ?? ''));
+            if ($n !== null && $n > $max) {
+                $max = $n;
+            }
+        }
+
+        return (string)($max + 1);
+    }
+
+    public function saveDocumentoVersion(int $empresaId, array $data): int
+    {
+        $id = (int)($data['id'] ?? 0);
+        $fields = [
+            'documento_id' => (int)($data['documento_id'] ?? 0),
+            'numero' => trim((string)($data['numero'] ?? '')),
+            'notas' => $data['notas'] ?? null,
+            'archivo_ruta' => $data['archivo_ruta'] ?? null,
+            'estado_id' => $this->normalizeEstadoDocumentalId(
+                isset($data['estado_id']) ? (int)$data['estado_id'] : SgdRepository::ESTADO_DOC_BORRADOR
+            ),
+            'fecha_aprobacion' => $data['fecha_aprobacion'] ?? null,
+            'es_vigente' => (int)($data['es_vigente'] ?? 0),
+        ];
+
+        if ($id > 0) {
+            $stmt = $this->pdo->prepare('
+                UPDATE sgd_documento_version
+                SET numero = ?, notas = ?, archivo_ruta = ?, estado_id = ?,
+                    fecha_aprobacion = ?, es_vigente = ?, updated_at = NOW(3), updated_by = ?
+                WHERE id = ? AND empresa_id = ?
+            ');
+            $stmt->execute([
+                $fields['numero'],
+                $fields['notas'],
+                $fields['archivo_ruta'],
+                $fields['estado_id'],
+                $fields['fecha_aprobacion'],
+                $fields['es_vigente'],
+                $data['updated_by'] ?? null,
+                $id,
+                $empresaId,
+            ]);
+
+            return $id;
+        }
+
+        $stmt = $this->pdo->prepare('
+            INSERT INTO sgd_documento_version (
+                empresa_id, documento_id, numero, notas, archivo_ruta,
+                estado_id, fecha_aprobacion, es_vigente, created_at, created_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(3), ?)
+        ');
+        $stmt->execute([
+            $empresaId,
+            $fields['documento_id'],
+            $fields['numero'],
+            $fields['notas'],
+            $fields['archivo_ruta'],
+            $fields['estado_id'],
+            $fields['fecha_aprobacion'],
+            $fields['es_vigente'],
+            $data['created_by'] ?? null,
+        ]);
+
+        return (int)$this->pdo->lastInsertId();
+    }
+
+    public function updateDocumentoVersionFecha(
+        int $empresaId,
+        int $versionId,
+        string $fechaAprobacion,
+        ?int $userId = null
+    ): void {
+        $stmt = $this->pdo->prepare('
+            UPDATE sgd_documento_version
+            SET fecha_aprobacion = ?, updated_at = NOW(3), updated_by = ?
+            WHERE id = ? AND empresa_id = ?
+        ');
+        $stmt->execute([$fechaAprobacion, $userId, $versionId, $empresaId]);
+
+        $version = $this->findDocumentoVersionById($empresaId, $versionId);
+        if ($version && (int)($version['es_vigente'] ?? 0) === 1) {
+            $documentoId = (int)$version['documento_id'];
+            $doc = $this->findDocumentoById($empresaId, $documentoId);
+            if ($doc) {
+                $fechaPrimera = trim((string)($doc['fecha_primera_aprobacion'] ?? ''));
+                if ($fechaPrimera === '' || strtotime($fechaAprobacion) < strtotime($fechaPrimera)) {
+                    $fechaPrimera = $fechaAprobacion;
+                }
+                $stmt = $this->pdo->prepare('
+                    UPDATE sgd_documento
+                    SET fecha_primera_aprobacion = ?, fecha_ultima_aprobacion = ?,
+                        updated_at = NOW(3), updated_by = ?
+                    WHERE id = ? AND empresa_id = ?
+                ');
+                $stmt->execute([$fechaPrimera, $fechaAprobacion, $userId, $documentoId, $empresaId]);
+            }
+        }
+    }
+
+    public function updateDocumentoVersionArchivo(
+        int $empresaId,
+        int $versionId,
+        string $archivoRuta,
+        ?int $userId = null
+    ): void {
+        $stmt = $this->pdo->prepare('
+            UPDATE sgd_documento_version
+            SET archivo_ruta = ?, updated_at = NOW(3), updated_by = ?
+            WHERE id = ? AND empresa_id = ?
+        ');
+        $stmt->execute([$archivoRuta, $userId, $versionId, $empresaId]);
+    }
+
+    public function publishDocumentoVersion(
+        int $empresaId,
+        int $versionId,
+        ?int $userId = null,
+        ?string $fechaAprobacion = null
+    ): void {
+        $version = $this->findDocumentoVersionById($empresaId, $versionId);
+        if ($version === null) {
+            throw new RuntimeException('Versión no encontrada.');
+        }
+
+        $documentoId = (int)$version['documento_id'];
+        $fecha = trim((string)($fechaAprobacion ?? ''));
+        if ($fecha === '') {
+            $fecha = date('Y-m-d');
+        }
+
+        $this->pdo->beginTransaction();
+        try {
+            $stmt = $this->pdo->prepare('
+                UPDATE sgd_documento_version
+                SET es_vigente = 0, estado_id = ?, updated_at = NOW(3), updated_by = ?
+                WHERE empresa_id = ? AND documento_id = ? AND id <> ? AND deleted_at IS NULL
+            ');
+            $stmt->execute([
+                self::ESTADO_DOC_OBSOLETO,
+                $userId,
+                $empresaId,
+                $documentoId,
+                $versionId,
+            ]);
+
+            $stmt = $this->pdo->prepare('
+                UPDATE sgd_documento_version
+                SET estado_id = ?, es_vigente = 1, fecha_aprobacion = ?,
+                    updated_at = NOW(3), updated_by = ?
+                WHERE id = ? AND empresa_id = ?
+            ');
+            $stmt->execute([
+                self::ESTADO_DOC_VIGENTE,
+                $fecha,
+                $userId,
+                $versionId,
+                $empresaId,
+            ]);
+
+            $doc = $this->findDocumentoById($empresaId, $documentoId);
+            $fechaPrimera = trim((string)($doc['fecha_primera_aprobacion'] ?? ''));
+            if ($fechaPrimera === '') {
+                $fechaPrimera = $fecha;
+            } elseif (strtotime($fecha) < strtotime($fechaPrimera)) {
+                $fechaPrimera = $fecha;
+            }
+
+            $stmt = $this->pdo->prepare('
+                UPDATE sgd_documento
+                SET version_actual = ?, estado_id = ?,
+                    fecha_primera_aprobacion = ?, fecha_ultima_aprobacion = ?,
+                    updated_at = NOW(3), updated_by = ?
+                WHERE id = ? AND empresa_id = ?
+            ');
+            $stmt->execute([
+                $version['numero'],
+                self::ESTADO_DOC_VIGENTE,
+                $fechaPrimera,
+                $fecha,
+                $userId,
+                $documentoId,
+                $empresaId,
+            ]);
+
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            $this->pdo->rollBack();
+            throw $e;
+        }
+    }
+
+    public function obsoleteDocumentoMaestro(int $empresaId, int $documentoId, ?int $userId = null): void
+    {
+        $this->pdo->beginTransaction();
+        try {
+            $stmt = $this->pdo->prepare('
+                UPDATE sgd_documento_version
+                SET estado_id = ?, es_vigente = 0, updated_at = NOW(3), updated_by = ?
+                WHERE empresa_id = ? AND documento_id = ? AND deleted_at IS NULL
+            ');
+            $stmt->execute([
+                self::ESTADO_DOC_OBSOLETO,
+                $userId,
+                $empresaId,
+                $documentoId,
+            ]);
+
+            $stmt = $this->pdo->prepare('
+                UPDATE sgd_documento
+                SET estado_id = ?, updated_at = NOW(3), updated_by = ?
+                WHERE id = ? AND empresa_id = ?
+            ');
+            $stmt->execute([
+                self::ESTADO_DOC_OBSOLETO,
+                $userId,
+                $documentoId,
+                $empresaId,
+            ]);
+
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            $this->pdo->rollBack();
+            throw $e;
+        }
+    }
+
+    /**
+     * Resuelve campos normalizados a partir del código del listado maestro.
+     *
+     * @return array{proceso_id: ?int, documento_id: ?int, tipo_documental_id: ?int, consecutivo: string}
+     */
+    public function resolveDocumentoFieldsFromCodigo(
+        int $empresaId,
+        string $codigo,
+        ?int $procesoIdHint = null,
+        ?int $tipoIdHint = null
+    ): array {
+        $codigo = strtoupper(trim($codigo));
+        $tipoMap = $this->mapTiposByCodigo($empresaId);
+        $tipoCodigos = array_keys($tipoMap);
+        $parser = new SgdCodigoParserService();
+        $parsed = $parser->parse($codigo, $tipoCodigos);
+
+        $procesoId = $procesoIdHint;
+        if ($procesoId === null && $parsed['proceso'] !== '') {
+            $ndP = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_proceso', 'p');
+            $stmt = $this->pdo->prepare("
+                SELECT p.id FROM sgd_proceso p
+                WHERE p.empresa_id = ? AND p.codigo = ? {$ndP}
+                LIMIT 1
+            ");
+            $stmt->execute([$empresaId, $parsed['proceso']]);
+            $pid = $stmt->fetchColumn();
+            $procesoId = $pid !== false ? (int)$pid : null;
+        }
+
+        $documentoPadreId = null;
+        $consecutivo = (string)($parsed['numero'] ?? '');
+        $tipoId = $tipoIdHint;
+
+        if ($parsed['tipo'] !== null && isset($tipoMap[strtoupper($parsed['tipo'])])) {
+            $tipoId = (int)$tipoMap[strtoupper($parsed['tipo'])]['id'];
+        }
+
+        $sufijo = trim((string)($parsed['sufijo'] ?? ''));
+        if ($sufijo !== '' && preg_match('/^([A-Z]+)(\d+)$/i', $sufijo, $sm)) {
+            $childTipo = strtoupper($sm[1]);
+            $consecutivo = $sm[2];
+            if (isset($tipoMap[$childTipo])) {
+                $tipoId = (int)$tipoMap[$childTipo]['id'];
+            }
+
+            if ($procesoId !== null && $parsed['tipo'] !== null && $parsed['numero'] !== null
+                && isset($tipoMap[strtoupper($parsed['tipo'])])) {
+                $ndD = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_documento', 'd');
+                $tipoPadreId = (int)$tipoMap[strtoupper($parsed['tipo'])]['id'];
+                $stmt = $this->pdo->prepare("
+                    SELECT d.id FROM sgd_documento d
+                    WHERE d.empresa_id = ? AND d.proceso_id = ?
+                      AND d.tipo_documental_id = ? AND d.consecutivo = ?
+                      AND (d.documento_id IS NULL OR d.documento_id = 0)
+                    {$ndD}
+                    LIMIT 1
+                ");
+                $stmt->execute([$empresaId, $procesoId, $tipoPadreId, (string)$parsed['numero']]);
+                $padreId = $stmt->fetchColumn();
+                if ($padreId !== false) {
+                    $documentoPadreId = (int)$padreId;
+                }
+            }
+        }
+
+        return [
+            'proceso_id' => $procesoId,
+            'documento_id' => $documentoPadreId,
+            'tipo_documental_id' => $tipoId,
+            'consecutivo' => $consecutivo,
+        ];
+    }
+
+    /**
+     * Importación listado maestro con modelo normalizado (consecutivo + padre).
+     */
+    public function upsertDocumentoFromCodigo(int $empresaId, array $row): int
+    {
+        $codigo = strtoupper(trim((string)($row['codigo'] ?? '')));
+        $existingId = $this->findDocumentoIdByCodigoCalidad($empresaId, $codigo)
+            ?? $this->findDocumentoId($empresaId, $codigo);
+
+        $resolved = $this->resolveDocumentoFieldsFromCodigo(
+            $empresaId,
+            $codigo,
+            isset($row['proceso_id']) ? (int)$row['proceso_id'] : null,
+            isset($row['tipo_documental_id']) ? (int)$row['tipo_documental_id'] : null
+        );
+
+        if ($resolved['consecutivo'] === '' && $codigo !== '') {
+            $resolved['consecutivo'] = $codigo;
+        }
+
+        return $this->saveDocumento($empresaId, [
+            'id' => $existingId ?? 0,
+            'proceso_id' => $resolved['proceso_id'],
+            'documento_id' => $resolved['documento_id'],
+            'tipo_documental_id' => $resolved['tipo_documental_id'],
+            'linea_documental_id' => null,
+            'consecutivo' => $resolved['consecutivo'],
+            'nombre' => $row['nombre'] ?? $codigo,
+            'modo' => $row['modo'] ?? null,
+            'version_actual' => $row['version_actual'] ?? null,
+            'fecha_primera_aprobacion' => $row['fecha_primera_aprobacion'] ?? null,
+            'fecha_ultima_aprobacion' => $row['fecha_ultima_aprobacion'] ?? null,
+            'estado_id' => isset($row['estado_id']) ? (int)$row['estado_id'] : self::ESTADO_DOC_VIGENTE,
+        ]);
     }
 
     /**
@@ -1415,5 +1831,412 @@ class SgdRepository
         ');
 
         return $stmt->execute([$userId, $id, $empresaId]);
+    }
+
+    public function findFormularioByDocumento(int $empresaId, int $documentoId, string $proposito): ?array
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_formulario', 'f');
+        $stmt = $this->pdo->prepare("
+            SELECT f.*
+            FROM sgd_formulario f
+            WHERE f.empresa_id = ? AND f.documento_id = ? AND f.proposito = ? {$nd}
+            LIMIT 1
+        ");
+        $stmt->execute([$empresaId, $documentoId, $proposito]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row ?: null;
+    }
+
+    public function createFormulario(int $empresaId, int $documentoId, string $proposito, ?int $userId = null): int
+    {
+        $stmt = $this->pdo->prepare('
+            INSERT INTO sgd_formulario (empresa_id, documento_id, proposito, estado_id, created_at, created_by)
+            VALUES (?, ?, ?, 1, NOW(3), ?)
+        ');
+        $stmt->execute([$empresaId, $documentoId, $proposito, $userId]);
+
+        return (int)$this->pdo->lastInsertId();
+    }
+
+    public function findFormularioVersionById(int $empresaId, int $versionId): ?array
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_formulario_version', 'v');
+        $stmt = $this->pdo->prepare("
+            SELECT v.*, f.documento_id, f.proposito
+            FROM sgd_formulario_version v
+            INNER JOIN sgd_formulario f ON f.id = v.formulario_id
+            WHERE v.empresa_id = ? AND v.id = ? {$nd}
+            LIMIT 1
+        ");
+        $stmt->execute([$empresaId, $versionId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row ?: null;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function listFormularioVersiones(int $empresaId, int $formularioId): array
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_formulario_version', 'v');
+        $stmt = $this->pdo->prepare("
+            SELECT v.id, v.numero, v.estado_id, v.es_vigente, v.sede_id, v.updated_at,
+                   e.nombre AS estado_nombre
+            FROM sgd_formulario_version v
+            LEFT JOIN estado e ON e.id = v.estado_id
+            WHERE v.empresa_id = ? AND v.formulario_id = ? {$nd}
+            ORDER BY CAST(v.numero AS DECIMAL(10,2)) ASC, v.id ASC
+        ");
+        $stmt->execute([$empresaId, $formularioId]);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    public function findFormularioBorradorVersion(int $empresaId, int $formularioId, ?int $sedeId = null): ?array
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_formulario_version', 'v');
+        if ($sedeId === null) {
+            $stmt = $this->pdo->prepare("
+                SELECT v.*
+                FROM sgd_formulario_version v
+                WHERE v.empresa_id = ? AND v.formulario_id = ?
+                  AND v.estado_id = ? AND v.sede_id IS NULL {$nd}
+                ORDER BY v.id DESC
+                LIMIT 1
+            ");
+            $stmt->execute([$empresaId, $formularioId, self::ESTADO_DOC_BORRADOR]);
+        } else {
+            $stmt = $this->pdo->prepare("
+                SELECT v.*
+                FROM sgd_formulario_version v
+                WHERE v.empresa_id = ? AND v.formulario_id = ?
+                  AND v.estado_id = ? AND v.sede_id = ? {$nd}
+                ORDER BY v.id DESC
+                LIMIT 1
+            ");
+            $stmt->execute([$empresaId, $formularioId, self::ESTADO_DOC_BORRADOR, $sedeId]);
+        }
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row ?: null;
+    }
+
+    public function suggestNextFormularioVersionNumero(int $empresaId, int $formularioId): string
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_formulario_version');
+        $stmt = $this->pdo->prepare("
+            SELECT numero FROM sgd_formulario_version
+            WHERE empresa_id = ? AND formulario_id = ? {$nd}
+        ");
+        $stmt->execute([$empresaId, $formularioId]);
+        $max = 0;
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $n = $this->parseNumericConsecutivo((string)($row['numero'] ?? ''));
+            if ($n !== null && $n > $max) {
+                $max = $n;
+            }
+        }
+
+        return (string)($max + 1);
+    }
+
+    public function createFormularioVersion(int $empresaId, int $formularioId, array $data): int
+    {
+        $esquema = $data['esquema_json'] ?? ['version' => 1, 'campos' => []];
+        if (is_array($esquema)) {
+            $esquema = json_encode($esquema, JSON_UNESCAPED_UNICODE);
+        }
+
+        $stmt = $this->pdo->prepare('
+            INSERT INTO sgd_formulario_version (
+                empresa_id, formulario_id, sede_id, numero, esquema_json,
+                estado_id, es_vigente, created_at, created_by
+            ) VALUES (?, ?, ?, ?, ?, ?, 0, NOW(3), ?)
+        ');
+        $stmt->execute([
+            $empresaId,
+            $formularioId,
+            $data['sede_id'] ?? null,
+            trim((string)($data['numero'] ?? '1')),
+            $esquema,
+            (int)($data['estado_id'] ?? self::ESTADO_DOC_BORRADOR),
+            $data['created_by'] ?? null,
+        ]);
+
+        return (int)$this->pdo->lastInsertId();
+    }
+
+    public function saveFormularioVersionEsquema(
+        int $empresaId,
+        int $versionId,
+        array $esquema,
+        ?int $userId = null
+    ): void {
+        $json = json_encode($esquema, JSON_UNESCAPED_UNICODE);
+        $stmt = $this->pdo->prepare('
+            UPDATE sgd_formulario_version
+            SET esquema_json = ?, updated_at = NOW(3), updated_by = ?
+            WHERE id = ? AND empresa_id = ?
+        ');
+        $stmt->execute([$json, $userId, $versionId, $empresaId]);
+    }
+
+    public function publishFormularioVersion(int $empresaId, int $versionId, ?int $userId = null): void
+    {
+        $version = $this->findFormularioVersionById($empresaId, $versionId);
+        if ($version === null) {
+            throw new RuntimeException('Versión de formulario no encontrada.');
+        }
+
+        $formularioId = (int)$version['formulario_id'];
+        $sedeId = $version['sede_id'] ?? null;
+
+        $this->pdo->beginTransaction();
+        try {
+            $sql = '
+                UPDATE sgd_formulario_version
+                SET es_vigente = 0, estado_id = ?, updated_at = NOW(3), updated_by = ?
+                WHERE empresa_id = ? AND formulario_id = ? AND id <> ? AND deleted_at IS NULL
+            ';
+            $params = [self::ESTADO_DOC_OBSOLETO, $userId, $empresaId, $formularioId, $versionId];
+            if ($sedeId === null) {
+                $sql .= ' AND sede_id IS NULL';
+            } else {
+                $sql .= ' AND sede_id = ?';
+                $params[] = $sedeId;
+            }
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($params);
+
+            $stmt = $this->pdo->prepare('
+                UPDATE sgd_formulario_version
+                SET estado_id = ?, es_vigente = 1, updated_at = NOW(3), updated_by = ?
+                WHERE id = ? AND empresa_id = ?
+            ');
+            $stmt->execute([self::ESTADO_DOC_VIGENTE, $userId, $versionId, $empresaId]);
+
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            $this->pdo->rollBack();
+            throw $e;
+        }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* F3c — Secciones M4, perfil tipo, elaboración maestro               */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function listSeccionesByEmpresa(int $empresaId): array
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_seccion');
+        $stmt = $this->pdo->prepare("
+            SELECT * FROM sgd_seccion
+            WHERE empresa_id = ? {$nd}
+            ORDER BY orden, codigo
+        ");
+        $stmt->execute([$empresaId]);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    public function findSeccionById(int $empresaId, int $id): ?array
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_seccion');
+        $stmt = $this->pdo->prepare("
+            SELECT * FROM sgd_seccion
+            WHERE empresa_id = ? AND id = ? {$nd}
+            LIMIT 1
+        ");
+        $stmt->execute([$empresaId, $id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row ?: null;
+    }
+
+    public function findSeccionByCodigo(int $empresaId, string $codigo): ?array
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_seccion');
+        $stmt = $this->pdo->prepare("
+            SELECT * FROM sgd_seccion
+            WHERE empresa_id = ? AND codigo = ? {$nd}
+            LIMIT 1
+        ");
+        $stmt->execute([$empresaId, $codigo]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row ?: null;
+    }
+
+    public function countSecciones(int $empresaId): int
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_seccion');
+        $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM sgd_seccion WHERE empresa_id = ? {$nd}");
+        $stmt->execute([$empresaId]);
+
+        return (int)$stmt->fetchColumn();
+    }
+
+    public function upsertSeccion(int $empresaId, array $data, ?int $userId = null): int
+    {
+        $id = (int)($data['id'] ?? 0);
+        $codigo = strtolower(trim((string)($data['codigo'] ?? '')));
+        $codigo = preg_replace('/[^a-z0-9_]+/', '_', $codigo) ?? '';
+        $codigo = trim($codigo, '_');
+        $nombre = trim((string)($data['nombre'] ?? ''));
+        $clase = in_array($data['clase'] ?? '', ['auto', 'contenido', 'sistema'], true)
+            ? $data['clase']
+            : 'contenido';
+        $orden = (int)($data['orden'] ?? 0);
+        $ayuda = trim((string)($data['ayuda'] ?? '')) ?: null;
+
+        if ($codigo === '' || $nombre === '') {
+            throw new InvalidArgumentException('Código y nombre de sección son obligatorios.');
+        }
+
+        if ($id > 0) {
+            $stmt = $this->pdo->prepare('
+                UPDATE sgd_seccion
+                SET nombre = ?, clase = ?, orden = ?, ayuda = ?, updated_at = NOW(3), updated_by = ?
+                WHERE id = ? AND empresa_id = ?
+            ');
+            $stmt->execute([$nombre, $clase, $orden, $ayuda, $userId, $id, $empresaId]);
+
+            return $id;
+        }
+
+        $stmt = $this->pdo->prepare('
+            INSERT INTO sgd_seccion (
+                empresa_id, codigo, nombre, clase, orden, ayuda, estado_id, created_at, created_by
+            ) VALUES (?, ?, ?, ?, ?, ?, 1, NOW(3), ?)
+        ');
+        $stmt->execute([$empresaId, $codigo, $nombre, $clase, $orden, $ayuda, $userId]);
+
+        return (int)$this->pdo->lastInsertId();
+    }
+
+    public function softDeleteSeccion(int $empresaId, int $id, ?int $userId = null): void
+    {
+        $stmt = $this->pdo->prepare('
+            UPDATE sgd_seccion
+            SET deleted_at = NOW(3), deleted_by = ?
+            WHERE id = ? AND empresa_id = ? AND deleted_at IS NULL
+        ');
+        $stmt->execute([$userId, $id, $empresaId]);
+    }
+
+    /**
+     * @return array<int, string> seccion_id => estado_seccion
+     */
+    public function listTipoSeccionEstadosMap(int $empresaId, int $tipoDocumentalId): array
+    {
+        $stmt = $this->pdo->prepare('
+            SELECT seccion_id, estado_seccion
+            FROM sgd_tipo_documental_seccion
+            WHERE empresa_id = ? AND tipo_documental_id = ?
+        ');
+        $stmt->execute([$empresaId, $tipoDocumentalId]);
+        $map = [];
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $map[(int)$row['seccion_id']] = (string)$row['estado_seccion'];
+        }
+
+        return $map;
+    }
+
+    /**
+     * @param array<int, string> $seccionEstados seccion_id => aplica|no_aplica|opcional
+     */
+    public function replaceTipoDocumentalSecciones(
+        int $empresaId,
+        int $tipoDocumentalId,
+        array $seccionEstados,
+        ?int $userId = null
+    ): void {
+        $valid = ['aplica', 'no_aplica', 'opcional'];
+        $this->pdo->beginTransaction();
+        try {
+            $stmt = $this->pdo->prepare('
+                DELETE FROM sgd_tipo_documental_seccion
+                WHERE empresa_id = ? AND tipo_documental_id = ?
+            ');
+            $stmt->execute([$empresaId, $tipoDocumentalId]);
+
+            $ins = $this->pdo->prepare('
+                INSERT INTO sgd_tipo_documental_seccion (
+                    empresa_id, tipo_documental_id, seccion_id, estado_seccion, estado_id, created_at, created_by
+                ) VALUES (?, ?, ?, ?, 1, NOW(3), ?)
+            ');
+            foreach ($seccionEstados as $seccionId => $estado) {
+                $sid = (int)$seccionId;
+                $est = in_array($estado, $valid, true) ? $estado : 'no_aplica';
+                if ($sid <= 0 || $est === 'no_aplica') {
+                    continue;
+                }
+                $ins->execute([$empresaId, $tipoDocumentalId, $sid, $est, $userId]);
+            }
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            $this->pdo->rollBack();
+            throw $e;
+        }
+    }
+
+    public function findDocumentoElaboracion(int $empresaId, int $documentoId): ?array
+    {
+        $stmt = $this->pdo->prepare('
+            SELECT * FROM sgd_documento_elaboracion
+            WHERE empresa_id = ? AND documento_id = ?
+            LIMIT 1
+        ');
+        $stmt->execute([$empresaId, $documentoId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row ?: null;
+    }
+
+    public function upsertDocumentoElaboracion(
+        int $empresaId,
+        int $documentoId,
+        array $opciones,
+        array $contenido,
+        ?int $userId = null
+    ): void {
+        $existing = $this->findDocumentoElaboracion($empresaId, $documentoId);
+        $opcJson = json_encode($opciones, JSON_UNESCAPED_UNICODE);
+        $contJson = json_encode($contenido, JSON_UNESCAPED_UNICODE);
+
+        if ($existing) {
+            $stmt = $this->pdo->prepare('
+                UPDATE sgd_documento_elaboracion
+                SET opciones_json = ?, contenido_json = ?, updated_at = NOW(3), updated_by = ?
+                WHERE id = ? AND empresa_id = ?
+            ');
+            $stmt->execute([$opcJson, $contJson, $userId, $existing['id'], $empresaId]);
+
+            return;
+        }
+
+        $stmt = $this->pdo->prepare('
+            INSERT INTO sgd_documento_elaboracion (
+                empresa_id, documento_id, opciones_json, contenido_json, estado_id, created_at, created_by
+            ) VALUES (?, ?, ?, ?, 1, NOW(3), ?)
+        ');
+        $stmt->execute([$empresaId, $documentoId, $opcJson, $contJson, $userId]);
+    }
+
+    public function saveDocumentoVersionContenido(int $empresaId, int $versionId, array $contenido): void
+    {
+        $json = json_encode($contenido, JSON_UNESCAPED_UNICODE);
+        $stmt = $this->pdo->prepare('
+            UPDATE sgd_documento_version
+            SET contenido_json = ?, updated_at = NOW(3)
+            WHERE id = ? AND empresa_id = ?
+        ');
+        $stmt->execute([$json, $versionId, $empresaId]);
     }
 }

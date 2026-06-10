@@ -5,12 +5,14 @@ class SgdDocumentoService
     private SgdRepository $repo;
     private SgdScopeService $scope;
     private SgdDocumentoCodigoService $codigoService;
+    private SgdDocumentoVersionService $versionService;
 
     public function __construct()
     {
         $this->repo = new SgdRepository();
         $this->scope = new SgdScopeService();
         $this->codigoService = new SgdDocumentoCodigoService();
+        $this->versionService = new SgdDocumentoVersionService();
     }
 
     /**
@@ -29,6 +31,8 @@ class SgdDocumentoService
         $documentos = [];
         $total = 0;
         $edit = null;
+        $versiones = [];
+        $suggestedVersionNumero = '1';
         $consecutivoIndex = [];
         $padresPermitidosPorTipo = [];
         $catalogos = [
@@ -54,6 +58,10 @@ class SgdDocumentoService
 
             if ($editId > 0) {
                 $edit = $this->repo->findDocumentoById($empresaId, $editId);
+                if ($edit) {
+                    $versiones = $this->repo->listDocumentoVersiones($empresaId, $editId);
+                    $suggestedVersionNumero = $this->repo->suggestNextVersionNumero($empresaId, $editId);
+                }
             } elseif ($padreIdFromQuery > 0) {
                 $edit = $this->buildNewDocumentoForm($empresaId, $padreIdFromQuery);
             } else {
@@ -88,7 +96,14 @@ class SgdDocumentoService
             'catalogos' => $catalogos,
             'catalogosJson' => $this->buildCatalogosJson($catalogos, $consecutivoIndex, $padresPermitidosPorTipo),
             'selectedGridId' => $editId > 0 ? $editId : $padreIdFromQuery,
+            'versiones' => $versiones,
+            'suggestedVersionNumero' => $suggestedVersionNumero,
         ];
+    }
+
+    public function getVersionService(): SgdDocumentoVersionService
+    {
+        return $this->versionService;
     }
 
     /**

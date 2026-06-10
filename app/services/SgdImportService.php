@@ -213,6 +213,7 @@ class SgdImportService
         $tipoProcesoActual = '';
         $procesoNombreActual = '';
         $procesoCodigoActual = '';
+        $pendingRows = [];
 
         foreach ($read['rows'] as $rowNum => $cols) {
             if ((int)$rowNum <= $headerRow) {
@@ -263,15 +264,35 @@ class SgdImportService
             $fechaPrimera = $this->parser->excelSerialToDate($this->cell($cols, 'H'));
             $fechaUltima = $this->parser->excelSerialToDate($this->cell($cols, 'J'));
 
-            $before = $this->repo->findDocumentoId($empresaId, $codigo);
-            $this->repo->upsertDocumento($empresaId, [
+            $pendingRows[] = [
                 'codigo' => $codigo,
                 'nombre' => $nombre,
                 'proceso_id' => $procesoId,
                 'tipo_documental_id' => $tipoId,
+                'modo' => $modo,
                 'version_actual' => $version !== '' ? $version : null,
                 'fecha_primera_aprobacion' => $fechaPrimera,
                 'fecha_ultima_aprobacion' => $fechaUltima,
+                'is_child' => trim((string)($parsed['sufijo'] ?? '')) !== '',
+            ];
+        }
+
+        usort($pendingRows, static fn(array $a, array $b): int => ($a['is_child'] ? 1 : 0) <=> ($b['is_child'] ? 1 : 0));
+
+        foreach ($pendingRows as $row) {
+            $codigo = $row['codigo'];
+            $before = $this->repo->findDocumentoIdByCodigoCalidad($empresaId, $codigo)
+                ?? $this->repo->findDocumentoId($empresaId, $codigo);
+
+            $this->repo->upsertDocumentoFromCodigo($empresaId, [
+                'codigo' => $codigo,
+                'nombre' => $row['nombre'],
+                'proceso_id' => $row['proceso_id'],
+                'tipo_documental_id' => $row['tipo_documental_id'],
+                'modo' => $row['modo'],
+                'version_actual' => $row['version_actual'],
+                'fecha_primera_aprobacion' => $row['fecha_primera_aprobacion'],
+                'fecha_ultima_aprobacion' => $row['fecha_ultima_aprobacion'],
             ]);
 
             if ($before) {

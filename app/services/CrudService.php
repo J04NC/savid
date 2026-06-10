@@ -917,7 +917,7 @@ class CrudService
 
             if ($usuarioTx && $usuarioSaveCtx !== null && $usuarioSaveCtx->isLinkOnly() && $id) {
                 $this->linkNewUsuarioToSessionScope((int)$id);
-                $this->pdo->commit();
+                    $this->pdo->commit();
                 $_SESSION['flash_notice'] = UsuarioSaveMessages::linkOnlyNotice();
 
                 return true;
@@ -1523,12 +1523,12 @@ class CrudService
         $tablaSql = $this->sqlIdentifierTable($tabla);
         $columns = $this->getColumns($tablaSql);
 
-        $relations = [];
+            $relations = [];
 
         $fks = $this->getOutgoingForeignKeys($tablaSql);
-        foreach ($fks as $fk) {
-            $relations[$fk['column']] = $fk['referenced_table'];
-        }
+            foreach ($fks as $fk) {
+                $relations[$fk['column']] = $fk['referenced_table'];
+            }
 
         foreach ($columns as $col) {
             $field = $col['Field'];
@@ -2117,7 +2117,7 @@ class CrudService
         $preferred = ['nombre', 'razon_social', 'descripcion', 'titulo', 'username', 'email', 'codigo'];
 
         if ($displayColumn === null) {
-            foreach ($preferred as $pref) {
+        foreach ($preferred as $pref) {
                 if (in_array($pref, $fieldNames, true)) {
                     $displayColumn = $pref;
                     break;
@@ -2266,7 +2266,7 @@ class CrudService
             if (is_numeric($item)) {
                 if ($isExclude) {
                     $excludeIds[] = $item;
-                } else {
+        } else {
                     $includeIds[] = $item;
                 }
             } elseif ($isExclude) {

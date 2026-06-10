@@ -359,4 +359,152 @@
     if (!isEditing() && elConsecutivo && !elConsecutivo.value.trim()) {
         suggestConsecutivo(true);
     }
+
+    function readPdfStable(file, retriesLeft, delayMs) {
+        return new Promise(function (resolve, reject) {
+            function attempt() {
+                var reader = new FileReader();
+                reader.onload = function () {
+                    resolve({
+                        blob: new Blob([reader.result], { type: 'application/pdf' }),
+                        name: file.name || 'documento.pdf'
+                    });
+                };
+                reader.onerror = function () {
+                    if (retriesLeft > 0) {
+                        retriesLeft -= 1;
+                        setTimeout(attempt, delayMs);
+                        return;
+                    }
+                    reject(new Error(
+                        'No se pudo leer el archivo desde la nube. Descárguelo al teléfono o ábralo desde Archivos locales.'
+                    ));
+                };
+                try {
+                    reader.readAsArrayBuffer(file);
+                } catch (err) {
+                    if (retriesLeft > 0) {
+                        retriesLeft -= 1;
+                        setTimeout(attempt, delayMs);
+                        return;
+                    }
+                    reject(err);
+                }
+            }
+            setTimeout(attempt, delayMs);
+        });
+    }
+
+    function resolveUploadUrl(action) {
+        if (!action) return '';
+        if (/^https?:\/\//i.test(action)) return action;
+        var base = window.location.pathname || '/';
+        if (action.charAt(0) === '?') return base + action;
+        if (action.charAt(0) === '/') return action;
+        return base + '?' + action.replace(/^\?/, '');
+    }
+
+    function parseUploadResponse(text) {
+        try {
+            return JSON.parse(text);
+        } catch (e) {
+            throw new Error('El servidor no respondió correctamente. Recargue la página e intente de nuevo.');
+        }
+    }
+
+    document.querySelectorAll('.sgd-doc-ver-upload-form').forEach(function (form) {
+        var fileInput = form.querySelector('.sgd-doc-ver-file');
+        var submitBtn = form.querySelector('.sgd-doc-ver-submit-btn');
+        var nameEl = form.querySelector('.sgd-doc-ver-file-name');
+        if (!fileInput || !submitBtn) return;
+
+        form._pdfPayload = null;
+
+        fileInput.addEventListener('change', function () {
+            var file = fileInput.files && fileInput.files[0];
+            form._pdfPayload = null;
+            submitBtn.disabled = true;
+            if (!file) {
+                if (nameEl) {
+                    nameEl.textContent = '';
+                    nameEl.classList.remove('is-error');
+                }
+                return;
+            }
+
+            if (nameEl) {
+                nameEl.textContent = 'Preparando archivo…';
+                nameEl.classList.remove('is-error');
+            }
+
+            readPdfStable(file, 4, 500).then(function (payload) {
+                form._pdfPayload = payload;
+                if (nameEl) {
+                    nameEl.textContent = payload.name + ' — listo para subir';
+                }
+                submitBtn.disabled = false;
+            }).catch(function (err) {
+                if (nameEl) {
+                    nameEl.textContent = err && err.message ? err.message : 'No se pudo preparar el archivo.';
+                    nameEl.classList.add('is-error');
+                }
+            });
+        });
+
+        form.addEventListener('submit', function (e) {
+            e.preventDefault();
+            var payload = form._pdfPayload;
+            if (!payload) {
+                if (nameEl) {
+                    nameEl.textContent = 'Espere a que el archivo quede listo o elíjalo de nuevo.';
+                    nameEl.classList.add('is-error');
+                }
+                return false;
+            }
+
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Subiendo…';
+            if (nameEl) {
+                nameEl.classList.remove('is-error');
+            }
+
+            var fd = new FormData();
+            fd.append('archivo', payload.blob, payload.name);
+            fd.append('version_id', form.getAttribute('data-version-id') || '');
+            fd.append('documento_id', form.getAttribute('data-documento-id') || '');
+
+            fetch(resolveUploadUrl(form.action), {
+                method: 'POST',
+                body: fd,
+                credentials: 'same-origin',
+                headers: {
+                    'ngrok-skip-browser-warning': '1',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Accept': 'application/json'
+                }
+            })
+                .then(function (r) {
+                    return r.text().then(function (text) {
+                        return parseUploadResponse(text);
+                    });
+                })
+                .then(function (data) {
+                    if (data && data.ok) {
+                        window.location.href = form.getAttribute('data-return-url') || window.location.href;
+                        return;
+                    }
+                    throw new Error((data && (data.error || data.message)) || 'Error al subir el PDF');
+                })
+                .catch(function (err) {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Subir';
+                    if (nameEl) {
+                        nameEl.textContent = err && err.message ? err.message : 'Error al subir';
+                        nameEl.classList.add('is-error');
+                    }
+                });
+
+            return false;
+        });
+    });
 })();
