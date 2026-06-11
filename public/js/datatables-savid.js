@@ -245,9 +245,53 @@
         return new DataTable(tableEl, opts);
     }
 
+    var TABLE_SELECTORS = [
+        '.crud-table > table',
+        'table.savid-datatable',
+        'table.auditoria-table',
+        'table.sesiones-table',
+        'table.sgd-doc-table',
+        'table.role-table',
+        'table.tercero-ident-table',
+        'table.item-acciones-table',
+        'table.empresa-sedes-table',
+        'table.empresa-usuarios-table',
+        'table.sgd-ref-table'
+    ];
+
+    function isWordEditorTable(tableEl) {
+        if (!tableEl) return true;
+        if (tableEl.classList.contains('sgd-word-table')) return true;
+        return !!tableEl.closest('.sgd-word-editor, #sgd-word-import-preview, #sgd-word-import-modal');
+    }
+
+    function matchesDataTableSelector(tableEl) {
+        if (!tableEl || tableEl.tagName !== 'TABLE') return false;
+        for (var i = 0; i < TABLE_SELECTORS.length; i++) {
+            var sel = TABLE_SELECTORS[i];
+            var sep = sel.indexOf(' > ');
+            if (sep >= 0) {
+                var parentSel = sel.slice(0, sep).trim();
+                var childSel = sel.slice(sep + 3).trim();
+                if (tableEl.matches(childSel) && tableEl.parentElement && tableEl.parentElement.matches(parentSel)) {
+                    return true;
+                }
+            } else if (tableEl.matches(sel)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function isManagedDataTable(tableEl) {
+        if (!tableEl || tableEl.classList.contains('no-datatable')) return false;
+        if (isWordEditorTable(tableEl)) return false;
+        return matchesDataTableSelector(tableEl);
+    }
+
     function initTable(tableEl) {
         if (!tableEl || tableEl.tagName !== 'TABLE') return null;
-        if (tableEl.classList.contains('no-datatable')) return null;
+        if (!isManagedDataTable(tableEl)) return null;
 
         if (tableEl.dataset[INIT_FLAG] === '1' || isDataTableInstance(tableEl)) {
             tableEl.dataset[INIT_FLAG] = '1';
@@ -295,25 +339,12 @@
 
     function collectTables(root) {
         root = root || document;
-        var selectors = [
-            '.crud-table > table',
-            'table.savid-datatable',
-            'table.auditoria-table',
-            'table.sesiones-table',
-            'table.sgd-doc-table',
-            'table.role-table',
-            'table.tercero-ident-table',
-            'table.item-acciones-table',
-            'table.empresa-sedes-table',
-            'table.empresa-usuarios-table',
-            'table.sgd-ref-table'
-        ];
         var seen = new Set();
         var out = [];
 
-        selectors.forEach(function (sel) {
+        TABLE_SELECTORS.forEach(function (sel) {
             root.querySelectorAll(sel).forEach(function (t) {
-                if (t.classList.contains('no-datatable')) return;
+                if (!isManagedDataTable(t)) return;
                 if (seen.has(t)) return;
                 seen.add(t);
                 out.push(t);
@@ -332,7 +363,7 @@
         var out = [];
 
         function addTable(t) {
-            if (!t || t.tagName !== 'TABLE' || t.classList.contains('no-datatable')) return;
+            if (!isManagedDataTable(t)) return;
             if (seen.has(t)) return;
             if (t.dataset[INIT_FLAG] === '1' || isDataTableInstance(t)) return;
             seen.add(t);

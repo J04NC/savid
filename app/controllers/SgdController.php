@@ -612,6 +612,134 @@ class SgdController
         exit;
     }
 
+    /**
+     * Ruta: ?url=sgd/elaboracionImportWord&empresa_id=…&documento_id=…
+     */
+    public function elaboracionImportWord(): void
+    {
+        ob_start();
+
+        if (!PermisoService::can('sgd/elaboracion', 'guardar')) {
+            ob_end_clean();
+            $this->jsonResponse(['ok' => false, 'error' => 'Sin permiso']);
+            return;
+        }
+
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            ob_end_clean();
+            $this->jsonResponse(['ok' => false, 'error' => 'Método no permitido']);
+            return;
+        }
+
+        try {
+            $service = new SgdDocxImportService();
+            $result = $service->import($_FILES, $_POST, $_GET);
+        } catch (Throwable $e) {
+            error_log('elaboracionImportWord: ' . $e->getMessage());
+            ob_end_clean();
+            $this->jsonResponse([
+                'ok' => false,
+                'error' => 'Error al convertir el Word: ' . $e->getMessage(),
+            ]);
+            return;
+        }
+
+        ob_end_clean();
+        $this->jsonResponse([
+            'ok' => $result['success'],
+            'html' => $result['html'] ?? '',
+            'plain' => $result['plain'] ?? '',
+            'stats' => $result['stats'] ?? [],
+            'messages' => $result['messages'] ?? [],
+            'message' => $result['message'],
+            'error' => $result['success'] ? null : $result['message'],
+            'source' => $result['success'] ? 'server' : null,
+            'converter' => $result['converter'] ?? null,
+            'staged' => !empty($result['staged']),
+            'import_token' => $result['import_token'] ?? null,
+            'content_chars' => $result['content_chars'] ?? 0,
+        ]);
+        return;
+    }
+
+    /**
+     * Ruta: ?url=sgd/elaboracionImportWordFetch&empresa_id=…&documento_id=…&token=…
+     */
+    public function elaboracionImportWordFetch(): void
+    {
+        if (!PermisoService::can('sgd/elaboracion', 'guardar')) {
+            http_response_code(403);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo 'Sin permiso';
+            exit;
+        }
+
+        try {
+            $empresaId = $this->scope->requireEmpresaId($_GET);
+        } catch (RuntimeException $e) {
+            http_response_code(400);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo $e->getMessage();
+            exit;
+        }
+
+        if (!$this->scope->canAccessEmpresa($empresaId, $_GET)) {
+            http_response_code(403);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo 'Sin permiso para esta empresa.';
+            exit;
+        }
+
+        $documentoId = (int)($_GET['documento_id'] ?? 0);
+        $userId = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : 0;
+        $token = trim((string)($_GET['token'] ?? ''));
+
+        if ($documentoId <= 0 || $userId <= 0 || $token === '') {
+            http_response_code(400);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo 'Parámetros inválidos.';
+            exit;
+        }
+
+        $loaded = SgdWordImportStaging::load($token, $empresaId, $documentoId, $userId);
+        if ($loaded === null) {
+            http_response_code(404);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo 'Importación no encontrada o expirada.';
+            exit;
+        }
+
+        header('Content-Type: text/html; charset=utf-8');
+        header('Cache-Control: no-store');
+        echo $loaded['html'];
+        exit;
+    }
+
+    /**
+     * Ruta: ?url=sgd/elaboracionUploadMedia&empresa_id=…&documento_id=…
+     */
+    public function elaboracionUploadMedia(): void
+    {
+        if (!PermisoService::can('sgd/elaboracion', 'guardar')) {
+            $this->jsonResponse(['ok' => false, 'error' => 'Sin permiso']);
+            return;
+        }
+
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            $this->jsonResponse(['ok' => false, 'error' => 'Método no permitido']);
+            return;
+        }
+
+        $result = $this->elaboracionService->uploadMedia($_FILES, $_POST, $_GET);
+        $this->jsonResponse([
+            'ok' => $result['success'],
+            'path' => $result['path'] ?? null,
+            'message' => $result['message'],
+            'error' => $result['success'] ? null : $result['message'],
+        ]);
+        return;
+    }
+
     public function elaboracion(): void
     {
         if (!PermisoService::can('sgd/elaboracion', 'ver')) {
@@ -623,6 +751,14 @@ class SgdController
                 $this->deny();
             }
             $result = $this->elaboracionService->save($_POST, $_GET);
+            if ($this->wantsJsonResponse()) {
+                $this->jsonResponse([
+                    'ok' => $result['success'],
+                    'message' => $result['message'],
+                    'content_chars' => $result['content_chars'] ?? 0,
+                ]);
+            }
+
             $_SESSION['flash_notice'] = $result['message'];
             $q = $this->empresaQuery();
             $docId = (int)($_POST['documento_id'] ?? $_GET['documento_id'] ?? 0);
@@ -708,13 +844,37 @@ class SgdController
             . '</footer></div>';
     }
 
+    private function wantsJsonResponse(): bool
+    {
+        if (!empty($_POST['_ajax'])) {
+            return true;
+        }
+
+        $xhr = $_SERVER['HTTP_X_REQUESTED_WITH'] ?? '';
+
+        return is_string($xhr) && strcasecmp($xhr, 'XMLHttpRequest') === 0;
+    }
+
     /**
      * @param array<string, mixed> $payload
      */
     private function jsonResponse(array $payload): void
     {
         header('Content-Type: application/json; charset=utf-8');
-        echo json_encode($payload, JSON_UNESCAPED_UNICODE);
+        $flags = JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE;
+        if (defined('JSON_PARTIAL_OUTPUT_ON_ERROR')) {
+            $flags |= JSON_PARTIAL_OUTPUT_ON_ERROR;
+        }
+        $json = json_encode($payload, $flags);
+        if ($json === false) {
+            http_response_code(500);
+            echo json_encode([
+                'ok' => false,
+                'error' => 'No se pudo generar la respuesta JSON: ' . json_last_error_msg(),
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        echo $json;
         exit;
     }
 }

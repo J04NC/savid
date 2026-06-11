@@ -21,16 +21,38 @@ SIDEBAR
 
 function initSidebar() {
 
+    const sidebar = document.querySelector(".sidebar-floating");
+    const header = sidebar ? sidebar.querySelector(".user-header") : null;
+    const usernameEl = sidebar ? sidebar.querySelector(".username") : null;
+
+    if (header && usernameEl) {
+        const name = usernameEl.textContent.trim();
+        const initial = (name.charAt(0) || "?").toUpperCase();
+        header.setAttribute("data-initial", initial);
+        header.setAttribute("title", name);
+    }
+
     window.toggleUserPanel = function () {
         const body = document.getElementById("userBody");
         const arrow = document.querySelector(".sidebar-floating .arrow");
 
         if (!body) return;
 
+        if (sidebar && sidebar.classList.contains("is-compact") && !sidebar.classList.contains("is-compact-expanded")) {
+            sidebar.classList.add("is-compact-expanded");
+            body.classList.remove("hidden");
+            if (arrow) arrow.innerHTML = "▼";
+            return;
+        }
+
         body.classList.toggle("hidden");
 
         if (arrow) {
             arrow.innerHTML = body.classList.contains("hidden") ? "▶" : "▼";
+        }
+
+        if (sidebar && sidebar.classList.contains("is-compact") && body.classList.contains("hidden")) {
+            sidebar.classList.remove("is-compact-expanded");
         }
     };
 
@@ -42,10 +64,39 @@ function initSidebar() {
             body.classList.add("hidden");
             if (arrow) arrow.innerHTML = "▶";
         }
+
+        if (sidebar) {
+            sidebar.classList.remove("is-compact-expanded");
+        }
     }
 
+    function setSidebarCompact(compact) {
+        if (!sidebar || window.matchMedia("(max-width: 768px)").matches) return;
+
+        sidebar.classList.toggle("is-compact", compact);
+        if (compact) {
+            collapseUserPanel();
+        } else {
+            sidebar.classList.remove("is-compact-expanded");
+        }
+    }
+
+    let scrollTick = false;
+    window.addEventListener("scroll", function () {
+        if (!sidebar || scrollTick) return;
+        scrollTick = true;
+        requestAnimationFrame(function () {
+            scrollTick = false;
+            const y = window.scrollY || document.documentElement.scrollTop || 0;
+            if (y < 48) {
+                setSidebarCompact(false);
+            } else if (y > 120) {
+                setSidebarCompact(true);
+            }
+        });
+    }, { passive: true });
+
     document.addEventListener("click", function (e) {
-        const sidebar = document.querySelector(".sidebar-floating");
         if (!sidebar) return;
 
         if (sidebar.contains(e.target)) return;

@@ -68,6 +68,8 @@ class Router
 
         $empresaJsonApiMethods = ['uploadLogo', 'lookupNit', 'searchRepresentante', 'lookupRepresentante'];
 
+        $sgdElaboracionJsonMethods = ['elaboracionUploadMedia', 'elaboracionImportWord', 'elaboracionImportWordFetch'];
+
         if (SessionManager::userLogged()
             && $controllerName === 'UsuarioController'
             && in_array($method, $usuarioJsonLookupMethods, true)
@@ -92,6 +94,9 @@ class Router
             && class_exists('PermisoService')
             && !($controllerName === 'UsuarioController' && in_array($method, $usuarioJsonLookupMethods, true))
             && !($controllerName === 'EmpresaController' && in_array($method, $empresaJsonApiMethods, true))
+            && !($controllerName === 'SgdController'
+                && in_array($method, $sgdElaboracionJsonMethods, true)
+                && PermisoService::can('sgd/elaboracion', 'ver'))
             && !PermisoService::can($rutaCompleta, 'ver')) {
             http_response_code(403);
             exit('Acceso denegado.');

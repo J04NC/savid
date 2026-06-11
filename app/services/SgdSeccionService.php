@@ -325,4 +325,85 @@ class SgdSeccionService
 
         return ['niveles' => self::filterTitulosNiveles($niveles)];
     }
+
+    /**
+     * Profundidad del patrón numérico en el ejemplo de nivel (1 → 1, 1.1 → 2, 1.1.1.1 → 4).
+     */
+    public static function tituloEjemploDepth(string $ejemplo): int
+    {
+        $ejemplo = trim($ejemplo);
+        if ($ejemplo === '' || !preg_match('/^(\d+(?:\.\d+)*)/u', $ejemplo, $m)) {
+            return 0;
+        }
+
+        return count(explode('.', $m[1]));
+    }
+
+    /**
+     * Profundidad del prefijo numérico al inicio de un párrafo importado.
+     */
+    public static function extractLeadingNumberingDepth(string $text): int
+    {
+        $text = trim($text);
+        if ($text === '') {
+            return 0;
+        }
+        if (preg_match('/^(\d+(?:\.\d+)+)/u', $text, $m)) {
+            return count(explode('.', $m[1]));
+        }
+        if (preg_match('/^\d+[\.\)\-]\s+\S/u', $text)) {
+            return 1;
+        }
+        if (preg_match('/^\d+\.\p{L}/u', $text)) {
+            return 1;
+        }
+        if (preg_match('/^\d+\s+\S/u', $text)) {
+            return 1;
+        }
+
+        return 0;
+    }
+
+    /**
+     * Etiqueta HTML (h2–h6) según profundidad numérica y niveles configurados en SGD.
+     *
+     * @param array{niveles?: list<array{ejemplo?: string}>} $titulosConfig
+     */
+    public static function headingTagForNumberingDepth(int $depth, array $titulosConfig): string
+    {
+        if ($depth < 1) {
+            return '';
+        }
+
+        $niveles = self::normalizeTitulosConfig($titulosConfig)['niveles'];
+        $tags = ['h2', 'h3', 'h4', 'h5', 'h6'];
+        $map = [];
+        foreach ($niveles as $i => $nivel) {
+            $ejemploDepth = self::tituloEjemploDepth((string)($nivel['ejemplo'] ?? ''));
+            if ($ejemploDepth > 0 && isset($tags[$i])) {
+                $map[] = ['depth' => $ejemploDepth, 'tag' => $tags[$i]];
+            }
+        }
+
+        if ($map === []) {
+            $idx = min($depth - 1, count($tags) - 1);
+
+            return $tags[$idx] ?? '';
+        }
+
+        foreach ($map as $entry) {
+            if ($entry['depth'] === $depth) {
+                return $entry['tag'];
+            }
+        }
+
+        $best = null;
+        foreach ($map as $entry) {
+            if ($entry['depth'] <= $depth && ($best === null || $entry['depth'] > $best['depth'])) {
+                $best = $entry;
+            }
+        }
+
+        return $best['tag'] ?? $map[0]['tag'];
+    }
 }

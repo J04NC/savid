@@ -37,14 +37,21 @@ $pageStyle = sprintf(
 );
 
 $refDocsJson = json_encode(array_map(static function ($dm) {
+    $codigo = trim((string)($dm['codigo_display'] ?? ''));
+    if ($codigo === '') {
+        $codigo = trim((string)($dm['proceso_codigo'] ?? '') . '-' . (string)($dm['tipo_codigo'] ?? '') . (string)($dm['consecutivo'] ?? ''));
+    }
+    $nombre = trim((string)($dm['nombre'] ?? ''));
+
     return [
         'id' => (int)$dm['id'],
-        'label' => trim((string)($dm['proceso_codigo'] ?? '') . '-' . (string)($dm['tipo_codigo'] ?? '') . (string)($dm['consecutivo'] ?? '') . ' — ' . (string)($dm['nombre'] ?? '')),
+        'label' => $nombre !== '' ? ($codigo . ' — ' . $nombre) : $codigo,
     ];
 }, $documentosMaestro ?? []), JSON_UNESCAPED_UNICODE);
 
 $sgdElabJs = BASE_PATH . '/public/js/sgd-elaboracion.js';
 $sgdElabJsV = is_readable($sgdElabJs) ? (int)filemtime($sgdElabJs) : time();
+$wordImportServerZip = class_exists('ZipArchive', false);
 
 $titulosElab = SgdSeccionService::normalizeTitulosConfig($formatoPdf['titulos'] ?? null);
 $titulosCss = SgdElaboracionService::buildTitulosCss($formatoPdf);
@@ -132,6 +139,85 @@ $headingTags = ['h2', 'h3', 'h4', 'h5', 'h6'];
                     <button type="button" class="sgd-word-tool" data-cmd="insertOrderedList" title="Numeración">1. Lista</button>
                 </div>
                 <div class="sgd-word-ribbon-sep"></div>
+                <div class="sgd-word-ribbon-group sgd-word-import-group">
+                    <label for="sgd-word-import-input" class="sgd-word-tool sgd-word-import-trigger" id="sgd-word-import-btn" title="Importar contenido desde Word (.docx)" role="button">📄 Word</label>
+                    <input type="file" id="sgd-word-import-input" class="sgd-img-file-input" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
+                </div>
+                <div class="sgd-word-ribbon-sep"></div>
+                <div class="sgd-word-ribbon-group sgd-word-img-group">
+                    <button type="button" class="sgd-word-tool" id="sgd-img-insert-btn" title="Insertar imagen (JPG, PNG, WebP)">🖼 Imagen</button>
+                    <input type="file" id="sgd-img-file-input" class="sgd-img-file-input" accept="image/jpeg,image/png,image/webp" hidden>
+                    <button type="button" class="sgd-word-tool" data-img-align="left" title="Imagen alineada izquierda">◧</button>
+                    <button type="button" class="sgd-word-tool" data-img-align="center" title="Imagen centrada">◫</button>
+                    <button type="button" class="sgd-word-tool" data-img-align="right" title="Imagen alineada derecha">◨</button>
+                </div>
+                <div class="sgd-word-ribbon-sep"></div>
+                <div class="sgd-word-ribbon-group sgd-word-table-insert-group">
+                    <button type="button" class="sgd-word-tool" id="sgd-table-insert-btn" title="Insertar tabla">▦ Tabla</button>
+                    <div class="sgd-table-popover" id="sgd-table-insert-panel" hidden>
+                        <div class="sgd-table-popover-row">
+                            <label>Filas <input type="number" id="sgd-table-rows" class="form-input sgd-table-num" min="1" max="20" value="3"></label>
+                            <label>Columnas <input type="number" id="sgd-table-cols" class="form-input sgd-table-num" min="1" max="12" value="3"></label>
+                        </div>
+                        <label class="sgd-table-popover-check">
+                            <input type="checkbox" id="sgd-table-header" checked> Primera fila como encabezado
+                        </label>
+                        <button type="button" class="sgd-word-btn sgd-word-btn-primary sgd-table-popover-btn" id="sgd-table-insert-confirm">Insertar</button>
+                    </div>
+                </div>
+                <div class="sgd-word-ribbon-group sgd-word-table-edit-group" id="sgd-table-edit-tools" hidden>
+                    <span class="sgd-table-tool-label">Filas</span>
+                    <button type="button" class="sgd-word-tool sgd-table-cmd" data-table-cmd="row-above" title="Insertar fila arriba">+↑</button>
+                    <button type="button" class="sgd-word-tool sgd-table-cmd" data-table-cmd="row-below" title="Insertar fila abajo">+↓</button>
+                    <button type="button" class="sgd-word-tool sgd-table-cmd" data-table-cmd="del-row" title="Eliminar fila">−F</button>
+                    <span class="sgd-word-ribbon-sep sgd-table-inner-sep"></span>
+                    <span class="sgd-table-tool-label">Cols</span>
+                    <button type="button" class="sgd-word-tool sgd-table-cmd" data-table-cmd="col-left" title="Insertar columna izquierda">+←</button>
+                    <button type="button" class="sgd-word-tool sgd-table-cmd" data-table-cmd="col-right" title="Insertar columna derecha">+→</button>
+                    <button type="button" class="sgd-word-tool sgd-table-cmd" data-table-cmd="del-col" title="Eliminar columna">−C</button>
+                    <span class="sgd-word-ribbon-sep sgd-table-inner-sep"></span>
+                    <span class="sgd-table-tool-label">Celdas</span>
+                    <button type="button" class="sgd-word-tool sgd-table-cmd" data-table-cmd="merge-cells" title="Combinar celdas (Shift+clic para seleccionar bloque)">⊞</button>
+                    <button type="button" class="sgd-word-tool sgd-table-cmd" data-table-cmd="split-cell" title="Dividir celda combinada">⊟</button>
+                    <button type="button" class="sgd-word-tool sgd-table-cmd" data-table-cmd="toggle-header" title="Alternar fila de encabezado">H</button>
+                    <span class="sgd-word-ribbon-sep sgd-table-inner-sep"></span>
+                    <span class="sgd-table-tool-label">Alinear</span>
+                    <button type="button" class="sgd-word-tool sgd-table-cmd" data-table-cmd="align-left" title="Alinear texto izquierda">⯇</button>
+                    <button type="button" class="sgd-word-tool sgd-table-cmd" data-table-cmd="align-center" title="Centrar texto">⯈</button>
+                    <button type="button" class="sgd-word-tool sgd-table-cmd" data-table-cmd="align-right" title="Alinear texto derecha">⯉</button>
+                    <button type="button" class="sgd-word-tool sgd-table-cmd" data-table-cmd="valign-top" title="Alinear arriba">⤒</button>
+                    <button type="button" class="sgd-word-tool sgd-table-cmd" data-table-cmd="valign-middle" title="Centrar vertical">⤡</button>
+                    <button type="button" class="sgd-word-tool sgd-table-cmd" data-table-cmd="valign-bottom" title="Alinear abajo">⤓</button>
+                    <span class="sgd-word-ribbon-sep sgd-table-inner-sep"></span>
+                    <div class="sgd-table-border-group">
+                        <button type="button" class="sgd-word-tool" id="sgd-table-border-btn" title="Opciones de bordes">▥</button>
+                        <div class="sgd-table-popover sgd-table-border-popover" id="sgd-table-border-panel" hidden>
+                            <p class="sgd-table-popover-hint">Bordes de la celda o selección</p>
+                            <div class="sgd-table-border-grid">
+                                <button type="button" class="sgd-word-tool sgd-table-cmd" data-table-cmd="border-all" title="Todos los bordes">▦</button>
+                                <button type="button" class="sgd-word-tool sgd-table-cmd" data-table-cmd="border-none" title="Sin bordes">▢</button>
+                                <button type="button" class="sgd-word-tool sgd-table-cmd" data-table-cmd="border-top" title="Borde superior">⬒</button>
+                                <button type="button" class="sgd-word-tool sgd-table-cmd" data-table-cmd="border-bottom" title="Borde inferior">⬓</button>
+                                <button type="button" class="sgd-word-tool sgd-table-cmd" data-table-cmd="border-left" title="Borde izquierdo">⬑</button>
+                                <button type="button" class="sgd-word-tool sgd-table-cmd" data-table-cmd="border-right" title="Borde derecho">⬐</button>
+                            </div>
+                            <p class="sgd-table-popover-hint">Dibujar / borrar en la tabla</p>
+                            <div class="sgd-table-border-modes">
+                                <button type="button" class="sgd-word-tool" data-table-border-mode="draw" title="Lápiz: clic en celda para dibujar bordes">✏</button>
+                                <button type="button" class="sgd-word-tool" data-table-border-mode="erase" title="Borrador: clic en celda para quitar bordes">⌫</button>
+                            </div>
+                        </div>
+                    </div>
+                    <span class="sgd-table-color-wrap" title="Color de fondo">
+                        <input type="color" id="sgd-cell-bg" class="sgd-table-color" value="#ffffff" aria-label="Color de fondo de celda">
+                    </span>
+                    <span class="sgd-table-color-wrap" title="Color de texto">
+                        <input type="color" id="sgd-cell-color" class="sgd-table-color" value="#000000" aria-label="Color de texto de celda">
+                    </span>
+                    <button type="button" class="sgd-word-tool sgd-table-cmd" data-table-cmd="clear-colors" title="Quitar colores de celda">◎</button>
+                    <button type="button" class="sgd-word-tool sgd-table-cmd" data-table-cmd="del-table" title="Eliminar tabla">✕▦</button>
+                </div>
+                <div class="sgd-word-ribbon-sep"></div>
                 <div class="sgd-word-ribbon-group">
                     <button type="button" class="sgd-word-tool" data-cmd="justifyLeft" title="Alinear izquierda">≡</button>
                     <button type="button" class="sgd-word-tool" data-cmd="justifyCenter" title="Centrar">≡</button>
@@ -149,8 +235,8 @@ $headingTags = ['h2', 'h3', 'h4', 'h5', 'h6'];
             <div class="sgd-word-workspace">
                 <aside class="sgd-word-nav" aria-label="Navegación del documento">
                     <h4 class="sgd-word-nav-title">Navegación</h4>
-                    <p class="field-note sgd-word-nav-hint">Clic en el número de una sección para quitarlo; las siguientes se renumeran solas.</p>
-                    <nav class="sgd-word-nav-list">
+                    <p class="field-note sgd-word-nav-hint">Clic en el número de una sección para quitarlo; las siguientes se renumeran solas. Los títulos del texto aparecen debajo de cada sección.</p>
+                    <nav class="sgd-word-nav-list" id="sgd-word-nav-list">
                         <?php foreach ($secciones as $sec): ?>
                             <?php
                             $cod = (string)$sec['codigo'];
@@ -170,12 +256,15 @@ $headingTags = ['h2', 'h3', 'h4', 'h5', 'h6'];
                                 $hasContent = trim((string)($contenido[$cod] ?? '')) !== '';
                             }
                             ?>
-                            <a href="#sec-<?= htmlspecialchars($cod, ENT_QUOTES, 'UTF-8') ?>"
-                               class="sgd-word-nav-item<?= $hasContent ? ' is-filled' : '' ?>"
-                               data-nav="<?= htmlspecialchars($cod, ENT_QUOTES, 'UTF-8') ?>"
-                               data-nav-name="<?= htmlspecialchars((string)$sec['nombre'], ENT_QUOTES, 'UTF-8') ?>">
-                                <?= htmlspecialchars($navLabel, ENT_QUOTES, 'UTF-8') ?>
-                            </a>
+                            <div class="sgd-word-nav-group" data-nav-group="<?= htmlspecialchars($cod, ENT_QUOTES, 'UTF-8') ?>">
+                                <a href="#sec-<?= htmlspecialchars($cod, ENT_QUOTES, 'UTF-8') ?>"
+                                   class="sgd-word-nav-item<?= $hasContent ? ' is-filled' : '' ?>"
+                                   data-nav="<?= htmlspecialchars($cod, ENT_QUOTES, 'UTF-8') ?>"
+                                   data-nav-name="<?= htmlspecialchars((string)$sec['nombre'], ENT_QUOTES, 'UTF-8') ?>">
+                                    <?= htmlspecialchars($navLabel, ENT_QUOTES, 'UTF-8') ?>
+                                </a>
+                                <ul class="sgd-word-nav-sublist" data-nav-sublist="<?= htmlspecialchars($cod, ENT_QUOTES, 'UTF-8') ?>"></ul>
+                            </div>
                         <?php endforeach; ?>
                     </nav>
 
@@ -321,8 +410,78 @@ $headingTags = ['h2', 'h3', 'h4', 'h5', 'h6'];
         </form>
 
         <script type="application/json" id="sgd-elab-ref-docs"><?= $refDocsJson ?: '[]' ?></script>
+        <div id="sgd-word-import-modal" class="sgd-word-import-modal" hidden aria-hidden="true">
+            <div class="sgd-word-import-backdrop" data-word-import-close></div>
+            <div class="sgd-word-import-dialog" role="dialog" aria-labelledby="sgd-word-import-title" aria-modal="true">
+                <header class="sgd-word-import-head">
+                    <h3 id="sgd-word-import-title">Importar desde Word</h3>
+                    <button type="button" class="sgd-word-import-close" data-word-import-close title="Cerrar">×</button>
+                </header>
+                <div class="sgd-word-import-body">
+                    <p class="field-note sgd-word-import-lead" id="sgd-word-import-lead">Convirtiendo documento…</p>
+                    <div class="sgd-word-import-progress" id="sgd-word-import-progress" hidden>
+                        <div class="sgd-word-import-progress-row">
+                            <div
+                                class="sgd-word-import-progress-track"
+                                id="sgd-word-import-progress-track"
+                                role="progressbar"
+                                aria-valuemin="0"
+                                aria-valuemax="100"
+                                aria-valuenow="0"
+                                aria-labelledby="sgd-word-import-lead"
+                            >
+                                <div class="sgd-word-import-progress-bar" id="sgd-word-import-progress-bar"></div>
+                            </div>
+                            <span class="sgd-word-import-progress-pct" id="sgd-word-import-progress-pct">0%</span>
+                        </div>
+                    </div>
+                    <div class="sgd-word-import-options" id="sgd-word-import-options" hidden>
+                        <label class="sgd-word-import-field">
+                            <span>Destino</span>
+                            <select id="sgd-word-import-mode" class="sgd-word-select">
+                                <option value="cursor">Insertar en la sección actual (cursor)</option>
+                                <option value="replace">Reemplazar sección elegida</option>
+                                <option value="map">Distribuir por títulos del Word (coincidencia con secciones)</option>
+                            </select>
+                        </label>
+                        <label class="sgd-word-import-field" id="sgd-word-import-section-wrap">
+                            <span>Sección</span>
+                            <select id="sgd-word-import-section" class="sgd-word-select"></select>
+                        </label>
+                        <details class="sgd-word-import-diag">
+                            <summary>Diagnóstico y vista previa</summary>
+                            <pre id="sgd-word-import-stats" class="sgd-word-import-stats"></pre>
+                            <div id="sgd-word-import-preview" class="sgd-word-import-preview sgd-word-editor"></div>
+                        </details>
+                    </div>
+                </div>
+                <footer class="sgd-word-import-foot">
+                    <button type="button" class="sgd-word-btn sgd-word-btn-ghost" data-word-import-close>Cancelar</button>
+                    <button type="button" class="sgd-word-btn sgd-word-btn-primary" id="sgd-word-import-confirm" disabled>Importar al documento</button>
+                </footer>
+            </div>
+        </div>
+
         <script type="application/json" id="sgd-elab-config"><?= json_encode([
             'canEdit' => $canGuardar,
+            'documentoId' => (int)$documentoId,
+            'uploadMediaUrl' => $canGuardar && $documentoId > 0
+                ? ('?url=sgd/elaboracionUploadMedia' . $empresaQuery . '&documento_id=' . (int)$documentoId)
+                : '',
+            'importWordUrl' => $canGuardar && $documentoId > 0
+                ? ('?url=sgd/elaboracionImportWord' . $empresaQuery . '&documento_id=' . (int)$documentoId)
+                : '',
+            'importWordFetchUrl' => $canGuardar && $documentoId > 0
+                ? ('?url=sgd/elaboracionImportWordFetch' . $empresaQuery . '&documento_id=' . (int)$documentoId)
+                : '',
+            'wordImportServerZip' => $wordImportServerZip,
+            'secciones' => array_values(array_map(static function (array $sec): array {
+                return [
+                    'codigo' => (string)($sec['codigo'] ?? ''),
+                    'nombre' => (string)($sec['nombre'] ?? ''),
+                    'clase' => (string)($sec['clase'] ?? ''),
+                ];
+            }, array_filter($secciones, static fn (array $s): bool => ($s['clase'] ?? '') === 'contenido'))),
             'piePagina' => (string)($formatoPdf['pie_pagina'] ?? ''),
             'headingTags' => $headingTags,
             'titulos' => $titulosElab,
@@ -332,4 +491,7 @@ $headingTags = ['h2', 'h3', 'h4', 'h5', 'h6'];
 
     <?php endif; ?>
 </div>
+<?php if (!$wordImportServerZip): ?>
+        <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js" crossorigin="anonymous"></script>
+<?php endif; ?>
 <script src="/js/sgd-elaboracion.js?v=<?= (int)$sgdElabJsV ?>"></script>
