@@ -12,6 +12,7 @@
 
     var activeEditor = null;
     var tableSelAnchor = null;
+    var tableSelTable = null;
     var tableBorderMode = null;
     var dirty = false;
     var saveInProgress = false;
@@ -1113,14 +1114,13 @@
         rows = Math.max(1, Math.min(20, parseInt(rows, 10) || 3));
         cols = Math.max(1, Math.min(12, parseInt(cols, 10) || 3));
         var bodyRows = rows;
-        var html = '<table class="sgd-word-table no-datatable">';
+        var html = '<table class="sgd-word-table no-datatable"><tbody>';
         if (withHeader) {
-            html += '<thead><tr>';
+            html += '<tr>';
             for (var hc = 0; hc < cols; hc++) html += '<th>&nbsp;</th>';
-            html += '</tr></thead>';
+            html += '</tr>';
             bodyRows = Math.max(0, rows - 1);
         }
-        html += '<tbody>';
         for (var r = 0; r < bodyRows; r++) {
             html += '<tr>';
             for (var c = 0; c < cols; c++) html += '<td>&nbsp;</td>';
@@ -1141,7 +1141,43 @@
 
     function getActiveTable() {
         var cell = getActiveCell();
-        return cell ? cell.closest('table.sgd-word-table') : null;
+        if (cell) {
+            var fromFocus = cell.closest('table.sgd-word-table');
+            if (fromFocus) {
+                tableSelTable = fromFocus;
+                return fromFocus;
+            }
+        }
+        if (tableSelTable && form.contains(tableSelTable)) {
+            return tableSelTable;
+        }
+        var selected = form.querySelectorAll('.sgd-word-cell-selected');
+        if (selected.length) {
+            var fromSel = selected[0].closest('table.sgd-word-table');
+            if (fromSel) {
+                tableSelTable = fromSel;
+                return fromSel;
+            }
+        }
+        return null;
+    }
+
+    function tableSectionForCell(cell) {
+        if (!cell) return '';
+        if (cell.closest('thead')) return 'thead';
+        if (cell.closest('tbody')) return 'tbody';
+        if (cell.closest('tfoot')) return 'tfoot';
+        return 'body';
+    }
+
+    function selectedCellsShareTableSection(cells) {
+        if (!cells || !cells.length) return true;
+        var section = tableSectionForCell(cells[0]);
+        var i;
+        for (i = 1; i < cells.length; i += 1) {
+            if (tableSectionForCell(cells[i]) !== section) return false;
+        }
+        return true;
     }
 
     function clearCellFocusMarkers() {
@@ -1154,11 +1190,6 @@
         form.querySelectorAll('.sgd-word-cell-selected').forEach(function (c) {
             c.classList.remove('sgd-word-cell-selected');
         });
-    }
-
-    function getSelectedCells() {
-        var cells = form.querySelectorAll('.sgd-word-cell-selected');
-        return cells.length ? Array.prototype.slice.call(cells) : [];
     }
 
     function markActiveCell(cell) {
@@ -1188,27 +1219,160 @@
         return grid;
     }
 
-    function findCellPosition(grid, cell) {
+    function findCellAnchorPosition(grid, cell) {
         for (var r = 0; r < grid.length; r += 1) {
             if (!grid[r]) continue;
             for (var c = 0; c < grid[r].length; c += 1) {
-                if (grid[r][c] === cell) return { r: r, c: c };
+                if (grid[r][c] !== cell) continue;
+                if (c > 0 && grid[r][c - 1] === cell) continue;
+                if (r > 0 && grid[r - 1] && grid[r - 1][c] === cell) continue;
+                return { r: r, c: c };
             }
         }
         return null;
     }
 
-    function selectSingleCell(cell) {
+    function findCellPosition(grid, cell) {
+        return findCellAnchorPosition(grid, cell);
+    }
+
+    function getSelectedCells() {
+        var table = getActiveTable();
+        var scope = table || form;
+        var cells = scope.querySelectorAll('.sgd-word-cell-selected');
+        return cells.length ? Array.prototype.slice.call(cells) : [];
+    }
+
+    function getSelectionBoundsFromGrid(grid, selectedSet) {
+        var minR = Infinity;
+        var maxR = -1;
+        var minC = Infinity;
+        var maxC = -1;
+        var found = false;
+        for (var r = 0; r < grid.length; r += 1) {
+            if (!grid[r]) continue;
+            for (var c = 0; c < grid[r].length; c += 1) {
+                var cell = grid[r][c];
+                if (cell && selectedSet.has(cell)) {
+                    found = true;
+                    minR = Math.min(minR, r);
+                    maxR = Math.max(maxR, r);
+                    minC = Math.min(minC, c);
+                    maxC = Math.max(maxC, c);
+                }
+            }
+        }
+        if (!found) return null;
+        return { minR: minR, maxR: maxR, minC: minC, maxC: maxC };
+    }
+
+    function isSolidRectangleSelection(grid, selectedSet, bounds) {
+        var rectUnique = new Set();
+        for (var r = bounds.minR; r <= bounds.maxR; r += 1) {
+            for (var c = bounds.minC; c <= bounds.maxC; c += 1) {
+                if (!grid[r] || !grid[r][c]) return false;
+                rectUnique.add(grid[r][c]);
+            }
+        }
+        if (rectUnique.size !== selectedSet.size) return false;
+        var ok = true;
+        selectedSet.forEach(function (cell) {
+            if (!rectUnique.has(cell)) ok = false;
+        });
+        return ok;
+    }
+
+    function tryMergeSameColumn(grid, selectedSet) {
+        var anchors = [];
+        selectedSet.forEach(function (cell) {
+            var pos = findCellAnchorPosition(grid, cell);
+            if (!pos || grid[pos.r][pos.c] !== cell) return;
+            anchors.push({ r: pos.r, c: pos.c, cell: cell });
+        });
+        if (anchors.length !== selectedSet.size || anchors.length < 2) return null;
+        var col = anchors[0].c;
+        if (!anchors.every(function (a) { return a.c === col; })) return null;
+        anchors.sort(function (a, b) { return a.r - b.r; });
+        var i;
+        for (i = 1; i < anchors.length; i += 1) {
+            if (anchors[i].r !== anchors[i - 1].r + 1) return null;
+        }
+        return {
+            minR: anchors[0].r,
+            maxR: anchors[anchors.length - 1].r,
+            minC: col,
+            maxC: col,
+            anchor: anchors[0].cell
+        };
+    }
+
+    function tryMergeSameRow(grid, selectedSet) {
+        var anchors = [];
+        selectedSet.forEach(function (cell) {
+            var pos = findCellAnchorPosition(grid, cell);
+            if (!pos || grid[pos.r][pos.c] !== cell) return;
+            anchors.push({ r: pos.r, c: pos.c, cell: cell });
+        });
+        if (anchors.length !== selectedSet.size || anchors.length < 2) return null;
+        var row = anchors[0].r;
+        if (!anchors.every(function (a) { return a.r === row; })) return null;
+        anchors.sort(function (a, b) { return a.c - b.c; });
+        var i;
+        for (i = 1; i < anchors.length; i += 1) {
+            var prevColspan = parseInt(anchors[i - 1].cell.getAttribute('colspan'), 10) || 1;
+            if (anchors[i].c !== anchors[i - 1].c + prevColspan) return null;
+        }
+        var lastColspan = parseInt(anchors[anchors.length - 1].cell.getAttribute('colspan'), 10) || 1;
+        return {
+            minR: row,
+            maxR: row,
+            minC: anchors[0].c,
+            maxC: anchors[anchors.length - 1].c + lastColspan - 1,
+            anchor: anchors[0].cell
+        };
+    }
+
+    function computeMergeBounds(grid, selectedCells) {
+        var selectedSet = new Set(selectedCells);
+        if (selectedSet.size < 2) return null;
+
+        var bounds = getSelectionBoundsFromGrid(grid, selectedSet);
+        if (bounds && isSolidRectangleSelection(grid, selectedSet, bounds)) {
+            return {
+                minR: bounds.minR,
+                maxR: bounds.maxR,
+                minC: bounds.minC,
+                maxC: bounds.maxC,
+                anchor: grid[bounds.minR][bounds.minC]
+            };
+        }
+
+        var colMerge = tryMergeSameColumn(grid, selectedSet);
+        if (colMerge) return colMerge;
+
+        var rowMerge = tryMergeSameRow(grid, selectedSet);
+        if (rowMerge) return rowMerge;
+
+        return null;
+    }
+
+    function noteTableCellAnchor(cell) {
         tableSelAnchor = cell || null;
+        tableSelTable = cell ? cell.closest('table.sgd-word-table') : null;
         clearCellSelection();
+    }
+
+    function selectSingleCell(cell) {
+        noteTableCellAnchor(cell);
         if (cell) cell.classList.add('sgd-word-cell-selected');
     }
 
     function selectCellRange(anchor, target) {
-        var table = getActiveTable();
+        var table = anchor ? anchor.closest('table.sgd-word-table') : null;
         if (!table || !anchor || !target) return;
         if (anchor.closest('table') !== table || target.closest('table') !== table) return;
 
+        tableSelTable = table;
         var grid = buildTableGrid(table);
         var a = findCellPosition(grid, anchor);
         var b = findCellPosition(grid, target);
@@ -1328,52 +1492,42 @@
     function mergeSelectedCells() {
         var cells = getSelectedCells();
         if (cells.length < 2) {
-            setStatus('Seleccione varias celdas (Shift+clic) para combinar', 'warn');
+            setStatus('Seleccione varias celdas (Shift+clic o Ctrl+clic) para combinar', 'warn');
+            return;
+        }
+
+        if (!selectedCellsShareTableSection(cells)) {
+            setStatus('No combine celdas del encabezado con el cuerpo. Seleccione filas consecutivas solo en el cuerpo de la tabla.', 'warn');
             return;
         }
 
         var table = getActiveTable();
-        if (!table) return;
+        if (!table) {
+            table = cells[0].closest('table.sgd-word-table');
+        }
+        if (!table) {
+            setStatus('No se encontró la tabla activa', 'warn');
+            return;
+        }
+        tableSelTable = table;
         var grid = buildTableGrid(table);
-        var positions = [];
-        var seenCells = new Set();
-
-        cells.forEach(function (cell) {
-            if (seenCells.has(cell)) return;
-            seenCells.add(cell);
-            var pos = findCellPosition(grid, cell);
-            if (pos) positions.push({ r: pos.r, c: pos.c, cell: cell });
-        });
-
-        if (!positions.length) return;
-
-        var minR = positions[0].r;
-        var maxR = positions[0].r;
-        var minC = positions[0].c;
-        var maxC = positions[0].c;
-        positions.forEach(function (p) {
-            minR = Math.min(minR, p.r);
-            maxR = Math.max(maxR, p.r);
-            minC = Math.min(minC, p.c);
-            maxC = Math.max(maxC, p.c);
-        });
-
-        for (var r = minR; r <= maxR; r += 1) {
-            for (var c = minC; c <= maxC; c += 1) {
-                if (!grid[r] || !grid[r][c] || cells.indexOf(grid[r][c]) < 0) {
-                    setStatus('La selección debe ser un bloque rectangular', 'warn');
-                    return;
-                }
-            }
+        var merge = computeMergeBounds(grid, cells);
+        if (!merge || !merge.anchor) {
+            setStatus('La selección debe ser un bloque rectangular o celdas consecutivas en la misma fila/columna', 'warn');
+            return;
         }
 
-        var anchor = grid[minR][minC];
+        var minR = merge.minR;
+        var maxR = merge.maxR;
+        var minC = merge.minC;
+        var maxC = merge.maxC;
+        var anchor = merge.anchor;
         var mergedHtml = [];
         var removed = new Set();
         for (var r2 = minR; r2 <= maxR; r2 += 1) {
             for (var c2 = minC; c2 <= maxC; c2 += 1) {
-                var cell = grid[r2][c2];
-                if (cell === anchor || removed.has(cell)) continue;
+                var cell = grid[r2] && grid[r2][c2];
+                if (!cell || cell === anchor || removed.has(cell)) continue;
                 removed.add(cell);
                 if (normalizeCellText(cell.textContent)) mergedHtml.push(cell.innerHTML);
                 cell.parentNode.removeChild(cell);
@@ -1750,9 +1904,16 @@
             if (activeEditor) updateTableToolbar();
         });
 
-        form.addEventListener('click', function (ev) {
+        form.addEventListener('mousedown', function (ev) {
             var cell = ev.target.closest('td, th');
-            if (!cell || !activeEditor || !activeEditor.contains(cell)) return;
+            if (!cell) return;
+
+            var editor = cell.closest('.sgd-word-editor[contenteditable="true"]');
+            if (!editor || !form.contains(editor)) return;
+
+            if (activeEditor !== editor) {
+                focusEditor(editor);
+            }
 
             if (tableBorderMode === 'draw') {
                 ev.preventDefault();
@@ -1767,13 +1928,44 @@
                 return;
             }
 
-            ev.preventDefault();
-
-            if (ev.shiftKey && tableSelAnchor) {
-                selectCellRange(tableSelAnchor, cell);
-            } else {
-                selectSingleCell(cell);
+            if ((ev.ctrlKey || ev.metaKey) && !ev.shiftKey) {
+                ev.preventDefault();
+                if (cell.classList.contains('sgd-word-cell-selected')) {
+                    cell.classList.remove('sgd-word-cell-selected');
+                    if (tableSelAnchor === cell) {
+                        var remaining = getSelectedCells();
+                        tableSelAnchor = remaining.length ? remaining[remaining.length - 1] : null;
+                        tableSelTable = tableSelAnchor
+                            ? tableSelAnchor.closest('table.sgd-word-table')
+                            : null;
+                    }
+                } else {
+                    if (!tableSelAnchor) {
+                        tableSelTable = cell.closest('table.sgd-word-table');
+                    }
+                    cell.classList.add('sgd-word-cell-selected');
+                    tableSelAnchor = cell;
+                    tableSelTable = cell.closest('table.sgd-word-table');
+                }
+                markActiveCell(cell);
+                updateTableToolbar();
+                return;
             }
+
+            if (ev.shiftKey) {
+                ev.preventDefault();
+                var rangeAnchor = tableSelAnchor || getActiveCell();
+                if (rangeAnchor && rangeAnchor.closest('table') === cell.closest('table')) {
+                    selectCellRange(rangeAnchor, cell);
+                } else {
+                    selectSingleCell(cell);
+                }
+                markActiveCell(cell);
+                updateTableToolbar();
+                return;
+            }
+
+            noteTableCellAnchor(cell);
             markActiveCell(cell);
             updateTableToolbar();
         });

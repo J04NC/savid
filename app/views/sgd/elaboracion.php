@@ -177,7 +177,7 @@ $headingTags = ['h2', 'h3', 'h4', 'h5', 'h6'];
                     <button type="button" class="sgd-word-tool sgd-table-cmd" data-table-cmd="del-col" title="Eliminar columna">−C</button>
                     <span class="sgd-word-ribbon-sep sgd-table-inner-sep"></span>
                     <span class="sgd-table-tool-label">Celdas</span>
-                    <button type="button" class="sgd-word-tool sgd-table-cmd" data-table-cmd="merge-cells" title="Combinar celdas (Shift+clic para seleccionar bloque)">⊞</button>
+                    <button type="button" class="sgd-word-tool sgd-table-cmd" data-table-cmd="merge-cells" title="Combinar celdas (Shift+clic: bloque; Ctrl+clic: celdas sueltas)">⊞</button>
                     <button type="button" class="sgd-word-tool sgd-table-cmd" data-table-cmd="split-cell" title="Dividir celda combinada">⊟</button>
                     <button type="button" class="sgd-word-tool sgd-table-cmd" data-table-cmd="toggle-header" title="Alternar fila de encabezado">H</button>
                     <span class="sgd-word-ribbon-sep sgd-table-inner-sep"></span>
