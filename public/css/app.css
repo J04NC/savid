@@ -5871,6 +5871,7 @@ AGREGAR AL FINAL DE public/css/app.css
 }
 
 .sgd-word-form{
+    --sgd-word-scroll-offset:120px;
     display:flex;
     flex-direction:column;
     min-height:calc(100vh - 120px);
@@ -6196,7 +6197,7 @@ label.sgd-word-tool.sgd-word-import-trigger{
 
 .sgd-word-block{
     margin-bottom:1.4em;
-    scroll-margin-top:100px;
+    scroll-margin-top:var(--sgd-word-scroll-offset, 120px);
 }
 
 .sgd-word-sec-head{
@@ -6207,6 +6208,7 @@ label.sgd-word-tool.sgd-word-import-trigger{
     align-items:baseline;
     gap:.35em;
     flex-wrap:wrap;
+    scroll-margin-top:var(--sgd-word-scroll-offset, 120px);
 }
 
 .sgd-word-sec-num-wrap{
@@ -6307,7 +6309,7 @@ label.sgd-word-tool.sgd-word-import-trigger{
 .sgd-word-editor h4,
 .sgd-word-editor h5,
 .sgd-word-editor h6{
-    scroll-margin-top:100px;
+    scroll-margin-top:var(--sgd-word-scroll-offset, 120px);
 }
 
 .sgd-word-editor table.sgd-word-table{

@@ -31,7 +31,7 @@ class SgdFormularioService
         $formulario = null;
         $version = null;
         $versiones = [];
-        $esquema = ['version' => 1, 'campos' => []];
+        $esquema = ['version' => 2, 'arquetipo' => 'libre', 'bloques' => [], 'campos' => []];
         $proposito = 'operativo';
         $codigoDisplay = '';
 
@@ -57,7 +57,7 @@ class SgdFormularioService
                     $vid = $this->repo->createFormularioVersion($empresaId, $formularioId, [
                         'numero' => $this->repo->suggestNextFormularioVersionNumero($empresaId, $formularioId),
                         'estado_id' => SgdRepository::ESTADO_DOC_BORRADOR,
-                        'esquema_json' => ['version' => 1, 'campos' => []],
+                        'esquema_json' => ['version' => 2, 'arquetipo' => 'libre', 'bloques' => [], 'campos' => []],
                         'created_by' => $userId,
                     ]);
                     $version = $this->repo->findFormularioVersionById($empresaId, $vid);
@@ -83,6 +83,8 @@ class SgdFormularioService
             'esquema' => $esquema,
             'esquemaJson' => json_encode($esquema, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP),
             'tiposCampo' => self::TIPOS_CAMPO,
+            'arquetipos' => SgdArquetipoOperativoService::listArquetipos(),
+            'arquetipoPiloto' => SgdArquetipoOperativoService::ARQUETIPO_PILOTO,
         ];
     }
 
@@ -119,7 +121,10 @@ class SgdFormularioService
 
         $raw = (string)($post['esquema_json'] ?? '');
         $esquema = json_decode($raw, true);
-        if (!is_array($esquema) || !isset($esquema['campos']) || !is_array($esquema['campos'])) {
+        if (!is_array($esquema)) {
+            return ['success' => false, 'message' => 'Esquema de formulario no válido.'];
+        }
+        if (!isset($esquema['campos']) && !isset($esquema['bloques'])) {
             return ['success' => false, 'message' => 'Esquema de formulario no válido.'];
         }
 
@@ -170,8 +175,8 @@ class SgdFormularioService
         }
 
         $esquema = $this->decodeEsquema($version['esquema_json'] ?? null);
-        if ($esquema['campos'] === []) {
-            return ['success' => false, 'message' => 'Agregue al menos un campo antes de publicar.'];
+        if (!$this->esquemaHasContent($esquema)) {
+            return ['success' => false, 'message' => 'Agregue al menos un bloque o campo antes de publicar.'];
         }
 
         $userId = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : null;
@@ -222,7 +227,7 @@ class SgdFormularioService
     }
 
     /**
-     * @return array{version: int, campos: list<array<string, mixed>>}
+     * @return array{version: int, arquetipo?: string, bloques?: list<array<string, mixed>>, campos: list<array<string, mixed>>}
      */
     private function decodeEsquema(mixed $raw): array
     {
@@ -236,18 +241,80 @@ class SgdFormularioService
             return $this->normalizeEsquema($raw);
         }
 
-        return ['version' => 1, 'campos' => []];
+        return ['version' => 2, 'arquetipo' => 'libre', 'bloques' => [], 'campos' => []];
     }
 
     /**
      * @param array<string, mixed> $esquema
-     * @return array{version: int, campos: list<array<string, mixed>>}
+     * @return array{version: int, arquetipo?: string, bloques?: list<array<string, mixed>>, campos: list<array<string, mixed>>}
      */
     private function normalizeEsquema(array $esquema): array
     {
+        $version = (int)($esquema['version'] ?? 1);
+        if ($version >= 2 || !empty($esquema['bloques']) || !empty($esquema['arquetipo'])) {
+            return $this->normalizeEsquemaV2($esquema);
+        }
+
+        return array_merge(
+            ['version' => 1, 'campos' => []],
+            $this->normalizeEsquemaV1($esquema)
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $esquema
+     * @return array{version: int, arquetipo: string, bloques: list<array<string, mixed>>, campos: list<array<string, mixed>>}
+     */
+    private function normalizeEsquemaV2(array $esquema): array
+    {
+        $arquetipo = strtolower(trim((string)($esquema['arquetipo'] ?? 'libre')));
+        if (!in_array($arquetipo, SgdArquetipoOperativoService::ARQUETIPOS, true)) {
+            $arquetipo = 'libre';
+        }
+
+        $bloques = [];
+        $orden = 10;
+        foreach ($esquema['bloques'] ?? [] as $bloque) {
+            if (!is_array($bloque) || empty($bloque['seccion_codigo'])) {
+                continue;
+            }
+            $estado = (string)($bloque['estado'] ?? 'aplica');
+            if (!in_array($estado, ['aplica', 'no_aplica', 'opcional'], true)) {
+                $estado = 'aplica';
+            }
+            $item = [
+                'seccion_codigo' => strtolower(trim((string)$bloque['seccion_codigo'])),
+                'nombre' => trim((string)($bloque['nombre'] ?? $bloque['seccion_codigo'])),
+                'widget' => trim((string)($bloque['widget'] ?? 'grupo_campos')),
+                'estado' => $estado,
+                'orden' => (int)($bloque['orden'] ?? $orden),
+            ];
+            if (!empty($bloque['definicion']) && is_array($bloque['definicion'])) {
+                $item['definicion'] = $bloque['definicion'];
+            }
+            $bloques[] = $item;
+            $orden += 10;
+        }
+
+        usort($bloques, static fn($a, $b) => ($a['orden'] ?? 0) <=> ($b['orden'] ?? 0));
+
+        return [
+            'version' => 2,
+            'arquetipo' => $arquetipo,
+            'bloques' => $bloques,
+            'campos' => $this->normalizeEsquemaV1($esquema)['campos'],
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $esquema
+     * @return array{campos: list<array<string, mixed>>}
+     */
+    private function normalizeEsquemaV1(array $esquema): array
+    {
         $campos = [];
         $orden = 10;
-        foreach ($esquema['campos'] as $campo) {
+        foreach ($esquema['campos'] ?? [] as $campo) {
             if (!is_array($campo)) {
                 continue;
             }
@@ -275,7 +342,24 @@ class SgdFormularioService
 
         usort($campos, static fn($a, $b) => ($a['orden'] ?? 0) <=> ($b['orden'] ?? 0));
 
-        return ['version' => 1, 'campos' => $campos];
+        return ['campos' => $campos];
+    }
+
+    /**
+     * @param array{version?: int, arquetipo?: string, bloques?: list<array<string, mixed>>, campos?: list<array<string, mixed>>} $esquema
+     */
+    private function esquemaHasContent(array $esquema): bool
+    {
+        if (($esquema['campos'] ?? []) !== []) {
+            return true;
+        }
+        foreach ($esquema['bloques'] ?? [] as $bloque) {
+            if (($bloque['estado'] ?? 'aplica') !== 'no_aplica') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function slugCampoId(string $raw): string

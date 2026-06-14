@@ -12,9 +12,11 @@
 /** @var bool $canEliminar */
 /** @var list<array<string, mixed>> $versiones */
 /** @var string $suggestedVersionNumero */
+/** @var bool $canAutoGeneratePdf */
 
 $versiones = $versiones ?? [];
 $suggestedVersionNumero = $suggestedVersionNumero ?? '1';
+$canAutoGeneratePdf = !empty($canAutoGeneratePdf);
 
 $sgdDocJs = BASE_PATH . '/public/js/sgd-documentos.js';
 $sgdDocJsV = is_readable($sgdDocJs) ? (int)filemtime($sgdDocJs) : time();
@@ -41,6 +43,7 @@ $empresaQuery = $empresaId ? '&empresa_id=' . (int)$empresaId : '';
 $listUrl = '?url=sgd/documentos' . $empresaQuery;
 $formAction = $listUrl;
 $versionUploadAction = '?url=sgd/documentoVersionUpload' . $empresaQuery;
+$previewPdfBase = '?url=sgd/elaboracionPreviewPdf' . $empresaQuery;
 
 $formatOption = static function (string $codigo, string $nombre): string {
     return htmlspecialchars($codigo . ' — ' . $nombre, ENT_QUOTES, 'UTF-8');
@@ -318,7 +321,7 @@ $formatOption = static function (string $codigo, string $nombre): string {
                         <p class="field-note sgd-doc-ver-cloud-note">Si el PDF está en Dropbox o la nube, espere el mensaje «listo para subir» antes de pulsar Subir. Si falla, descárguelo al teléfono y elíjalo desde Archivos.</p>
 
                         <?php if ($versiones === []): ?>
-                            <p class="field-note sgd-doc-versions-empty">Sin versiones registradas. Cree una versión en borrador, suba el PDF y publíquela.</p>
+                            <p class="field-note sgd-doc-versions-empty">Sin versiones registradas. Cree una versión en borrador<?= $canAutoGeneratePdf ? ', complete la elaboración y publíquela (el PDF se generará automáticamente)' : ', suba el PDF y publíquela' ?>.</p>
                         <?php else: ?>
                             <div class="sgd-doc-versions-table-wrap">
                                 <table class="sgd-doc-versions-table">
@@ -348,6 +351,7 @@ $formatOption = static function (string $codigo, string $nombre): string {
                                             }
                                             $fechaEditable = $canGuardar && in_array($estadoId, [SgdRepository::ESTADO_DOC_BORRADOR, SgdRepository::ESTADO_DOC_VIGENTE], true);
                                             $publishFormId = 'sgd-ver-publish-' . $vid;
+                                            $canPublish = $esBorrador && ($pdfPath !== '' || $canAutoGeneratePdf);
                                             ?>
                                             <tr class="sgd-doc-ver-row<?= $esVigente ? ' is-vigente' : '' ?>" data-version-id="<?= $vid ?>">
                                                 <td>
@@ -364,7 +368,7 @@ $formatOption = static function (string $codigo, string $nombre): string {
                                                 <td class="sgd-doc-ver-pdf">
                                                     <?php if ($pdfPath !== ''): ?>
                                                         <a href="<?= htmlspecialchars($pdfPath, ENT_QUOTES, 'UTF-8') ?>" target="_blank" rel="noopener">Ver PDF</a>
-                                                    <?php elseif ($canGuardar && $esBorrador): ?>
+                                                    <?php elseif ($canGuardar && $esBorrador && !$canAutoGeneratePdf): ?>
                                                         <?php
                                                         $verReturnUrl = $listUrl . '&id=' . (int)$form['id'];
                                                         ?>
@@ -392,13 +396,19 @@ $formatOption = static function (string $codigo, string $nombre): string {
                                                             </div>
                                                             <span class="sgd-doc-ver-file-name" aria-live="polite"></span>
                                                         </form>
+                                                    <?php elseif ($canAutoGeneratePdf && $esBorrador): ?>
+                                                        <?php
+                                                        $previewUrl = $previewPdfBase . '&documento_id=' . (int)$form['id'] . '&version_id=' . $vid;
+                                                        ?>
+                                                        <a href="<?= htmlspecialchars($previewUrl, ENT_QUOTES, 'UTF-8') ?>" target="_blank" rel="noopener" class="sgd-doc-ver-preview-link">Vista previa</a>
+                                                        <span class="sgd-doc-ver-auto-pdf field-note"> · se generará al publicar</span>
                                                     <?php else: ?>
                                                         <span class="sgd-doc-ver-sin-pdf">—</span>
                                                     <?php endif; ?>
                                                 </td>
                                                 <td class="sgd-doc-ver-fecha-cell">
                                                     <?php if ($fechaEditable): ?>
-                                                        <?php if ($esBorrador && $pdfPath !== ''): ?>
+                                                        <?php if ($canPublish): ?>
                                                             <label class="sgd-doc-ver-fecha-label" for="sgd_ver_fecha_<?= $vid ?>">Aprobación</label>
                                                             <input
                                                                 type="date"
@@ -431,7 +441,13 @@ $formatOption = static function (string $codigo, string $nombre): string {
                                                 </td>
                                                 <?php if ($canGuardar): ?>
                                                     <td class="sgd-doc-ver-actions">
-                                                        <?php if ($esBorrador && $pdfPath !== ''): ?>
+                                                        <?php if ($canPublish): ?>
+                                                            <?php if ($canAutoGeneratePdf && $pdfPath === ''): ?>
+                                                                <?php
+                                                                $previewUrl = $previewPdfBase . '&documento_id=' . (int)$form['id'] . '&version_id=' . $vid;
+                                                                ?>
+                                                                <a href="<?= htmlspecialchars($previewUrl, ENT_QUOTES, 'UTF-8') ?>" target="_blank" rel="noopener" class="sgd-doc-btn sgd-doc-ver-btn">Vista previa PDF</a>
+                                                            <?php endif; ?>
                                                             <form
                                                                 id="<?= htmlspecialchars($publishFormId, ENT_QUOTES, 'UTF-8') ?>"
                                                                 method="post"

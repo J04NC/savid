@@ -2088,7 +2088,7 @@ class SgdRepository
         $codigo = preg_replace('/[^a-z0-9_]+/', '_', $codigo) ?? '';
         $codigo = trim($codigo, '_');
         $nombre = trim((string)($data['nombre'] ?? ''));
-        $clase = in_array($data['clase'] ?? '', ['auto', 'contenido', 'sistema'], true)
+        $clase = in_array($data['clase'] ?? '', ['auto', 'contenido', 'sistema', 'operativo'], true)
             ? $data['clase']
             : 'contenido';
         $orden = (int)($data['orden'] ?? 0);
@@ -2238,5 +2238,24 @@ class SgdRepository
             WHERE id = ? AND empresa_id = ?
         ');
         $stmt->execute([$json, $versionId, $empresaId]);
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function findEmpresaBranding(int $empresaId): ?array
+    {
+        $eNd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'empresa', 'e');
+        $stmt = $this->pdo->prepare("
+            SELECT e.id, e.logo, e.logo2, e.sitio_web, t.razon_social
+            FROM empresa e
+            INNER JOIN tercero t ON t.id = e.tercero_id
+            WHERE e.id = ? {$eNd}
+            LIMIT 1
+        ");
+        $stmt->execute([$empresaId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row ?: null;
     }
 }

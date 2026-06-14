@@ -49,6 +49,7 @@ class SgdSeccionService
                 'auto' => 'Automática (PDF)',
                 'contenido' => 'Contenido (redacción)',
                 'sistema' => 'Sistema (datos SAVID)',
+                'operativo' => 'Operativo (formulario F/R)',
             ],
         ];
     }

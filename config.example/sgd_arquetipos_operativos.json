@@ -1,0 +1,152 @@
+{
+  "version": 1,
+  "arquetipos": [
+    {
+      "codigo": "acta",
+      "nombre": "Acta estructurada",
+      "descripcion": "Reuniones, auditorías, comités. Bloques fijos + tablas repetibles + firmas.",
+      "piloto": "GE-PD3-F1",
+      "orden": 10
+    },
+    {
+      "codigo": "bitacora",
+      "nombre": "Bitácora / control periódico",
+      "descripcion": "Controles diarios, por turno o por lote con filas repetibles.",
+      "orden": 20
+    },
+    {
+      "codigo": "checklist",
+      "nombre": "Checklist / verificación",
+      "descripcion": "Ítems Sí/No/N/A con observaciones y firma responsable.",
+      "orden": 30
+    },
+    {
+      "codigo": "analisis",
+      "nombre": "Análisis / informe periódico",
+      "descripcion": "Narrativa + tablas de indicadores + plan de acción.",
+      "orden": 40
+    },
+    {
+      "codigo": "consentimiento",
+      "nombre": "Consentimiento / autorización",
+      "descripcion": "Identificación, cláusulas, checkboxes y firmas.",
+      "orden": 50
+    },
+    {
+      "codigo": "contrato",
+      "nombre": "Contrato / acuerdo",
+      "descripcion": "Partes, objeto, vigencia, cláusulas y firmas múltiples.",
+      "orden": 60
+    },
+    {
+      "codigo": "lista_maestra",
+      "nombre": "Lista maestra / catálogo",
+      "descripcion": "Tabla editable (proveedores, tarifas, personal). Versión del listado.",
+      "orden": 70
+    },
+    {
+      "codigo": "matriz",
+      "nombre": "Matriz (MT)",
+      "descripcion": "Grilla fija; maestro versionado u operativa periódica según documento.",
+      "orden": 80
+    },
+    {
+      "codigo": "libre",
+      "nombre": "Formulario libre",
+      "descripcion": "Composición manual de campos (diseñador plano enriquecido).",
+      "orden": 90
+    },
+    {
+      "codigo": "solo_archivo",
+      "nombre": "Solo evidencia (adjunto)",
+      "descripcion": "PDF/Excel escaneado con metadatos mínimos y firma de recibido.",
+      "orden": 100
+    }
+  ],
+  "bloques_operativos": [
+    {
+      "codigo": "op_encabezado_acta",
+      "nombre": "Encabezado del acta",
+      "clase": "operativo",
+      "orden": 210,
+      "ayuda": "N° acta, fecha, hora, lugar, objetivo y convocante.",
+      "widget": "grupo_campos",
+      "campos": [
+        {"id": "acta_numero", "tipo": "texto", "label": "Acta N°", "requerido": true},
+        {"id": "fecha", "tipo": "fecha", "label": "Fecha", "requerido": true},
+        {"id": "hora", "tipo": "texto", "label": "Hora", "requerido": false},
+        {"id": "lugar", "tipo": "texto", "label": "Lugar", "requerido": true},
+        {"id": "objetivo", "tipo": "textarea", "label": "Objetivo de la reunión", "requerido": true},
+        {"id": "convocante", "tipo": "texto", "label": "Convocante / redactada por", "requerido": false}
+      ]
+    },
+    {
+      "codigo": "op_asistentes",
+      "nombre": "Asistentes",
+      "clase": "operativo",
+      "orden": 220,
+      "ayuda": "Tabla de asistentes con nombre, cargo y asistencia/firma.",
+      "widget": "tabla_repetible",
+      "columnas": [
+        {"id": "nombre", "tipo": "texto", "label": "Nombre", "requerido": true},
+        {"id": "cargo", "tipo": "texto", "label": "Cargo", "requerido": true},
+        {"id": "asistio", "tipo": "lista", "label": "Asistió", "opciones": ["Sí", "No"], "requerido": true}
+      ]
+    },
+    {
+      "codigo": "op_orden_dia",
+      "nombre": "Orden del día",
+      "clase": "operativo",
+      "orden": 230,
+      "ayuda": "Puntos del orden del día (lista numerada).",
+      "widget": "lista_repetible",
+      "item": {"id": "punto", "tipo": "textarea", "label": "Punto", "requerido": true}
+    },
+    {
+      "codigo": "op_desarrollo",
+      "nombre": "Desarrollo",
+      "clase": "operativo",
+      "orden": 240,
+      "ayuda": "Desarrollo de la reunión por punto o bloque narrativo.",
+      "widget": "texto_enriquecido",
+      "requerido": true
+    },
+    {
+      "codigo": "op_compromisos",
+      "nombre": "Compromisos",
+      "clase": "operativo",
+      "orden": 250,
+      "ayuda": "Tabla de compromisos con responsable, plazo y seguimiento.",
+      "widget": "tabla_repetible",
+      "columnas": [
+        {"id": "compromiso", "tipo": "textarea", "label": "Compromiso", "requerido": true},
+        {"id": "responsable", "tipo": "texto", "label": "Responsable", "requerido": true},
+        {"id": "plazo", "tipo": "fecha", "label": "Plazo", "requerido": false},
+        {"id": "cumplimiento", "tipo": "texto", "label": "Cumplimiento", "requerido": false},
+        {"id": "observaciones", "tipo": "textarea", "label": "Observaciones", "requerido": false}
+      ]
+    },
+    {
+      "codigo": "op_firmas_acta",
+      "nombre": "Firmas / cierre",
+      "clase": "operativo",
+      "orden": 260,
+      "ayuda": "Bloque de firmas ordenadas (presidente, secretario, asistentes clave).",
+      "widget": "bloque_firmas",
+      "roles": [
+        {"id": "presidente", "label": "Presidente / quien preside", "requerido": true},
+        {"id": "secretario", "label": "Secretario / quien redacta", "requerido": true}
+      ]
+    }
+  ],
+  "perfiles_arquetipo": {
+    "acta": {
+      "op_encabezado_acta": "aplica",
+      "op_asistentes": "aplica",
+      "op_orden_dia": "aplica",
+      "op_desarrollo": "aplica",
+      "op_compromisos": "opcional",
+      "op_firmas_acta": "aplica"
+    }
+  }
+}

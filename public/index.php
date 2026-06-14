@@ -10,6 +10,11 @@ error_reporting(E_ALL);
 // Definir ruta base
 define('BASE_PATH', dirname(__DIR__));
 
+$composerAutoload = BASE_PATH . '/vendor/autoload.php';
+if (is_readable($composerAutoload)) {
+    require_once $composerAutoload;
+}
+
 // Base de datos: config local (gitignored) o plantilla versionada
 $dbFile = BASE_PATH . '/config/Database.php';
 if (is_readable($dbFile)) {

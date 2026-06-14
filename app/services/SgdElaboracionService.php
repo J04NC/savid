@@ -461,6 +461,143 @@ class SgdElaboracionService
     }
 
     /**
+     * @param array<string, mixed> $documento
+     * @param array<string, mixed> $elaboracion
+     * @return array{secciones: list<array<string, mixed>>, contenido: array<string, mixed>, opciones: array<string, bool>, numeracion: array<string, bool>}
+     */
+    public function buildPublishContext(int $empresaId, array $documento, array $elaboracion): array
+    {
+        $opcionesRaw = $this->decodeJsonMap($elaboracion['opciones_json'] ?? null);
+        [$opciones, $numeracion] = $this->splitOpcionesNumeracion($opcionesRaw);
+        $contenido = $this->decodeJsonMap($elaboracion['contenido_json'] ?? null);
+        $secciones = $this->buildSeccionesEfectivas($empresaId, $documento, $opciones);
+        $secciones = $this->assignSectionNumbers($secciones, $numeracion);
+
+        return [
+            'secciones' => $secciones,
+            'contenido' => $contenido,
+            'opciones' => $opciones,
+            'numeracion' => $numeracion,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $version
+     * @param array{secciones: list<array<string, mixed>>, contenido: array<string, mixed>, opciones: array<string, bool>, numeracion: array<string, bool>} $context
+     * @return array<string, mixed>
+     */
+    public function buildPublishSnapshot(int $documentoId, int $versionId, array $version, array $context): array
+    {
+        return [
+            'generated_at' => date('c'),
+            'documento_id' => $documentoId,
+            'version_id' => $versionId,
+            'version_numero' => (string)($version['numero'] ?? ''),
+            'opciones' => $context['opciones'],
+            'numeracion' => $context['numeracion'],
+            'contenido' => $context['contenido'],
+            'secciones' => array_map(static function (array $sec): array {
+                return [
+                    'codigo' => (string)($sec['codigo'] ?? ''),
+                    'nombre' => (string)($sec['nombre'] ?? ''),
+                    'clase' => (string)($sec['clase'] ?? ''),
+                    'numero_visible' => $sec['numero_visible'] ?? null,
+                ];
+            }, $context['secciones']),
+        ];
+    }
+
+    /**
+     * @return array{valid: bool, errors: list<string>}
+     */
+    public function validateForPublish(int $empresaId, int $documentoId): array
+    {
+        $documento = $this->repo->findDocumentoById($empresaId, $documentoId);
+        if ($documento === null) {
+            return ['valid' => false, 'errors' => ['Documento no encontrado.']];
+        }
+
+        $documento = $this->resolveModoDocumento($empresaId, $documento);
+        if (($documento['modo_efectivo'] ?? '') !== 'maestro') {
+            return ['valid' => false, 'errors' => ['La publicación automática solo aplica a documentos maestro.']];
+        }
+
+        $elaboracion = $this->repo->findDocumentoElaboracion($empresaId, $documentoId);
+        if ($elaboracion === null) {
+            return ['valid' => false, 'errors' => ['No hay elaboración guardada. Redacte el documento antes de publicar.']];
+        }
+
+        $context = $this->buildPublishContext($empresaId, $documento, $elaboracion);
+        $errors = [];
+
+        foreach ($context['secciones'] as $sec) {
+            if (empty($sec['obligatoria'])) {
+                continue;
+            }
+            $codigo = (string)($sec['codigo'] ?? '');
+            $clase = (string)($sec['clase'] ?? '');
+            if ($clase !== 'contenido' && $codigo !== 'anexos') {
+                continue;
+            }
+            if ($this->sectionContentIsEmpty($codigo, $clase, $context['contenido'][$codigo] ?? null)) {
+                $errors[] = 'La sección «' . (string)($sec['nombre'] ?? $codigo) . '» es obligatoria y está vacía.';
+            }
+        }
+
+        if ($errors !== []) {
+            return ['valid' => false, 'errors' => $errors];
+        }
+
+        $total = $this->countContenidoChars($context['contenido']);
+        if ($total < 20) {
+            return ['valid' => false, 'errors' => ['El documento no tiene contenido suficiente para generar el PDF.']];
+        }
+
+        return ['valid' => true, 'errors' => []];
+    }
+
+    public function canAutoGeneratePdf(int $empresaId, int $documentoId): bool
+    {
+        $documento = $this->repo->findDocumentoById($empresaId, $documentoId);
+        if ($documento === null) {
+            return false;
+        }
+        $documento = $this->resolveModoDocumento($empresaId, $documento);
+
+        return ($documento['modo_efectivo'] ?? '') === 'maestro'
+            && $this->repo->findDocumentoElaboracion($empresaId, $documentoId) !== null;
+    }
+
+    private function sectionContentIsEmpty(string $codigo, string $clase, mixed $value): bool
+    {
+        if ($codigo === 'anexos') {
+            $bloques = is_array($value) ? ($value['bloques'] ?? []) : [];
+            if (!is_array($bloques) || $bloques === []) {
+                return true;
+            }
+            foreach ($bloques as $bloque) {
+                if (!is_array($bloque)) {
+                    continue;
+                }
+                if (trim((string)($bloque['titulo'] ?? '')) !== '') {
+                    return false;
+                }
+                if (trim(strip_tags((string)($bloque['cuerpo'] ?? ''))) !== '') {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        if ($clase === 'contenido') {
+            return !is_string($value) || trim(strip_tags($value)) === '';
+        }
+
+        return true;
+    }
+
+    /**
      * @param list<array<string, mixed>> $seccionesEfectivas
      * @param array<string, mixed> $contenidoRaw
      * @return array<string, mixed>

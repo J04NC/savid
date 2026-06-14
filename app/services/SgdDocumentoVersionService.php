@@ -4,11 +4,15 @@ class SgdDocumentoVersionService
 {
     private SgdRepository $repo;
     private SgdScopeService $scope;
+    private SgdElaboracionService $elabService;
+    private SgdPdfGenerationService $pdfService;
 
     public function __construct()
     {
         $this->repo = new SgdRepository();
         $this->scope = new SgdScopeService();
+        $this->elabService = new SgdElaboracionService();
+        $this->pdfService = new SgdPdfGenerationService();
     }
 
     /**
@@ -158,16 +162,43 @@ class SgdDocumentoVersionService
             return ['success' => false, 'message' => 'Solo se pueden publicar versiones en borrador.'];
         }
 
-        if (trim((string)($version['archivo_ruta'] ?? '')) === '') {
-            return ['success' => false, 'message' => 'Suba el PDF oficial antes de publicar.'];
-        }
-
         $fechaAprobacion = $this->parseFechaAprobacion($post['fecha_aprobacion'] ?? null, date('Y-m-d'));
         if ($fechaAprobacion === null) {
             return ['success' => false, 'message' => 'Indique una fecha de aprobación válida.'];
         }
 
         $userId = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : null;
+        $documentoId = (int)$version['documento_id'];
+        $archivoRuta = trim((string)($version['archivo_ruta'] ?? ''));
+
+        if ($archivoRuta === '' && $this->elabService->canAutoGeneratePdf($empresaId, $documentoId)) {
+            $versionForPdf = $version;
+            $versionForPdf['fecha_aprobacion'] = $fechaAprobacion;
+
+            $validation = $this->elabService->validateForPublish($empresaId, $documentoId);
+            if (!$validation['valid']) {
+                return [
+                    'success' => false,
+                    'message' => implode(' ', $validation['errors']),
+                ];
+            }
+
+            $generated = $this->pdfService->generateForVersion($empresaId, $documentoId, $versionId, $versionForPdf);
+            if (!$generated['success']) {
+                return $generated;
+            }
+
+            $archivoRuta = (string)($generated['path'] ?? '');
+            $this->repo->updateDocumentoVersionArchivo($empresaId, $versionId, $archivoRuta, $userId);
+            if (!empty($generated['snapshot']) && is_array($generated['snapshot'])) {
+                $this->repo->saveDocumentoVersionContenido($empresaId, $versionId, $generated['snapshot']);
+            }
+        }
+
+        if ($archivoRuta === '') {
+            return ['success' => false, 'message' => 'Suba el PDF oficial o complete la elaboración en el sistema antes de publicar.'];
+        }
+
         $this->repo->publishDocumentoVersion($empresaId, $versionId, $userId, $fechaAprobacion);
 
         return [

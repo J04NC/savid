@@ -14,6 +14,7 @@ class SgdController
     private SgdSeccionService $seccionService;
     private SgdTipoDocumentalSeccionService $tipoSeccionService;
     private SgdElaboracionService $elaboracionService;
+    private SgdPdfGenerationService $pdfService;
 
     public function __construct()
     {
@@ -29,6 +30,7 @@ class SgdController
         $this->seccionService = new SgdSeccionService();
         $this->tipoSeccionService = new SgdTipoDocumentalSeccionService();
         $this->elaboracionService = new SgdElaboracionService();
+        $this->pdfService = new SgdPdfGenerationService();
     }
 
     public function index(): void
@@ -128,6 +130,21 @@ class SgdController
         }
 
         $result = $this->configService->importSeccionesPlantilla($_GET);
+        $_SESSION['flash_notice'] = $result['message'];
+        $q = $this->empresaQuery();
+        header('Location: ?url=sgd/config' . $q);
+
+        exit;
+    }
+
+    public function cargarBloquesOperativos(): void
+    {
+        if (!PermisoService::can('sgd/config', 'configurar')
+            && !PermisoService::can('sgd/config', 'guardar')) {
+            $this->deny();
+        }
+
+        $result = $this->configService->importBloquesOperativos($_GET);
         $_SESSION['flash_notice'] = $result['message'];
         $q = $this->empresaQuery();
         header('Location: ?url=sgd/config' . $q);
@@ -237,6 +254,7 @@ class SgdController
         $selectedGridId = (int)($page['selectedGridId'] ?? 0);
         $versiones = $page['versiones'] ?? [];
         $suggestedVersionNumero = (string)($page['suggestedVersionNumero'] ?? '1');
+        $canAutoGeneratePdf = !empty($page['canAutoGeneratePdf']);
         $breadcrumb = $this->moduleService->buildBreadcrumbForRuta('sgd/documentos');
         $canGuardar = PermisoService::can('sgd/documentos', 'guardar');
         $canEliminar = PermisoService::can('sgd/documentos', 'eliminar');
@@ -277,6 +295,8 @@ class SgdController
         $esquema = $page['esquema'];
         $esquemaJson = (string)($page['esquemaJson'] ?? '{}');
         $tiposCampo = $page['tiposCampo'] ?? [];
+        $arquetipos = $page['arquetipos'] ?? [];
+        $arquetipoPiloto = (string)($page['arquetipoPiloto'] ?? 'acta');
         $breadcrumb = $this->moduleService->buildBreadcrumbForRuta('sgd/formularios');
         $canGuardar = PermisoService::can('sgd/formularios', 'guardar');
 
@@ -738,6 +758,73 @@ class SgdController
             'error' => $result['success'] ? null : $result['message'],
         ]);
         return;
+    }
+
+    /**
+     * Vista previa PDF en línea (no publica ni guarda archivo oficial).
+     * Ruta: ?url=sgd/elaboracionPreviewPdf&empresa_id=…&documento_id=…[&version_id=…]
+     */
+    public function elaboracionPreviewPdf(): void
+    {
+        if (!PermisoService::can('sgd/elaboracion', 'ver') && !PermisoService::can('sgd/documentos', 'ver')) {
+            $this->deny();
+        }
+
+        if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
+            http_response_code(405);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo 'Método no permitido.';
+            exit;
+        }
+
+        try {
+            $empresaId = $this->scope->requireEmpresaId($_GET);
+        } catch (RuntimeException $e) {
+            http_response_code(400);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo $e->getMessage();
+            exit;
+        }
+
+        if (!$this->scope->canAccessEmpresa($empresaId, $_GET)) {
+            http_response_code(403);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo 'Sin permiso para esta empresa.';
+            exit;
+        }
+
+        $documentoId = isset($_GET['documento_id']) && ctype_digit((string)$_GET['documento_id'])
+            ? (int)$_GET['documento_id']
+            : 0;
+        if ($documentoId <= 0) {
+            http_response_code(400);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo 'Documento no válido.';
+            exit;
+        }
+
+        $versionId = isset($_GET['version_id']) && ctype_digit((string)$_GET['version_id'])
+            ? (int)$_GET['version_id']
+            : null;
+
+        $result = $this->pdfService->generatePreview($empresaId, $documentoId, $versionId);
+        if (!$result['success']) {
+            http_response_code(400);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo (string)($result['message'] ?? 'No se pudo generar la vista previa.');
+            exit;
+        }
+
+        $binary = $result['binary'] ?? '';
+        $filename = 'preview-doc-' . $documentoId . '.pdf';
+
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: inline; filename="' . $filename . '"');
+        header('Content-Length: ' . strlen($binary));
+        header('Cache-Control: no-store, no-cache, must-revalidate');
+        header('Pragma: no-cache');
+        echo $binary;
+        exit;
     }
 
     public function elaboracion(): void

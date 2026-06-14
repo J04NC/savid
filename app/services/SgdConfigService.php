@@ -116,6 +116,14 @@ class SgdConfigService
     }
 
     /**
+     * @return array{success: bool, message: string, inserted?: int}
+     */
+    public function importBloquesOperativos(array $query): array
+    {
+        return (new SgdArquetipoOperativoService())->importBloquesOperativos($query);
+    }
+
+    /**
      * @param array<string, mixed>|null $existing
      */
     private function buildConfigJsonFromPost(array $post, ?array $existing): ?string

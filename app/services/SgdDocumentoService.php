@@ -6,6 +6,7 @@ class SgdDocumentoService
     private SgdScopeService $scope;
     private SgdDocumentoCodigoService $codigoService;
     private SgdDocumentoVersionService $versionService;
+    private SgdElaboracionService $elabService;
 
     public function __construct()
     {
@@ -13,6 +14,7 @@ class SgdDocumentoService
         $this->scope = new SgdScopeService();
         $this->codigoService = new SgdDocumentoCodigoService();
         $this->versionService = new SgdDocumentoVersionService();
+        $this->elabService = new SgdElaboracionService();
     }
 
     /**
@@ -33,6 +35,7 @@ class SgdDocumentoService
         $edit = null;
         $versiones = [];
         $suggestedVersionNumero = '1';
+        $canAutoGeneratePdf = false;
         $consecutivoIndex = [];
         $padresPermitidosPorTipo = [];
         $catalogos = [
@@ -61,6 +64,7 @@ class SgdDocumentoService
                 if ($edit) {
                     $versiones = $this->repo->listDocumentoVersiones($empresaId, $editId);
                     $suggestedVersionNumero = $this->repo->suggestNextVersionNumero($empresaId, $editId);
+                    $canAutoGeneratePdf = $this->elabService->canAutoGeneratePdf($empresaId, $editId);
                 }
             } elseif ($padreIdFromQuery > 0) {
                 $edit = $this->buildNewDocumentoForm($empresaId, $padreIdFromQuery);
@@ -98,6 +102,7 @@ class SgdDocumentoService
             'selectedGridId' => $editId > 0 ? $editId : $padreIdFromQuery,
             'versiones' => $versiones,
             'suggestedVersionNumero' => $suggestedVersionNumero,
+            'canAutoGeneratePdf' => $canAutoGeneratePdf,
         ];
     }
 

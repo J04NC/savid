@@ -985,24 +985,61 @@ class SgdDocxImportService
             return '';
         }
 
-        $html = '<table class="sgd-word-table no-datatable">';
-        $rowIndex = 0;
+        $parsed = $this->parseWordTableRows($xpath, $rows);
+        if ($parsed === []) {
+            return '';
+        }
+
+        $html = '<table class="sgd-word-table no-datatable"><tbody>';
+        foreach ($parsed as $rowIndex => $rowCells) {
+            $html .= '<tr>';
+            foreach ($rowCells as $cell) {
+                if (($cell['type'] ?? '') !== 'cell') {
+                    continue;
+                }
+                $cellTag = ($rowIndex === 0) ? 'th' : 'td';
+                $colspan = max(1, (int)($cell['colspan'] ?? 1));
+                $rowspan = max(1, (int)($cell['rowspan'] ?? 1));
+                $attrs = '';
+                if ($colspan > 1) {
+                    $attrs .= ' colspan="' . $colspan . '"';
+                }
+                if ($rowspan > 1) {
+                    $attrs .= ' rowspan="' . $rowspan . '"';
+                }
+                $inner = (string)($cell['inner'] ?? '');
+                $html .= '<' . $cellTag . $attrs . '>' . ($inner !== '' ? $inner : '&nbsp;') . '</' . $cellTag . '>';
+            }
+            $html .= '</tr>';
+        }
+        $html .= '</tbody></table>';
+
+        return $html;
+    }
+
+    /**
+     * @return list<list<array<string, mixed>>>
+     */
+    private function parseWordTableRows(DOMXPath $xpath, DOMNodeList $rows): array
+    {
+        $parsed = [];
         foreach ($rows as $tr) {
             if (!$tr instanceof DOMElement) {
                 continue;
             }
-            $html .= '<tr>';
+            $parsedRow = [];
+            $col = 0;
             $cells = $xpath->query('w:tc', $tr);
             if ($cells === false) {
+                $parsed[] = $parsedRow;
                 continue;
             }
             foreach ($cells as $tc) {
                 if (!$tc instanceof DOMElement) {
                     continue;
                 }
-                $cellTag = ($rowIndex === 0) ? 'th' : 'td';
                 $colspan = 1;
-                $rowspan = 1;
+                $vMergeType = null;
                 $tcPr = $this->xpathFirst($xpath, 'w:tcPr', $tc);
                 if ($tcPr instanceof DOMElement) {
                     $gridSpan = $this->xpathFirst($xpath, 'w:gridSpan', $tcPr);
@@ -1010,13 +1047,21 @@ class SgdDocxImportService
                         $colspan = max(1, (int)$gridSpan->getAttributeNS(self::W_NS, 'val'));
                     }
                     $vMerge = $this->xpathFirst($xpath, 'w:vMerge', $tcPr);
-                    if ($vMerge instanceof DOMElement && $vMerge->getAttributeNS(self::W_NS, 'val') !== 'restart') {
-                        continue;
+                    if ($vMerge instanceof DOMElement) {
+                        $vMergeType = $vMerge->getAttributeNS(self::W_NS, 'val') === 'restart'
+                            ? 'restart'
+                            : 'continue';
                     }
-                    $vRestart = $vMerge instanceof DOMElement && $vMerge->getAttributeNS(self::W_NS, 'val') === 'restart';
-                    if ($vRestart) {
-                        $rowspan = 2;
-                    }
+                }
+
+                if ($vMergeType === 'continue') {
+                    $parsedRow[] = [
+                        'type' => 'continue',
+                        'col' => $col,
+                        'colspan' => $colspan,
+                    ];
+                    $col += $colspan;
+                    continue;
                 }
 
                 $inner = '';
@@ -1030,21 +1075,57 @@ class SgdDocxImportService
                     }
                 }
                 $inner = rtrim($inner, '<br>');
-                $attrs = '';
-                if ($colspan > 1) {
-                    $attrs .= ' colspan="' . $colspan . '"';
-                }
-                if ($rowspan > 1) {
-                    $attrs .= ' rowspan="' . $rowspan . '"';
-                }
-                $html .= '<' . $cellTag . $attrs . '>' . ($inner !== '' ? $inner : '&nbsp;') . '</' . $cellTag . '>';
-            }
-            $html .= '</tr>';
-            $rowIndex += 1;
-        }
-        $html .= '</table>';
 
-        return $html;
+                $parsedRow[] = [
+                    'type' => 'cell',
+                    'col' => $col,
+                    'colspan' => $colspan,
+                    'rowspan' => 1,
+                    'vmerge' => $vMergeType,
+                    'inner' => $inner,
+                ];
+                $col += $colspan;
+            }
+            $parsed[] = $parsedRow;
+        }
+
+        foreach ($parsed as $rowIndex => $rowCells) {
+            foreach ($rowCells as $cellIndex => $cell) {
+                if (($cell['type'] ?? '') !== 'cell' || ($cell['vmerge'] ?? null) !== 'restart') {
+                    continue;
+                }
+                $parsed[$rowIndex][$cellIndex]['rowspan'] = $this->countWordVerticalMergeSpan(
+                    $parsed,
+                    $rowIndex,
+                    (int)$cell['col']
+                );
+            }
+        }
+
+        return $parsed;
+    }
+
+    /**
+     * @param list<list<array<string, mixed>>> $parsed
+     */
+    private function countWordVerticalMergeSpan(array $parsed, int $startRow, int $col): int
+    {
+        $rowspan = 1;
+        for ($r = $startRow + 1, $max = count($parsed); $r < $max; $r += 1) {
+            $found = false;
+            foreach ($parsed[$r] as $item) {
+                if (($item['type'] ?? '') === 'continue' && (int)($item['col'] ?? -1) === $col) {
+                    $found = true;
+                    break;
+                }
+            }
+            if (!$found) {
+                break;
+            }
+            $rowspan += 1;
+        }
+
+        return $rowspan;
     }
 
     private function xpathFirst(DOMXPath $xpath, string $query, DOMElement $context): ?DOMElement

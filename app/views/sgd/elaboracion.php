@@ -95,6 +95,9 @@ $headingTags = ['h2', 'h3', 'h4', 'h5', 'h6'];
                 </div>
                 <div class="sgd-word-topbar-right">
                     <span id="sgd-word-status" class="sgd-word-status" aria-live="polite"></span>
+                    <?php if ($documentoId > 0): ?>
+                        <button type="button" class="sgd-word-btn sgd-word-btn-ghost" id="sgd-btn-preview-pdf" title="Generar vista previa del PDF con el contenido guardado">📄 Vista previa PDF</button>
+                    <?php endif; ?>
                     <?php if ($canGuardar): ?>
                         <button type="submit" class="sgd-word-btn sgd-word-btn-primary">💾 Guardar</button>
                     <?php endif; ?>
@@ -473,6 +476,9 @@ $headingTags = ['h2', 'h3', 'h4', 'h5', 'h6'];
                 : '',
             'importWordFetchUrl' => $canGuardar && $documentoId > 0
                 ? ('?url=sgd/elaboracionImportWordFetch' . $empresaQuery . '&documento_id=' . (int)$documentoId)
+                : '',
+            'previewPdfUrl' => $documentoId > 0
+                ? ('?url=sgd/elaboracionPreviewPdf' . $empresaQuery . '&documento_id=' . (int)$documentoId)
                 : '',
             'wordImportServerZip' => $wordImportServerZip,
             'secciones' => array_values(array_map(static function (array $sec): array {

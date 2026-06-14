@@ -11,6 +11,8 @@
 /** @var array{version: int, campos: list<array<string, mixed>>} $esquema */
 /** @var string $esquemaJson */
 /** @var list<string> $tiposCampo */
+/** @var list<array<string, mixed>> $arquetipos */
+/** @var string $arquetipoPiloto */
 /** @var bool $canGuardar */
 
 $empresaQuery = $empresaId ? '&empresa_id=' . (int)$empresaId : '';
@@ -18,6 +20,11 @@ $formUrl = '?url=sgd/formularios' . $empresaQuery;
 $docUrl = '?url=sgd/documentos' . $empresaQuery . ($documentoId > 0 ? '&id=' . $documentoId : '');
 $versionId = (int)($version['id'] ?? 0);
 $esBorrador = (int)($version['estado_id'] ?? 0) === SgdRepository::ESTADO_DOC_BORRADOR;
+$arquetipoActual = (string)($esquema['arquetipo'] ?? 'libre');
+$arquetiposSemillaJson = json_encode(
+    SgdArquetipoOperativoService::loadCatalog(),
+    JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP
+);
 
 $sgdFormJs = BASE_PATH . '/public/js/sgd-formularios.js';
 $sgdFormJsV = is_readable($sgdFormJs) ? (int)filemtime($sgdFormJs) : time();
@@ -58,7 +65,31 @@ $sgdFormJsV = is_readable($sgdFormJs) ? (int)filemtime($sgdFormJs) : time();
 
         <div class="sgd-form-layout">
             <section class="sgd-panel sgd-form-designer-panel">
-                <h4 class="sgd-form-section-title">Campos</h4>
+                <?php if ($canGuardar && $esBorrador): ?>
+                    <div class="sgd-form-arquetipo-bar form-group">
+                        <label for="sgd_arquetipo_select">Arquetipo de formulario</label>
+                        <div class="sgd-form-arquetipo-row">
+                            <select id="sgd_arquetipo_select" class="form-input">
+                                <?php foreach ($arquetipos as $arq): ?>
+                                    <?php $cod = (string)($arq['codigo'] ?? ''); ?>
+                                    <option value="<?= htmlspecialchars($cod, ENT_QUOTES, 'UTF-8') ?>"
+                                        <?= $arquetipoActual === $cod ? 'selected' : '' ?>>
+                                        <?= htmlspecialchars((string)($arq['nombre'] ?? $cod), ENT_QUOTES, 'UTF-8') ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <button type="button" id="sgd-btn-cargar-arquetipo" class="sgd-doc-btn">
+                                Cargar plantilla del arquetipo
+                            </button>
+                        </div>
+                        <p class="field-note">
+                            Piloto F3b: <strong>Acta</strong> (GE-PD3-F1). Los bloques se guardan en el catálogo
+                            <code>sgd_seccion</code> con clase <em>operativo</em> (importar desde Configuración SGD).
+                        </p>
+                    </div>
+                <?php endif; ?>
+
+                <h4 class="sgd-form-section-title">Bloques / campos</h4>
 
                 <?php if ($canGuardar && $esBorrador): ?>
                     <form id="sgd-form-add-campo" class="sgd-form-add-campo" onsubmit="return false;">
@@ -124,6 +155,7 @@ $sgdFormJsV = is_readable($sgdFormJs) ? (int)filemtime($sgdFormJs) : time();
         <?php endif; ?>
 
         <script type="application/json" id="sgd-form-esquema-inicial"><?= $esquemaJson ?></script>
+        <script type="application/json" id="sgd-form-arquetipos-catalog"><?= $arquetiposSemillaJson ?></script>
         <script src="/js/sgd-formularios.js?v=<?= (int)$sgdFormJsV ?>"></script>
     <?php endif; ?>
 </div>
