@@ -6,27 +6,43 @@ const overlay=document.getElementById("searchOverlay");
 const input=document.getElementById("searchInput");
 const results=document.getElementById("searchResults");
 
+if(!overlay || !input || !results) return;
+
+function closeSearch(){
+overlay.classList.remove("active");
+overlay.setAttribute("aria-hidden","true");
+input.value="";
+results.innerHTML="";
+}
+
+function openSearch(){
+overlay.classList.add("active");
+overlay.setAttribute("aria-hidden","false");
+input.focus();
+}
+
 document.addEventListener("keydown",function(e){
 
 if(e.ctrlKey && e.key==="k"){
 
 e.preventDefault();
-
-overlay.classList.add("active");
-
-input.focus();
+openSearch();
 
 }
 
-if(e.key==="Escape"){
+if(e.key==="Escape" && overlay.classList.contains("active")){
 
-overlay.classList.remove("active");
-
-input.value="";
-results.innerHTML="";
+e.preventDefault();
+closeSearch();
 
 }
 
+});
+
+overlay.addEventListener("click",function(e){
+if(e.target===overlay){
+closeSearch();
+}
 });
 
 input.addEventListener("input",function(){

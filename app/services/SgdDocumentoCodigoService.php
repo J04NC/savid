@@ -79,6 +79,43 @@ class SgdDocumentoCodigoService
         return $this->buildForRow($row, $allById);
     }
 
+    /**
+     * Código completo resolviendo la cadena de padres (ej. GE-PD3-F1).
+     *
+     * @param array<string, mixed> $row Fila de findDocumentoById
+     * @return array<int, array<string, mixed>>
+     */
+    public function buildAncestorMap(int $empresaId, array $row, SgdRepository $repo): array
+    {
+        $allById = [];
+        $id = (int)($row['id'] ?? 0);
+        if ($id > 0) {
+            $allById[$id] = $row;
+        }
+
+        $padreId = (int)($row['documento_id'] ?? 0);
+        $guard = 0;
+        while ($padreId > 0 && !isset($allById[$padreId]) && $guard < 20) {
+            $guard++;
+            $padre = $repo->findDocumentoById($empresaId, $padreId);
+            if ($padre === null) {
+                break;
+            }
+            $allById[$padreId] = $padre;
+            $padreId = (int)($padre['documento_id'] ?? 0);
+        }
+
+        return $allById;
+    }
+
+    /**
+     * @param array<string, mixed> $row Fila de findDocumentoById
+     */
+    public function buildForDocument(int $empresaId, array $row, SgdRepository $repo): string
+    {
+        return $this->buildForRow($row, $this->buildAncestorMap($empresaId, $row, $repo));
+    }
+
     private function buildChildSuffix(string $tipo, string $consecutivo): string
     {
         $consecutivo = trim($consecutivo);

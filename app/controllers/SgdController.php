@@ -15,6 +15,7 @@ class SgdController
     private SgdTipoDocumentalSeccionService $tipoSeccionService;
     private SgdElaboracionService $elaboracionService;
     private SgdPdfGenerationService $pdfService;
+    private SgdFormularioPreviewService $formularioPreviewService;
 
     public function __construct()
     {
@@ -31,6 +32,7 @@ class SgdController
         $this->tipoSeccionService = new SgdTipoDocumentalSeccionService();
         $this->elaboracionService = new SgdElaboracionService();
         $this->pdfService = new SgdPdfGenerationService();
+        $this->formularioPreviewService = new SgdFormularioPreviewService();
     }
 
     public function index(): void
@@ -84,6 +86,7 @@ class SgdController
         $tipos = $page['tipos'];
         $configExtra = SgdConfigService::parseConfigJson($config);
         $formatoPdf = $configExtra['formato_pdf'] ?? SgdSeccionService::defaultFormatoPdf();
+        $archivoOficial = SgdConfigService::archivoOficialSettings($configExtra);
         $breadcrumb = $this->moduleService->buildBreadcrumbForRuta('sgd/config');
         $canConfigurar = PermisoService::can('sgd/config', 'configurar')
             || PermisoService::can('sgd/config', 'guardar');
@@ -255,9 +258,18 @@ class SgdController
         $versiones = $page['versiones'] ?? [];
         $suggestedVersionNumero = (string)($page['suggestedVersionNumero'] ?? '1');
         $canAutoGeneratePdf = !empty($page['canAutoGeneratePdf']);
+        $canPreviewPlantilla = !empty($page['canPreviewPlantilla']);
+        $previewPlantillaUrl = (string)($page['previewPlantillaUrl'] ?? '');
+        $esOperativo = !empty($page['esOperativo']);
+        $formatoArchivoEsperado = (string)($page['formatoArchivoEsperado'] ?? 'pdf_auto');
+        $canAutoGenerateEsqueleto = !empty($page['canAutoGenerateEsqueleto']);
+        $uploadExtensions = $page['uploadExtensions'] ?? ['pdf'];
+        $arquetipoOperativo = (string)($page['arquetipoOperativo'] ?? 'libre');
         $breadcrumb = $this->moduleService->buildBreadcrumbForRuta('sgd/documentos');
         $canGuardar = PermisoService::can('sgd/documentos', 'guardar');
         $canEliminar = PermisoService::can('sgd/documentos', 'eliminar');
+        $canEliminarVersion = PermisoService::can('sgd/documentos', 'version_eliminar');
+        $canRevertVigente = PermisoService::can('sgd/documentos', 'version_revertir_vigente');
 
         $view = BASE_PATH . '/app/views/sgd/documentos.php';
         require BASE_PATH . '/app/views/layouts/main.php';
@@ -297,6 +309,12 @@ class SgdController
         $tiposCampo = $page['tiposCampo'] ?? [];
         $arquetipos = $page['arquetipos'] ?? [];
         $arquetipoPiloto = (string)($page['arquetipoPiloto'] ?? 'acta');
+        $borradorDesdeVigente = !empty($page['borradorDesdeVigente']);
+        $versionVigenteNumero = $page['versionVigenteNumero'] ?? null;
+        $needsNewVersionConfirm = !empty($page['needsNewVersionConfirm']);
+        $documentoVersion = $page['documentoVersion'] ?? null;
+        $canPreviewPlantilla = !empty($page['canPreviewPlantilla']);
+        $previewPdfUrl = (string)($page['previewPdfUrl'] ?? '');
         $breadcrumb = $this->moduleService->buildBreadcrumbForRuta('sgd/formularios');
         $canGuardar = PermisoService::can('sgd/formularios', 'guardar');
 
@@ -314,7 +332,7 @@ class SgdController
 
         $result = match ($action) {
             'save' => $this->formularioService->saveEsquema($_POST, $_GET),
-            'publish' => $this->formularioService->publish($_POST, $_GET),
+            'create_borrador' => $this->formularioService->createBorradorFromVigente($_GET, $_POST),
             default => ['success' => false, 'message' => 'Acción no válida.'],
         };
 
@@ -411,8 +429,16 @@ class SgdController
             exit;
         }
 
-        if (in_array($action, ['version_create', 'version_publish', 'version_obsolete', 'version_save_fecha'], true)) {
-            if (!PermisoService::can('sgd/documentos', 'guardar')) {
+        if (in_array($action, ['version_create', 'version_publish', 'version_obsolete', 'version_save_fecha', 'version_delete', 'version_revert_vigente'], true)) {
+            if ($action === 'version_delete') {
+                if (!PermisoService::can('sgd/documentos', 'version_eliminar')) {
+                    $this->deny();
+                }
+            } elseif ($action === 'version_revert_vigente') {
+                if (!PermisoService::can('sgd/documentos', 'version_revertir_vigente')) {
+                    $this->deny();
+                }
+            } elseif (!PermisoService::can('sgd/documentos', 'guardar')) {
                 $this->deny();
             }
 
@@ -421,6 +447,8 @@ class SgdController
                 'version_publish' => $this->versionService->publish($_POST, $_GET),
                 'version_obsolete' => $this->versionService->obsoleteDocument($_POST, $_GET),
                 'version_save_fecha' => $this->versionService->saveFechaAprobacion($_POST, $_GET),
+                'version_delete' => $this->versionService->deleteVersion($_POST, $_GET),
+                'version_revert_vigente' => $this->versionService->revertVigenteVersion($_POST, $_GET),
                 default => ['success' => false, 'message' => 'Acción no válida.'],
             };
 
@@ -469,7 +497,11 @@ class SgdController
         $result = $this->versionService->uploadPdf($_FILES, $_POST, $_GET);
 
         if (!empty($_POST['_redirect'])) {
-            $_SESSION['flash_notice'] = $result['message'];
+            $flash = $result['message'];
+            if (!empty($result['warning'])) {
+                $flash .= ' ' . $result['warning'];
+            }
+            $_SESSION['flash_notice'] = $flash;
             $q = $this->empresaQuery();
             $docId = (int)($_POST['documento_id'] ?? $_GET['id'] ?? 0);
             if ($docId > 0) {
@@ -483,6 +515,7 @@ class SgdController
             'ok' => $result['success'],
             'message' => $result['message'],
             'path' => $result['path'] ?? null,
+            'warning' => $result['warning'] ?? null,
             'error' => $result['success'] ? null : $result['message'],
         ]);
     }
@@ -827,6 +860,63 @@ class SgdController
         exit;
     }
 
+    public function formularioPreviewPdf(): void
+    {
+        if (!PermisoService::can('sgd/formularios', 'ver')
+            && !PermisoService::can('sgd/documentos', 'ver')) {
+            $this->deny();
+        }
+
+        try {
+            $empresaId = $this->scope->requireEmpresaId($_GET);
+        } catch (RuntimeException $e) {
+            http_response_code(400);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo $e->getMessage();
+            exit;
+        }
+
+        if (!$this->scope->canAccessEmpresa($empresaId, $_GET)) {
+            http_response_code(403);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo 'Sin permiso para esta empresa.';
+            exit;
+        }
+
+        $documentoId = isset($_GET['documento_id']) && ctype_digit((string)$_GET['documento_id'])
+            ? (int)$_GET['documento_id']
+            : 0;
+        if ($documentoId <= 0) {
+            http_response_code(400);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo 'Documento no válido.';
+            exit;
+        }
+
+        $formularioVersionId = isset($_GET['formulario_version_id']) && ctype_digit((string)$_GET['formulario_version_id'])
+            ? (int)$_GET['formulario_version_id']
+            : null;
+
+        $result = $this->formularioPreviewService->generatePreview($empresaId, $documentoId, $formularioVersionId);
+        if (!$result['success']) {
+            http_response_code(400);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo (string)($result['message'] ?? 'No se pudo generar la vista previa.');
+            exit;
+        }
+
+        $binary = $result['binary'] ?? '';
+        $filename = 'preview-formato-' . $documentoId . '.pdf';
+
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: inline; filename="' . $filename . '"');
+        header('Content-Length: ' . strlen($binary));
+        header('Cache-Control: no-store, no-cache, must-revalidate');
+        header('Pragma: no-cache');
+        echo $binary;
+        exit;
+    }
+
     public function elaboracion(): void
     {
         if (!PermisoService::can('sgd/elaboracion', 'ver')) {
@@ -879,17 +969,14 @@ class SgdController
             return null;
         }
 
-        $dir = BASE_PATH . '/storage/sgd_imports/' . $empresaId;
-        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
-            return null;
-        }
+        $filename = date('Ymd_His') . '_' . preg_replace('/[^a-zA-Z0-9._-]+/', '_', basename($name));
 
-        $dest = $dir . '/' . date('Ymd_His') . '_' . preg_replace('/[^a-zA-Z0-9._-]+/', '_', basename($name));
-        if (!move_uploaded_file($_FILES['archivo']['tmp_name'], $dest)) {
-            return null;
-        }
-
-        return $dest;
+        return StorageService::instance()->putUploadedFile(
+            StorageService::ZONE_SGD_IMPORTS,
+            $filename,
+            $_FILES['archivo'],
+            $empresaId
+        );
     }
 
     private function empresaQuery(): string

@@ -7,24 +7,37 @@
 /** @var string $proposito */
 /** @var string $propositoLabel */
 /** @var array<string, mixed>|null $version */
-/** @var list<array<string, mixed>> $versiones */
 /** @var array{version: int, campos: list<array<string, mixed>>} $esquema */
 /** @var string $esquemaJson */
 /** @var list<string> $tiposCampo */
 /** @var list<array<string, mixed>> $arquetipos */
 /** @var string $arquetipoPiloto */
+/** @var bool $canPreviewPlantilla */
+/** @var string $previewPdfUrl */
 /** @var bool $canGuardar */
+/** @var bool $borradorDesdeVigente */
+/** @var string|null $versionVigenteNumero */
+/** @var bool $needsNewVersionConfirm */
+/** @var array<string, mixed>|null $documentoVersion */
 
 $empresaQuery = $empresaId ? '&empresa_id=' . (int)$empresaId : '';
 $formUrl = '?url=sgd/formularios' . $empresaQuery;
 $docUrl = '?url=sgd/documentos' . $empresaQuery . ($documentoId > 0 ? '&id=' . $documentoId : '');
+$docVersionsUrl = $docUrl . '#sgd-doc-versions';
 $versionId = (int)($version['id'] ?? 0);
-$esBorrador = (int)($version['estado_id'] ?? 0) === SgdRepository::ESTADO_DOC_BORRADOR;
+$esBorrador = $version && (int)($version['estado_id'] ?? 0) === SgdRepository::ESTADO_DOC_BORRADOR;
 $arquetipoActual = (string)($esquema['arquetipo'] ?? 'libre');
+$archivoRuta = trim((string)($documentoVersion['archivo_ruta'] ?? ''));
 $arquetiposSemillaJson = json_encode(
     SgdArquetipoOperativoService::loadCatalog(),
     JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP
 );
+$pageMetaJson = json_encode([
+    'codigo' => $codigoDisplay,
+    'nombre' => (string)($documento['nombre'] ?? ''),
+    'version' => (string)($version['numero'] ?? '1'),
+    'proceso' => (string)($documento['proceso_nombre'] ?? ''),
+], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP);
 
 $sgdFormJs = BASE_PATH . '/public/js/sgd-formularios.js';
 $sgdFormJsV = is_readable($sgdFormJs) ? (int)filemtime($sgdFormJs) : time();
@@ -40,14 +53,36 @@ $sgdFormJsV = is_readable($sgdFormJs) ? (int)filemtime($sgdFormJs) : time();
             <a href="<?= htmlspecialchars('?url=sgd/documentos' . $empresaQuery, ENT_QUOTES, 'UTF-8') ?>">listado maestro</a>
             (botón «Diseñar plantilla»).
         </p>
+    <?php elseif (!empty($needsNewVersionConfirm)): ?>
+        <section class="sgd-panel sgd-form-confirm-panel">
+            <h3 class="sgd-panel-title">Nueva versión de plantilla</h3>
+            <p class="field-note">
+                Existe la versión publicada
+                <strong><?= htmlspecialchars((string)($versionVigenteNumero ?? ''), ENT_QUOTES, 'UTF-8') ?></strong>
+                con plantilla en el sistema.
+            </p>
+            <p>¿Desea crear un <strong>nuevo borrador</strong> basado en esa plantilla para seguir editando?</p>
+            <div class="sgd-form-confirm-actions">
+                <a href="<?= htmlspecialchars($docUrl, ENT_QUOTES, 'UTF-8') ?>" class="sgd-doc-btn">Cancelar</a>
+                <?php if ($canGuardar): ?>
+                    <form method="post" action="<?= htmlspecialchars($formUrl, ENT_QUOTES, 'UTF-8') ?>" class="sgd-form-confirm-form">
+                        <input type="hidden" name="_action" value="create_borrador">
+                        <input type="hidden" name="documento_id" value="<?= $documentoId ?>">
+                        <button type="submit" class="sgd-doc-btn sgd-doc-btn-primary">Crear borrador</button>
+                    </form>
+                <?php endif; ?>
+            </div>
+        </section>
     <?php else: ?>
 
         <div class="crud-toolbar sgd-form-toolbar">
-            <a href="<?= htmlspecialchars($docUrl, ENT_QUOTES, 'UTF-8') ?>" class="sgd-doc-btn">← Volver al documento</a>
+            <a href="<?= htmlspecialchars($docVersionsUrl, ENT_QUOTES, 'UTF-8') ?>" class="sgd-doc-btn">← Versiones y archivo oficial</a>
+            <?php if ($canPreviewPlantilla && $previewPdfUrl !== ''): ?>
+                <a href="<?= htmlspecialchars($previewPdfUrl, ENT_QUOTES, 'UTF-8') ?>"
+                   class="sgd-doc-btn" target="_blank" rel="noopener" title="Abrir PDF de la plantilla">📄 Vista previa PDF</a>
+            <?php endif; ?>
             <?php if ($canGuardar && $esBorrador): ?>
                 <button type="submit" form="sgd-form-designer-save" class="sgd-doc-btn sgd-doc-btn-primary">💾 Guardar plantilla</button>
-                <button type="submit" form="sgd-form-designer-publish" class="sgd-doc-btn"
-                        onclick="return confirm('¿Publicar esta versión de plantilla?');">Publicar</button>
             <?php endif; ?>
         </div>
 
@@ -57,10 +92,25 @@ $sgdFormJsV = is_readable($sgdFormJs) ? (int)filemtime($sgdFormJs) : time();
                 <strong><?= htmlspecialchars($codigoDisplay, ENT_QUOTES, 'UTF-8') ?></strong>
                 — <?= htmlspecialchars((string)($documento['nombre'] ?? ''), ENT_QUOTES, 'UTF-8') ?>
             </p>
-            <p class="field-note">
-                Propósito: <strong><?= htmlspecialchars($propositoLabel, ENT_QUOTES, 'UTF-8') ?></strong>
-                · Versión borrador <strong><?= htmlspecialchars((string)($version['numero'] ?? '1'), ENT_QUOTES, 'UTF-8') ?></strong>
+            <p class="field-note sgd-form-status-line">
+                Borrador <strong>v<?= htmlspecialchars((string)($version['numero'] ?? '1'), ENT_QUOTES, 'UTF-8') ?></strong>
+                · Archivo oficial:
+                <?php if ($archivoRuta !== ''): ?>
+                    <span class="sgd-form-pill sgd-form-pill-estado-aplica">Cargado</span>
+                <?php else: ?>
+                    <span class="sgd-form-pill sgd-form-pill-estado-opcional">Pendiente</span>
+                <?php endif; ?>
+                · <a href="<?= htmlspecialchars($docVersionsUrl, ENT_QUOTES, 'UTF-8') ?>">Publicar o subir archivo</a>
             </p>
+            <?php if ($borradorDesdeVigente && $versionVigenteNumero): ?>
+                <div class="sgd-form-notice" role="status">
+                    <span class="sgd-form-notice-icon" aria-hidden="true">ℹ</span>
+                    <div>
+                        <strong>Borrador basado en la versión publicada <?= htmlspecialchars((string)$versionVigenteNumero, ENT_QUOTES, 'UTF-8') ?></strong>
+                        <p class="field-note">Edite la plantilla aquí; la publicación se hace en Versiones y archivo oficial.</p>
+                    </div>
+                </div>
+            <?php endif; ?>
         </header>
 
         <div class="sgd-form-layout">
@@ -126,35 +176,40 @@ $sgdFormJsV = is_readable($sgdFormJs) ? (int)filemtime($sgdFormJs) : time();
                     <input type="hidden" name="version_id" value="<?= $versionId ?>">
                     <input type="hidden" name="esquema_json" id="sgd_esquema_json" value="">
                 </form>
-                <form id="sgd-form-designer-publish" method="post" action="<?= htmlspecialchars($formUrl, ENT_QUOTES, 'UTF-8') ?>">
-                    <input type="hidden" name="_action" value="publish">
-                    <input type="hidden" name="documento_id" value="<?= $documentoId ?>">
-                    <input type="hidden" name="version_id" value="<?= $versionId ?>">
-                    <input type="hidden" name="esquema_json" id="sgd_esquema_json_publish" value="">
-                </form>
             </section>
 
             <section class="sgd-panel sgd-form-preview-panel">
                 <h4 class="sgd-form-section-title">Vista previa</h4>
-                <div id="sgd-form-preview" class="sgd-form-preview"></div>
+                <p class="field-note sgd-form-preview-hint">Así se verá el formato vacío al diligenciarlo.</p>
+                <div class="sgd-form-preview">
+                    <div class="sgd-form-preview-sheet">
+                        <div class="sgd-form-preview-sheet-head" id="sgd-form-preview-head">
+                            <?php if ($codigoDisplay !== ''): ?>
+                                <div class="sgd-form-preview-code-label">Código documento</div>
+                                <div class="sgd-form-preview-code"><?= htmlspecialchars($codigoDisplay, ENT_QUOTES, 'UTF-8') ?></div>
+                            <?php endif; ?>
+                            <?php if (!empty($documento['nombre'])): ?>
+                                <h3 class="sgd-form-preview-title"><?= htmlspecialchars((string)$documento['nombre'], ENT_QUOTES, 'UTF-8') ?></h3>
+                            <?php endif; ?>
+                            <p class="sgd-form-preview-meta-line">
+                                <?php if (!empty($documento['proceso_nombre'])): ?>
+                                    <span><?= htmlspecialchars((string)$documento['proceso_nombre'], ENT_QUOTES, 'UTF-8') ?></span>
+                                    ·
+                                <?php endif; ?>
+                                Versión plantilla: <strong><?= htmlspecialchars((string)($version['numero'] ?? '1'), ENT_QUOTES, 'UTF-8') ?></strong>
+                                <?php if ($arquetipoActual !== '' && $arquetipoActual !== 'libre'): ?>
+                                    · Arquetipo: <strong><?= htmlspecialchars($arquetipoActual, ENT_QUOTES, 'UTF-8') ?></strong>
+                                <?php endif; ?>
+                            </p>
+                        </div>
+                        <div id="sgd-form-preview-body" class="sgd-form-preview-sheet-body"></div>
+                    </div>
+                </div>
             </section>
         </div>
 
-        <?php if ($versiones !== []): ?>
-            <section class="sgd-form-versions-history">
-                <h4 class="sgd-form-section-title">Historial de versiones</h4>
-                <ul class="sgd-form-ver-list">
-                    <?php foreach ($versiones as $ver): ?>
-                        <li class="<?= (int)($ver['es_vigente'] ?? 0) === 1 ? 'is-vigente' : '' ?>">
-                            v<?= htmlspecialchars((string)$ver['numero'], ENT_QUOTES, 'UTF-8') ?>
-                            — <?= htmlspecialchars((string)($ver['estado_nombre'] ?? ''), ENT_QUOTES, 'UTF-8') ?>
-                        </li>
-                    <?php endforeach; ?>
-                </ul>
-            </section>
-        <?php endif; ?>
-
         <script type="application/json" id="sgd-form-esquema-inicial"><?= $esquemaJson ?></script>
+        <script type="application/json" id="sgd-form-page-meta"><?= $pageMetaJson ?></script>
         <script type="application/json" id="sgd-form-arquetipos-catalog"><?= $arquetiposSemillaJson ?></script>
         <script src="/js/sgd-formularios.js?v=<?= (int)$sgdFormJsV ?>"></script>
     <?php endif; ?>

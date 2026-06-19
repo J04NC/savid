@@ -474,21 +474,18 @@ class EmpresaController
                 return;
             }
 
-            $dir = BASE_PATH . '/public/uploads/empresas';
-            if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) {
-                $this->jsonResponse(['ok' => false, 'error' => 'No se pudo crear la carpeta de subidas']);
-                return;
-            }
-
             $name = 'e_' . bin2hex(random_bytes(8)) . '.' . $allowed[$mime];
-            $dest = $dir . '/' . $name;
-
-            if (!@move_uploaded_file($tmp, $dest)) {
+            $path = StorageService::instance()->putUploadedFile(
+                StorageService::ZONE_EMPRESAS,
+                $name,
+                $f
+            );
+            if ($path === null) {
                 $this->jsonResponse(['ok' => false, 'error' => 'No se pudo guardar el archivo']);
                 return;
             }
 
-            $this->jsonResponse(['ok' => true, 'path' => '/uploads/empresas/' . $name]);
+            $this->jsonResponse(['ok' => true, 'path' => $path]);
         } catch (Throwable $e) {
             error_log('uploadLogo: ' . $e->getMessage());
             $this->jsonResponse(['ok' => false, 'error' => 'Error interno al subir']);

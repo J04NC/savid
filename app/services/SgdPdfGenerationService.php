@@ -29,6 +29,8 @@ class SgdPdfGenerationService
     /** @var array<string, int>|null Páginas por ancla (sec-codigo) resueltas en primer pase. */
     private ?array $tocPageNumbers = null;
 
+    private ?string $lastPdfBinary = null;
+
     private bool $needsTocPass = false;
 
     public function __construct()
@@ -116,16 +118,25 @@ class SgdPdfGenerationService
             false
         );
 
-        $dir = BASE_PATH . '/public/uploads/sgd/' . $empresaId . '/' . $documentoId;
-        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
-            return ['success' => false, 'message' => 'No se pudo crear la carpeta de almacenamiento del PDF.'];
+        $filename = 'v' . $versionId . '_' . bin2hex(random_bytes(8)) . '.pdf';
+        $storage = StorageService::instance();
+
+        if (!$this->writePdf($html, $prepared['formatoPdf'])) {
+            return ['success' => false, 'message' => 'No se pudo generar el archivo PDF.'];
         }
 
-        $filename = 'v' . $versionId . '_' . bin2hex(random_bytes(8)) . '.pdf';
-        $dest = $dir . '/' . $filename;
-
-        if (!$this->writePdf($html, $dest, $prepared['formatoPdf'])) {
+        $pdfBinary = $this->lastPdfBinary ?? '';
+        if ($pdfBinary === '') {
             return ['success' => false, 'message' => 'No se pudo generar el archivo PDF.'];
+        }
+
+        try {
+            $path = $storage->putContents(
+                $storage->key(StorageService::ZONE_SGD, $filename, $empresaId, $documentoId),
+                $pdfBinary
+            );
+        } catch (RuntimeException) {
+            return ['success' => false, 'message' => 'No se pudo guardar el archivo PDF.'];
         }
 
         $snapshot = $this->elabService->buildPublishSnapshot(
@@ -138,7 +149,7 @@ class SgdPdfGenerationService
         return [
             'success' => true,
             'message' => 'PDF generado.',
-            'path' => '/uploads/sgd/' . $empresaId . '/' . $documentoId . '/' . $filename,
+            'path' => $path,
             'snapshot' => $snapshot,
         ];
     }
@@ -180,7 +191,7 @@ class SgdPdfGenerationService
         return [
             'success' => true,
             'documento' => $documento,
-            'codigoDisplay' => $this->codigoService->buildForRow($documento, [$documentoId => $documento]),
+            'codigoDisplay' => $this->codigoService->buildForDocument($empresaId, $documento, $this->repo),
             'context' => $context,
             'formatoPdf' => $formatoPdf,
             'empresa' => $this->repo->findEmpresaBranding($empresaId),
@@ -849,12 +860,16 @@ class SgdPdfGenerationService
         }
 
         $rows = [];
+        $allById = [];
         foreach ($this->repo->listDocumentosForSelect($empresaId) as $doc) {
+            $allById[(int)$doc['id']] = $doc;
+        }
+        foreach ($allById as $doc) {
             $id = (int)($doc['id'] ?? 0);
             if (!in_array($id, array_map('intval', $ids), true)) {
                 continue;
             }
-            $codigo = $this->codigoService->buildForRow($doc, [$id => $doc]);
+            $codigo = $this->codigoService->buildForRow($doc, $allById);
             $rows[] = '<tr><td>' . htmlspecialchars($codigo, ENT_QUOTES, 'UTF-8')
                 . '</td><td>' . htmlspecialchars((string)($doc['nombre'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td></tr>';
         }
@@ -956,9 +971,10 @@ class SgdPdfGenerationService
         if (!str_starts_with($publicPath, '/uploads/')) {
             return null;
         }
-        $abs = BASE_PATH . '/public' . $publicPath;
 
-        return is_readable($abs) ? $abs : null;
+        $abs = StorageService::instance()->localPath($publicPath);
+
+        return $abs !== null && is_readable($abs) ? $abs : null;
     }
 
     /**
@@ -1048,15 +1064,15 @@ class SgdPdfGenerationService
     /**
      * @param array<string, mixed> $formatoPdf
      */
-    private function writePdf(string $html, string $destPath, array $formatoPdf): bool
+    private function writePdf(string $html, array $formatoPdf): bool
     {
-        $binary = $this->renderPdfBinary($html, $formatoPdf);
-        if ($binary === null || $binary === '') {
+        $this->lastPdfBinary = $this->renderPdfBinary($html, $formatoPdf);
+        if ($this->lastPdfBinary === null || $this->lastPdfBinary === '') {
+            $this->lastPdfBinary = null;
+
             return false;
         }
 
-        $written = file_put_contents($destPath, $binary);
-
-        return $written !== false && $written > 0;
+        return true;
     }
 }

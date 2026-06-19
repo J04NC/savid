@@ -83,11 +83,41 @@ class SgdDocumentoService
         }
 
         $this->codigoService->clearCache();
-        $documentos = $this->attachCodigos($documentos, $allById);
-        $catalogos['padres'] = $this->attachCodigos($catalogos['padres'], $allById);
+        $documentos = $this->attachCodigos($documentos, $empresaId);
+        $catalogos['padres'] = $this->attachCodigos($catalogos['padres'], $empresaId);
 
         if ($edit) {
-            $edit['codigo_display'] = $this->codigoService->buildForRow($edit, $allById);
+            $edit['codigo_display'] = $this->codigoService->buildForDocument($empresaId, $edit, $this->repo);
+        }
+
+        $canPreviewPlantilla = false;
+        $previewPlantillaUrl = '';
+        $esOperativo = false;
+        $formatoArchivoEsperado = 'pdf_auto';
+        $canAutoGenerateEsqueleto = false;
+        $uploadExtensions = ['pdf'];
+        $arquetipoOperativo = 'libre';
+        if ($edit && !empty($edit['id']) && $empresaId) {
+            $editModo = $this->elabService->resolveModoDocumento($empresaId, $edit);
+            if (($editModo['modo_efectivo'] ?? '') !== 'maestro') {
+                $esOperativo = true;
+                $esqueleto = new SgdFormularioEsqueletoService();
+                $opMeta = $esqueleto->resolveMetaForDocumento($empresaId, (int)$edit['id']);
+                $arquetipoOperativo = (string)($opMeta['arquetipo'] ?? 'libre');
+                $formatoArchivoEsperado = (string)($opMeta['formato_archivo'] ?? 'pdf_auto');
+                $canAutoGenerateEsqueleto = !empty($opMeta['can_auto_pdf']);
+                $uploadExtensions = $opMeta['upload_extensions'] ?? ['pdf'];
+
+                $formService = new SgdFormularioService();
+                $previewMeta = $formService->getPreviewMeta(
+                    $empresaId,
+                    (int)$edit['id'],
+                    null,
+                    '&empresa_id=' . (int)$empresaId
+                );
+                $canPreviewPlantilla = !empty($previewMeta['canPreview']);
+                $previewPlantillaUrl = (string)($previewMeta['previewPdfUrl'] ?? '');
+            }
         }
 
         return [
@@ -103,6 +133,13 @@ class SgdDocumentoService
             'versiones' => $versiones,
             'suggestedVersionNumero' => $suggestedVersionNumero,
             'canAutoGeneratePdf' => $canAutoGeneratePdf,
+            'canPreviewPlantilla' => $canPreviewPlantilla,
+            'previewPlantillaUrl' => $previewPlantillaUrl,
+            'esOperativo' => $esOperativo,
+            'formatoArchivoEsperado' => $formatoArchivoEsperado,
+            'canAutoGenerateEsqueleto' => $canAutoGenerateEsqueleto,
+            'uploadExtensions' => $uploadExtensions,
+            'arquetipoOperativo' => $arquetipoOperativo,
         ];
     }
 
@@ -256,10 +293,10 @@ class SgdDocumentoService
      * @param list<array<string, mixed>> $rows
      * @return list<array<string, mixed>>
      */
-    private function attachCodigos(array $rows, array $allById): array
+    private function attachCodigos(array $rows, int $empresaId): array
     {
         foreach ($rows as &$row) {
-            $row['codigo_display'] = $this->codigoService->buildForRow($row, $allById);
+            $row['codigo_display'] = $this->codigoService->buildForDocument($empresaId, $row, $this->repo);
         }
         unset($row);
 

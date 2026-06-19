@@ -122,7 +122,7 @@ if ($sessionIdleMin < 0) {
 
 <!-- BUSCADOR -->
 
-<div id="searchOverlay" class="search-overlay">
+<div id="searchOverlay" class="search-overlay" aria-hidden="true">
 
 <input
 type="text"

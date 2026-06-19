@@ -1037,6 +1037,8 @@ class SgdRepository
                 v.numero,
                 v.notas,
                 v.archivo_ruta,
+                v.archivo_tipo,
+                v.formulario_version_id,
                 v.estado_id,
                 v.fecha_aprobacion,
                 v.es_vigente,
@@ -1062,6 +1064,100 @@ class SgdRepository
             LIMIT 1
         ");
         $stmt->execute([$empresaId, $versionId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row ?: null;
+    }
+
+    public function findDocumentoVersionByDocumentoNumero(
+        int $empresaId,
+        int $documentoId,
+        string $numero,
+        ?int $estadoId = null
+    ): ?array {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_documento_version', 'v');
+        $sql = "
+            SELECT v.*
+            FROM sgd_documento_version v
+            WHERE v.empresa_id = ? AND v.documento_id = ? AND v.numero = ? {$nd}
+        ";
+        $params = [$empresaId, $documentoId, trim($numero)];
+        if ($estadoId !== null) {
+            $sql .= ' AND v.estado_id = ?';
+            $params[] = $estadoId;
+        }
+        $sql .= ' ORDER BY v.id DESC LIMIT 1';
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row ?: null;
+    }
+
+    /**
+     * Busca versión por número incluyendo filas soft-deleted (para reactivar sin violar UNIQUE).
+     */
+    public function findDocumentoVersionByDocumentoNumeroAny(
+        int $empresaId,
+        int $documentoId,
+        string $numero
+    ): ?array {
+        $stmt = $this->pdo->prepare('
+            SELECT v.*
+            FROM sgd_documento_version v
+            WHERE v.empresa_id = ? AND v.documento_id = ? AND v.numero = ?
+            ORDER BY v.deleted_at IS NULL DESC, v.id DESC
+            LIMIT 1
+        ');
+        $stmt->execute([$empresaId, $documentoId, trim($numero)]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row ?: null;
+    }
+
+    public function reactivateDocumentoVersionBorrador(
+        int $empresaId,
+        int $versionId,
+        int $formularioVersionId,
+        ?int $userId = null,
+        ?string $notas = null
+    ): void {
+        $formularioVersionId = $formularioVersionId > 0 ? $formularioVersionId : null;
+        $stmt = $this->pdo->prepare('
+            UPDATE sgd_documento_version
+            SET deleted_at = NULL,
+                deleted_by = NULL,
+                estado_id = ?,
+                es_vigente = 0,
+                formulario_version_id = ?,
+                notas = COALESCE(?, notas),
+                updated_at = NOW(3),
+                updated_by = ?
+            WHERE id = ? AND empresa_id = ?
+        ');
+        $stmt->execute([
+            self::ESTADO_DOC_BORRADOR,
+            $formularioVersionId,
+            $notas,
+            $userId,
+            $versionId,
+            $empresaId,
+        ]);
+    }
+
+    public function findDocumentoVersionByFormularioVersionId(
+        int $empresaId,
+        int $formularioVersionId
+    ): ?array {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_documento_version', 'v');
+        $stmt = $this->pdo->prepare("
+            SELECT v.*
+            FROM sgd_documento_version v
+            WHERE v.empresa_id = ? AND v.formulario_version_id = ? {$nd}
+            ORDER BY v.id DESC
+            LIMIT 1
+        ");
+        $stmt->execute([$empresaId, $formularioVersionId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
         return $row ?: null;
@@ -1117,6 +1213,8 @@ class SgdRepository
             'numero' => trim((string)($data['numero'] ?? '')),
             'notas' => $data['notas'] ?? null,
             'archivo_ruta' => $data['archivo_ruta'] ?? null,
+            'archivo_tipo' => $data['archivo_tipo'] ?? null,
+            'formulario_version_id' => $data['formulario_version_id'] ?? null,
             'estado_id' => $this->normalizeEstadoDocumentalId(
                 isset($data['estado_id']) ? (int)$data['estado_id'] : SgdRepository::ESTADO_DOC_BORRADOR
             ),
@@ -1127,14 +1225,16 @@ class SgdRepository
         if ($id > 0) {
             $stmt = $this->pdo->prepare('
                 UPDATE sgd_documento_version
-                SET numero = ?, notas = ?, archivo_ruta = ?, estado_id = ?,
-                    fecha_aprobacion = ?, es_vigente = ?, updated_at = NOW(3), updated_by = ?
+                SET numero = ?, notas = ?, archivo_ruta = ?, archivo_tipo = ?, formulario_version_id = ?,
+                    estado_id = ?, fecha_aprobacion = ?, es_vigente = ?, updated_at = NOW(3), updated_by = ?
                 WHERE id = ? AND empresa_id = ?
             ');
             $stmt->execute([
                 $fields['numero'],
                 $fields['notas'],
                 $fields['archivo_ruta'],
+                $fields['archivo_tipo'],
+                $fields['formulario_version_id'],
                 $fields['estado_id'],
                 $fields['fecha_aprobacion'],
                 $fields['es_vigente'],
@@ -1148,9 +1248,9 @@ class SgdRepository
 
         $stmt = $this->pdo->prepare('
             INSERT INTO sgd_documento_version (
-                empresa_id, documento_id, numero, notas, archivo_ruta,
+                empresa_id, documento_id, numero, notas, archivo_ruta, archivo_tipo, formulario_version_id,
                 estado_id, fecha_aprobacion, es_vigente, created_at, created_by
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(3), ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3), ?)
         ');
         $stmt->execute([
             $empresaId,
@@ -1158,6 +1258,8 @@ class SgdRepository
             $fields['numero'],
             $fields['notas'],
             $fields['archivo_ruta'],
+            $fields['archivo_tipo'],
+            $fields['formulario_version_id'],
             $fields['estado_id'],
             $fields['fecha_aprobacion'],
             $fields['es_vigente'],
@@ -1204,14 +1306,256 @@ class SgdRepository
         int $empresaId,
         int $versionId,
         string $archivoRuta,
+        ?int $userId = null,
+        ?string $archivoTipo = null
+    ): void {
+        $tipo = $archivoTipo ?? SgdArquetipoOperativoService::detectArchivoTipo($archivoRuta);
+        $stmt = $this->pdo->prepare('
+            UPDATE sgd_documento_version
+            SET archivo_ruta = ?, archivo_tipo = ?, updated_at = NOW(3), updated_by = ?
+            WHERE id = ? AND empresa_id = ?
+        ');
+        $stmt->execute([$archivoRuta, $tipo, $userId, $versionId, $empresaId]);
+    }
+
+    public function linkDocumentoVersionFormulario(
+        int $empresaId,
+        int $documentoVersionId,
+        int $formularioVersionId,
         ?int $userId = null
     ): void {
         $stmt = $this->pdo->prepare('
             UPDATE sgd_documento_version
-            SET archivo_ruta = ?, updated_at = NOW(3), updated_by = ?
+            SET formulario_version_id = ?, updated_at = NOW(3), updated_by = ?
             WHERE id = ? AND empresa_id = ?
         ');
-        $stmt->execute([$archivoRuta, $userId, $versionId, $empresaId]);
+        $stmt->execute([$formularioVersionId, $userId, $documentoVersionId, $empresaId]);
+    }
+
+    public function softDeleteDocumentoVersion(int $empresaId, int $versionId, ?int $userId = null): void
+    {
+        $version = $this->findDocumentoVersionById($empresaId, $versionId);
+        if ($version === null) {
+            throw new RuntimeException('Versión no encontrada.');
+        }
+        if ((int)($version['es_vigente'] ?? 0) === 1) {
+            throw new RuntimeException('No se puede eliminar la versión vigente.');
+        }
+        $estadoId = (int)($version['estado_id'] ?? 0);
+        $eliminable = in_array($estadoId, [self::ESTADO_DOC_BORRADOR, self::ESTADO_DOC_OBSOLETO], true);
+        if (!$eliminable) {
+            throw new RuntimeException('Solo se pueden eliminar versiones en borrador u obsoletas.');
+        }
+
+        if (!SoftDeleteService::supports($this->pdo, 'sgd_documento_version')) {
+            $stmt = $this->pdo->prepare('DELETE FROM sgd_documento_version WHERE id = ? AND empresa_id = ?');
+            $stmt->execute([$versionId, $empresaId]);
+
+            return;
+        }
+
+        $stmt = $this->pdo->prepare('
+            UPDATE sgd_documento_version
+            SET deleted_at = NOW(3), deleted_by = ?, updated_at = NOW(3), updated_by = ?
+            WHERE id = ? AND empresa_id = ?
+        ');
+        $stmt->execute([$userId, $userId, $versionId, $empresaId]);
+    }
+
+    public function countRegistrosByFormularioVersionId(int $empresaId, int $formularioVersionId): int
+    {
+        if ($formularioVersionId <= 0) {
+            return 0;
+        }
+
+        $check = $this->pdo->query("SHOW TABLES LIKE 'sgd_registro'");
+        if ($check === false || $check->fetchColumn() === false) {
+            return 0;
+        }
+
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_registro', 'r');
+        $stmt = $this->pdo->prepare("
+            SELECT COUNT(*)
+            FROM sgd_registro r
+            WHERE r.empresa_id = ? AND r.formulario_version_id = ?
+            {$nd}
+        ");
+        $stmt->execute([$empresaId, $formularioVersionId]);
+
+        return (int)$stmt->fetchColumn();
+    }
+
+    /**
+     * Revierte una versión vigente publicada: documento y plantilla vuelven a borrador.
+     *
+     * @return string|null Ruta pública del archivo oficial a eliminar del storage (tras commit)
+     */
+    public function revertVigentePublication(int $empresaId, int $documentoVersionId, ?int $userId = null): ?string
+    {
+        $version = $this->findDocumentoVersionById($empresaId, $documentoVersionId);
+        if ($version === null) {
+            throw new RuntimeException('Versión no encontrada.');
+        }
+
+        if ((int)($version['estado_id'] ?? 0) !== self::ESTADO_DOC_VIGENTE
+            || (int)($version['es_vigente'] ?? 0) !== 1) {
+            throw new RuntimeException('Solo se puede revertir una versión vigente publicada.');
+        }
+
+        $documentoId = (int)($version['documento_id'] ?? 0);
+        $formularioVersionId = (int)($version['formulario_version_id'] ?? 0);
+        if ($formularioVersionId > 0) {
+            $registros = $this->countRegistrosByFormularioVersionId($empresaId, $formularioVersionId);
+            if ($registros > 0) {
+                throw new RuntimeException(
+                    'No se puede revertir: existen ' . $registros . ' registro(s) diligenciado(s) con esta versión.'
+                );
+            }
+        }
+
+        $archivoRuta = trim((string)($version['archivo_ruta'] ?? ''));
+
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_documento_version', 'v');
+        $stmt = $this->pdo->prepare("
+            SELECT COUNT(*)
+            FROM sgd_documento_version v
+            WHERE v.empresa_id = ? AND v.documento_id = ? AND v.id <> ?
+            AND v.estado_id IN (?, ?) {$nd}
+        ");
+        $stmt->execute([
+            $empresaId,
+            $documentoId,
+            $documentoVersionId,
+            self::ESTADO_DOC_VIGENTE,
+            self::ESTADO_DOC_OBSOLETO,
+        ]);
+        $hasOtherPublishedHistory = (int)$stmt->fetchColumn() > 0;
+
+        $this->pdo->beginTransaction();
+        try {
+            $stmt = $this->pdo->prepare('
+                UPDATE sgd_documento_version
+                SET estado_id = ?, es_vigente = 0,
+                    archivo_ruta = NULL, archivo_tipo = NULL,
+                    fecha_aprobacion = NULL,
+                    updated_at = NOW(3), updated_by = ?
+                WHERE id = ? AND empresa_id = ?
+            ');
+            $stmt->execute([
+                self::ESTADO_DOC_BORRADOR,
+                $userId,
+                $documentoVersionId,
+                $empresaId,
+            ]);
+
+            if ($formularioVersionId > 0) {
+                $stmt = $this->pdo->prepare('
+                    UPDATE sgd_formulario_version
+                    SET estado_id = ?, es_vigente = 0,
+                        updated_at = NOW(3), updated_by = ?
+                    WHERE id = ? AND empresa_id = ?
+                ');
+                $stmt->execute([
+                    self::ESTADO_DOC_BORRADOR,
+                    $userId,
+                    $formularioVersionId,
+                    $empresaId,
+                ]);
+            }
+
+            $fechaPrimera = null;
+            $fechaUltima = null;
+            if ($hasOtherPublishedHistory) {
+                $doc = $this->findDocumentoById($empresaId, $documentoId);
+                $fechaPrimera = $doc['fecha_primera_aprobacion'] ?? null;
+            }
+
+            $stmt = $this->pdo->prepare('
+                UPDATE sgd_documento
+                SET version_actual = NULL,
+                    estado_id = ?,
+                    fecha_primera_aprobacion = ?,
+                    fecha_ultima_aprobacion = ?,
+                    updated_at = NOW(3), updated_by = ?
+                WHERE id = ? AND empresa_id = ?
+            ');
+            $stmt->execute([
+                self::ESTADO_DOC_BORRADOR,
+                $fechaPrimera,
+                $fechaUltima,
+                $userId,
+                $documentoId,
+                $empresaId,
+            ]);
+
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            $this->pdo->rollBack();
+            throw $e;
+        }
+
+        return $row ?: null;
+    }
+
+    public function findDocumentoVersionVigente(int $empresaId, int $documentoId): ?array
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_documento_version', 'v');
+        $stmt = $this->pdo->prepare("
+            SELECT v.*
+            FROM sgd_documento_version v
+            WHERE v.empresa_id = ? AND v.documento_id = ?
+              AND v.es_vigente = 1 {$nd}
+            ORDER BY v.id DESC
+            LIMIT 1
+        ");
+        $stmt->execute([$empresaId, $documentoId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row ?: null;
+    }
+
+    public function findDocumentoBorradorVersion(int $empresaId, int $documentoId): ?array
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_documento_version', 'v');
+        $stmt = $this->pdo->prepare("
+            SELECT v.*
+            FROM sgd_documento_version v
+            WHERE v.empresa_id = ? AND v.documento_id = ?
+              AND v.estado_id = ? {$nd}
+            ORDER BY v.id DESC
+            LIMIT 1
+        ");
+        $stmt->execute([$empresaId, $documentoId, self::ESTADO_DOC_BORRADOR]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row ?: null;
+    }
+
+    public function softDeleteFormularioVersion(int $empresaId, int $versionId, ?int $userId = null): void
+    {
+        $version = $this->findFormularioVersionById($empresaId, $versionId);
+        if ($version === null) {
+            return;
+        }
+
+        $estadoId = (int)($version['estado_id'] ?? 0);
+        if (!in_array($estadoId, [self::ESTADO_DOC_BORRADOR, self::ESTADO_DOC_OBSOLETO], true)) {
+            return;
+        }
+
+        if (!SoftDeleteService::supports($this->pdo, 'sgd_formulario_version')) {
+            $stmt = $this->pdo->prepare('DELETE FROM sgd_formulario_version WHERE id = ? AND empresa_id = ?');
+            $stmt->execute([$versionId, $empresaId]);
+
+            return;
+        }
+
+        $stmt = $this->pdo->prepare('
+            UPDATE sgd_formulario_version
+            SET deleted_at = NOW(3), deleted_by = ?, updated_at = NOW(3), updated_by = ?
+            WHERE id = ? AND empresa_id = ?
+        ');
+        $stmt->execute([$userId, $userId, $versionId, $empresaId]);
     }
 
     public function publishDocumentoVersion(
@@ -1277,6 +1621,119 @@ class SgdRepository
             ');
             $stmt->execute([
                 $version['numero'],
+                self::ESTADO_DOC_VIGENTE,
+                $fechaPrimera,
+                $fecha,
+                $userId,
+                $documentoId,
+                $empresaId,
+            ]);
+
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            $this->pdo->rollBack();
+            throw $e;
+        }
+    }
+
+    /**
+     * Publica plantilla operativa (formulario) y versión documento con archivo oficial en una transacción.
+     */
+    public function publishOperativoPlantillaBundle(
+        int $empresaId,
+        int $formularioVersionId,
+        int $documentoVersionId,
+        ?int $userId = null,
+        ?string $fechaAprobacion = null
+    ): void {
+        $formVersion = $this->findFormularioVersionById($empresaId, $formularioVersionId);
+        $docVersion = $this->findDocumentoVersionById($empresaId, $documentoVersionId);
+        if ($formVersion === null || $docVersion === null) {
+            throw new RuntimeException('Versión de plantilla o documento no encontrada.');
+        }
+
+        $documentoId = (int)$formVersion['documento_id'];
+        if ((int)$docVersion['documento_id'] !== $documentoId) {
+            throw new RuntimeException('La versión documental no corresponde al mismo formato.');
+        }
+
+        $fecha = trim((string)($fechaAprobacion ?? ''));
+        if ($fecha === '') {
+            $fecha = date('Y-m-d');
+        }
+
+        $formularioId = (int)$formVersion['formulario_id'];
+        $sedeId = $formVersion['sede_id'] ?? null;
+
+        $this->pdo->beginTransaction();
+        try {
+            $sql = '
+                UPDATE sgd_formulario_version
+                SET es_vigente = 0, estado_id = ?, updated_at = NOW(3), updated_by = ?
+                WHERE empresa_id = ? AND formulario_id = ? AND id <> ? AND deleted_at IS NULL
+            ';
+            $params = [self::ESTADO_DOC_OBSOLETO, $userId, $empresaId, $formularioId, $formularioVersionId];
+            if ($sedeId === null) {
+                $sql .= ' AND sede_id IS NULL';
+            } else {
+                $sql .= ' AND sede_id = ?';
+                $params[] = $sedeId;
+            }
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($params);
+
+            $stmt = $this->pdo->prepare('
+                UPDATE sgd_formulario_version
+                SET estado_id = ?, es_vigente = 1, updated_at = NOW(3), updated_by = ?
+                WHERE id = ? AND empresa_id = ?
+            ');
+            $stmt->execute([self::ESTADO_DOC_VIGENTE, $userId, $formularioVersionId, $empresaId]);
+
+            $stmt = $this->pdo->prepare('
+                UPDATE sgd_documento_version
+                SET es_vigente = 0, estado_id = ?, updated_at = NOW(3), updated_by = ?
+                WHERE empresa_id = ? AND documento_id = ? AND id <> ? AND deleted_at IS NULL
+            ');
+            $stmt->execute([
+                self::ESTADO_DOC_OBSOLETO,
+                $userId,
+                $empresaId,
+                $documentoId,
+                $documentoVersionId,
+            ]);
+
+            $stmt = $this->pdo->prepare('
+                UPDATE sgd_documento_version
+                SET estado_id = ?, es_vigente = 1, fecha_aprobacion = ?,
+                    formulario_version_id = ?, updated_at = NOW(3), updated_by = ?
+                WHERE id = ? AND empresa_id = ?
+            ');
+            $stmt->execute([
+                self::ESTADO_DOC_VIGENTE,
+                $fecha,
+                $formularioVersionId,
+                $userId,
+                $documentoVersionId,
+                $empresaId,
+            ]);
+
+            $doc = $this->findDocumentoById($empresaId, $documentoId);
+            $fechaPrimera = trim((string)($doc['fecha_primera_aprobacion'] ?? ''));
+            if ($fechaPrimera === '') {
+                $fechaPrimera = $fecha;
+            } elseif (strtotime($fecha) < strtotime($fechaPrimera)) {
+                $fechaPrimera = $fecha;
+            }
+
+            $stmt = $this->pdo->prepare('
+                UPDATE sgd_documento
+                SET version_actual = ?, estado_id = ?,
+                    fecha_primera_aprobacion = ?, fecha_ultima_aprobacion = ?,
+                    updated_at = NOW(3), updated_by = ?
+                WHERE id = ? AND empresa_id = ?
+            ');
+            $stmt->execute([
+                $docVersion['numero'],
                 self::ESTADO_DOC_VIGENTE,
                 $fechaPrimera,
                 $fecha,
@@ -1917,6 +2374,35 @@ class SgdRepository
                 LIMIT 1
             ");
             $stmt->execute([$empresaId, $formularioId, self::ESTADO_DOC_BORRADOR, $sedeId]);
+        }
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row ?: null;
+    }
+
+    public function findFormularioVersionVigente(int $empresaId, int $formularioId, ?int $sedeId = null): ?array
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_formulario_version', 'v');
+        if ($sedeId === null) {
+            $stmt = $this->pdo->prepare("
+                SELECT v.*
+                FROM sgd_formulario_version v
+                WHERE v.empresa_id = ? AND v.formulario_id = ?
+                  AND v.es_vigente = 1 AND v.sede_id IS NULL {$nd}
+                ORDER BY v.id DESC
+                LIMIT 1
+            ");
+            $stmt->execute([$empresaId, $formularioId]);
+        } else {
+            $stmt = $this->pdo->prepare("
+                SELECT v.*
+                FROM sgd_formulario_version v
+                WHERE v.empresa_id = ? AND v.formulario_id = ?
+                  AND v.es_vigente = 1 AND v.sede_id = ? {$nd}
+                ORDER BY v.id DESC
+                LIMIT 1
+            ");
+            $stmt->execute([$empresaId, $formularioId, $sedeId]);
         }
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 

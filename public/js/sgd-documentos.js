@@ -432,23 +432,37 @@
                 return;
             }
 
+            var extList = (form.getAttribute('data-upload-extensions') || 'pdf').split(',');
+            var ext = (file.name.split('.').pop() || '').toLowerCase();
+            var isPdf = ext === 'pdf' || file.type === 'application/pdf';
+
             if (nameEl) {
                 nameEl.textContent = 'Preparando archivo…';
                 nameEl.classList.remove('is-error');
             }
 
-            readPdfStable(file, 4, 500).then(function (payload) {
+            function ready(payload) {
                 form._pdfPayload = payload;
                 if (nameEl) {
                     nameEl.textContent = payload.name + ' — listo para subir';
                 }
                 submitBtn.disabled = false;
-            }).catch(function (err) {
+            }
+
+            function fail(err) {
                 if (nameEl) {
                     nameEl.textContent = err && err.message ? err.message : 'No se pudo preparar el archivo.';
                     nameEl.classList.add('is-error');
                 }
-            });
+            }
+
+            if (isPdf) {
+                readPdfStable(file, 4, 500).then(ready).catch(fail);
+            } else if (extList.indexOf(ext) >= 0) {
+                ready({ blob: file, name: file.name || ('archivo.' + ext) });
+            } else {
+                fail(new Error('Tipo de archivo no permitido. Use: ' + extList.join(', ')));
+            }
         });
 
         form.addEventListener('submit', function (e) {
@@ -490,6 +504,9 @@
                 })
                 .then(function (data) {
                     if (data && data.ok) {
+                        if (data.warning) {
+                            window.alert(data.warning);
+                        }
                         window.location.href = form.getAttribute('data-return-url') || window.location.href;
                         return;
                     }
@@ -507,4 +524,74 @@
             return false;
         });
     });
+
+    var revertModal = document.getElementById('sgd-revert-vigente-modal');
+    var revertForm = document.getElementById('sgd-revert-vigente-form');
+    var revertVersionId = document.getElementById('sgd-revert-version-id');
+    var revertVersionLabel = document.getElementById('sgd-revert-version-label');
+    var revertCodigoHint = document.getElementById('sgd-revert-codigo-hint');
+    var revertCodigoInput = document.getElementById('sgd_revert_confirm_codigo');
+    var revertVersionInput = document.getElementById('sgd_revert_confirm_version');
+    var revertPasswordInput = document.getElementById('sgd_revert_confirm_password');
+
+    function closeRevertModal() {
+        if (!revertModal) return;
+        revertModal.hidden = true;
+        revertModal.setAttribute('aria-hidden', 'true');
+        if (revertForm) revertForm.reset();
+    }
+
+    function openRevertModal(btn) {
+        if (!revertModal || !btn) return;
+        var vid = btn.getAttribute('data-version-id') || '';
+        var numero = btn.getAttribute('data-version-numero') || '';
+        var codigo = btn.getAttribute('data-codigo') || '';
+        if (revertVersionId) revertVersionId.value = vid;
+        if (revertVersionLabel) revertVersionLabel.textContent = numero ? ('v.' + numero) : '';
+        if (revertCodigoHint) revertCodigoHint.textContent = codigo || '—';
+        if (revertVersionInput) revertVersionInput.placeholder = numero || '1';
+        revertModal.hidden = false;
+        revertModal.setAttribute('aria-hidden', 'false');
+        if (revertCodigoInput) revertCodigoInput.focus();
+    }
+
+    document.querySelectorAll('.sgd-btn-revert-vigente').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            openRevertModal(btn);
+        });
+    });
+
+    if (revertModal) {
+        revertModal.querySelectorAll('[data-revert-close]').forEach(function (el) {
+            el.addEventListener('click', closeRevertModal);
+        });
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && !revertModal.hidden) {
+                closeRevertModal();
+            }
+        });
+    }
+
+    if (revertForm) {
+        revertForm.addEventListener('submit', function (e) {
+            var codigo = revertCodigoInput ? String(revertCodigoInput.value || '').trim() : '';
+            var hint = revertCodigoHint ? String(revertCodigoHint.textContent || '').trim() : '';
+            var numero = revertVersionInput ? String(revertVersionInput.value || '').trim() : '';
+            var expectedNum = revertVersionLabel ? String(revertVersionLabel.textContent || '').replace(/^v\./, '').trim() : '';
+            if (hint && codigo.toUpperCase() !== hint.toUpperCase()) {
+                e.preventDefault();
+                alert('El código del documento no coincide.');
+                return false;
+            }
+            if (expectedNum && numero !== expectedNum) {
+                e.preventDefault();
+                alert('El número de versión no coincide.');
+                return false;
+            }
+            if (!confirm('¿Confirma revertir la publicación? La versión volverá a borrador.')) {
+                e.preventDefault();
+                return false;
+            }
+        });
+    }
 })();

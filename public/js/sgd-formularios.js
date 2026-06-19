@@ -35,18 +35,49 @@
     }
 
     var listEl = document.getElementById('sgd-form-campos-list');
-    var previewEl = document.getElementById('sgd-form-preview');
+    var previewBodyEl = document.getElementById('sgd-form-preview-body');
+    var previewHeadEl = document.getElementById('sgd-form-preview-head');
+    var pageMeta = {};
+    var pageMetaEl = document.getElementById('sgd-form-page-meta');
+    if (pageMetaEl) {
+        try {
+            pageMeta = JSON.parse(pageMetaEl.textContent || '{}');
+        } catch (e) {
+            pageMeta = {};
+        }
+    }
     var hiddenSave = document.getElementById('sgd_esquema_json');
-    var hiddenPublish = document.getElementById('sgd_esquema_json_publish');
     var btnAdd = document.getElementById('sgd-btn-add-campo');
     var btnCargarArquetipo = document.getElementById('sgd-btn-cargar-arquetipo');
     var arquetipoSelect = document.getElementById('sgd_arquetipo_select');
     var canEdit = !!btnAdd;
 
+    var WIDGET_LABELS = {
+        grupo_campos: 'Grupo de campos',
+        tabla_repetible: 'Tabla repetible',
+        lista_repetible: 'Lista repetible',
+        texto_enriquecido: 'Texto enriquecido',
+        bloque_firmas: 'Bloque de firmas'
+    };
+
+    var ESTADO_LABELS = {
+        aplica: 'Aplica',
+        opcional: 'Opcional',
+        no_aplica: 'No aplica'
+    };
+
+    var DRAG_ICON = '<svg class="sgd-form-drag-icon" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">'
+        + '<circle cx="5.5" cy="3.5" r="1.25" fill="currentColor"></circle><circle cx="10.5" cy="3.5" r="1.25" fill="currentColor"></circle>'
+        + '<circle cx="5.5" cy="8" r="1.25" fill="currentColor"></circle><circle cx="10.5" cy="8" r="1.25" fill="currentColor"></circle>'
+        + '<circle cx="5.5" cy="12.5" r="1.25" fill="currentColor"></circle><circle cx="10.5" cy="12.5" r="1.25" fill="currentColor"></circle>'
+        + '</svg>';
+
+    var dragFromIdx = null;
+
     function syncHidden() {
+        normalizeBloquesOrden();
         var json = JSON.stringify(esquema);
         if (hiddenSave) hiddenSave.value = json;
-        if (hiddenPublish) hiddenPublish.value = json;
     }
 
     function slugId(raw) {
@@ -120,10 +151,10 @@
         } else if (bloque.widget === 'lista_repetible') {
             html += '<p class="field-note">Lista numerada repetible</p>';
         } else if (bloque.widget === 'texto_enriquecido') {
-            html += '<textarea class="form-input" rows="4" disabled placeholder="Desarrollo…"></textarea>';
+            html += '<div class="sgd-preview-rich-box"></div>';
         } else if (bloque.widget === 'bloque_firmas' && def.roles) {
             def.roles.forEach(function (r) {
-                html += '<div class="sgd-preview-firma">' + escapeHtml(r.label || r.id) + '</div>';
+                html += '<div class="sgd-preview-firma-line"><span class="sgd-preview-firma-label">' + escapeHtml(r.label || r.id) + '</span></div>';
             });
         }
         html += '</div>';
@@ -139,7 +170,7 @@
         } else if (c.tipo === 'lista') {
             html += '<select class="form-input" disabled><option>—</option></select>';
         } else if (c.tipo === 'firma') {
-            html += '<div class="sgd-preview-firma">[ Bloque de firma ]</div>';
+            html += '<div class="sgd-preview-firma-line"><span class="sgd-preview-firma-label">Firma</span></div>';
         } else {
             var type = c.tipo === 'numero' ? 'number' : (c.tipo === 'fecha' ? 'date' : 'text');
             html += '<input type="' + type + '" class="form-input" disabled>';
@@ -148,43 +179,200 @@
         return html;
     }
 
+    function updatePreviewHeadMeta() {
+        if (!previewHeadEl) return;
+        var metaLine = previewHeadEl.querySelector('.sgd-form-preview-meta-line');
+        if (!metaLine) return;
+        var parts = [];
+        if (pageMeta.proceso) {
+            parts.push('<span>' + escapeHtml(pageMeta.proceso) + '</span>');
+        }
+        if (pageMeta.version) {
+            parts.push('Versión plantilla: <strong>' + escapeHtml(pageMeta.version) + '</strong>');
+        }
+        if (esquema.arquetipo && esquema.arquetipo !== 'libre') {
+            parts.push('Arquetipo: <strong>' + escapeHtml(esquema.arquetipo) + '</strong>');
+        }
+        metaLine.innerHTML = parts.join(' · ');
+    }
+
     function renderPreview() {
-        if (!previewEl) return;
+        if (!previewBodyEl) return;
+        updatePreviewHeadMeta();
         var hasBloques = esquema.bloques && esquema.bloques.length;
         var hasCampos = esquema.campos && esquema.campos.length;
         if (!hasBloques && !hasCampos) {
-            previewEl.innerHTML = '<p class="field-note">Sin bloques ni campos. Elija un arquetipo y pulse «Cargar plantilla del arquetipo».</p>';
+            previewBodyEl.innerHTML = '<p class="field-note">Sin bloques ni campos. Elija un arquetipo y pulse «Cargar plantilla del arquetipo».</p>';
             return;
         }
-        var html = '<div class="sgd-form-preview-inner">';
-        if (esquema.arquetipo) {
-            html += '<p class="field-note sgd-preview-arquetipo">Arquetipo: <strong>' + escapeHtml(esquema.arquetipo) + '</strong></p>';
-        }
+
+        var html = '';
+        sortBloques();
         (esquema.bloques || []).forEach(function (b) {
             html += renderBloquePreview(b);
         });
         (esquema.campos || []).forEach(function (c) {
             html += renderFieldPreview(c);
         });
-        html += '</div>';
-        previewEl.innerHTML = html;
+        previewBodyEl.innerHTML = html;
+    }
+
+    function sortBloques() {
+        if (!esquema.bloques || !esquema.bloques.length) return;
+        esquema.bloques.sort(function (a, b) {
+            return (a.orden || 0) - (b.orden || 0);
+        });
+    }
+
+    function normalizeBloquesOrden() {
+        sortBloques();
+        (esquema.bloques || []).forEach(function (b, i) {
+            b.orden = (i + 1) * 10;
+        });
+    }
+
+    function widgetLabel(widget) {
+        return WIDGET_LABELS[widget] || widget || '—';
+    }
+
+    function estadoLabel(estado) {
+        return ESTADO_LABELS[estado] || estado || 'Aplica';
+    }
+
+    function estadoClass(estado) {
+        if (estado === 'opcional') return 'sgd-form-pill-estado-opcional';
+        if (estado === 'no_aplica') return 'sgd-form-pill-estado-na';
+        return 'sgd-form-pill-estado-aplica';
+    }
+
+    function reorderBloque(from, to) {
+        sortBloques();
+        if (from === to || from < 0 || to < 0 || from >= esquema.bloques.length || to >= esquema.bloques.length) {
+            return;
+        }
+        var moved = esquema.bloques.splice(from, 1)[0];
+        esquema.bloques.splice(to, 0, moved);
+        normalizeBloquesOrden();
+        renderList();
+    }
+
+    function moveBloque(idx, delta) {
+        reorderBloque(idx, idx + delta);
+    }
+
+    function bindBloquesSortable() {
+        var list = listEl.querySelector('.sgd-form-bloques-sortable');
+        if (!list || !canEdit) return;
+
+        list.querySelectorAll('.sgd-form-bloque-item').forEach(function (item) {
+            item.setAttribute('draggable', 'true');
+
+            item.addEventListener('dragstart', function (e) {
+                if (!e.target.closest('.sgd-form-drag-handle')) {
+                    e.preventDefault();
+                    return;
+                }
+                dragFromIdx = parseInt(item.getAttribute('data-idx'), 10);
+                if (isNaN(dragFromIdx)) return;
+                item.classList.add('is-dragging');
+                if (e.dataTransfer) {
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', String(dragFromIdx));
+                }
+            });
+
+            item.addEventListener('dragend', function () {
+                item.classList.remove('is-dragging');
+                list.querySelectorAll('.sgd-form-bloque-item').forEach(function (el) {
+                    el.classList.remove('is-drag-over-before', 'is-drag-over-after');
+                });
+                dragFromIdx = null;
+            });
+
+            item.addEventListener('dragover', function (e) {
+                e.preventDefault();
+                if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+                var rect = item.getBoundingClientRect();
+                var after = e.clientY > rect.top + rect.height / 2;
+                item.classList.toggle('is-drag-over-before', !after);
+                item.classList.toggle('is-drag-over-after', after);
+                item._dropAfter = after;
+            });
+
+            item.addEventListener('dragleave', function () {
+                item.classList.remove('is-drag-over-before', 'is-drag-over-after');
+            });
+
+            item.addEventListener('drop', function (e) {
+                e.preventDefault();
+                item.classList.remove('is-drag-over-before', 'is-drag-over-after');
+                var from = dragFromIdx;
+                var to = parseInt(item.getAttribute('data-idx'), 10);
+                if (from === null || isNaN(from) || isNaN(to)) return;
+                if (item._dropAfter) to += 1;
+                if (from < to) to -= 1;
+                reorderBloque(from, to);
+            });
+
+            item.addEventListener('keydown', function (e) {
+                if (!e.altKey) return;
+                var idx = parseInt(item.getAttribute('data-idx'), 10);
+                if (isNaN(idx)) return;
+                if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    moveBloque(idx, -1);
+                } else if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    moveBloque(idx, 1);
+                }
+            });
+        });
+    }
+
+    function renderBloquesList() {
+        var parts = [];
+        parts.push('<div class="sgd-form-bloques-panel">');
+        parts.push('<div class="sgd-form-bloques-head">');
+        parts.push('<h5 class="sgd-form-subtitle">Bloques <span class="sgd-form-count">(' + esquema.bloques.length + ')</span></h5>');
+        if (canEdit) {
+            parts.push('<p class="field-note sgd-form-order-hint">Arrastre el control <span aria-hidden="true">⠿</span> para definir el orden del formato. Atajo: <kbd>Alt</kbd> + <kbd>↑</kbd>/<kbd>↓</kbd> con el bloque enfocado.</p>');
+        }
+        parts.push('</div>');
+        parts.push('<ul class="sgd-form-bloques-sortable' + (canEdit ? '' : ' sgd-form-bloques-sortable--readonly') + '" role="list" aria-label="Bloques del formato">');
+        esquema.bloques.forEach(function (b, idx) {
+            var nombre = escapeHtml(b.nombre || b.seccion_codigo);
+            var codigo = escapeHtml(b.seccion_codigo);
+            var widget = escapeHtml(widgetLabel(b.widget));
+            var estado = String(b.estado || 'aplica');
+            parts.push('<li class="sgd-form-bloque-item" data-idx="' + idx + '" role="listitem"' + (canEdit ? ' tabindex="0"' : '') + '>');
+            if (canEdit) {
+                parts.push('<button type="button" class="sgd-form-drag-handle" aria-label="Arrastrar bloque ' + nombre + '" title="Arrastrar para reordenar">');
+                parts.push(DRAG_ICON);
+                parts.push('</button>');
+            }
+            parts.push('<span class="sgd-form-bloque-order" aria-hidden="true">' + (idx + 1) + '</span>');
+            parts.push('<div class="sgd-form-bloque-main">');
+            parts.push('<span class="sgd-form-bloque-name">' + nombre + '</span>');
+            parts.push('<code class="sgd-form-bloque-code">' + codigo + '</code>');
+            parts.push('</div>');
+            parts.push('<div class="sgd-form-bloque-meta">');
+            parts.push('<span class="sgd-form-pill sgd-form-pill-widget">' + widget + '</span>');
+            parts.push('<span class="sgd-form-pill ' + estadoClass(estado) + '">' + escapeHtml(estadoLabel(estado)) + '</span>');
+            parts.push('</div>');
+            parts.push('</li>');
+        });
+        parts.push('</ul></div>');
+        return parts.join('');
     }
 
     function renderList() {
         if (!listEl) return;
 
+        sortBloques();
         var parts = [];
 
         if (esquema.bloques && esquema.bloques.length) {
-            parts.push('<h5 class="sgd-form-subtitle">Bloques (' + esquema.bloques.length + ')</h5>');
-            parts.push('<table class="sgd-form-campos-table"><thead><tr><th>Código</th><th>Nombre</th><th>Widget</th><th>Estado</th></tr></thead><tbody>');
-            esquema.bloques.forEach(function (b) {
-                parts.push('<tr><td><code>' + escapeHtml(b.seccion_codigo) + '</code></td>');
-                parts.push('<td>' + escapeHtml(b.nombre) + '</td>');
-                parts.push('<td>' + escapeHtml(b.widget) + '</td>');
-                parts.push('<td>' + escapeHtml(b.estado || 'aplica') + '</td></tr>');
-            });
-            parts.push('</tbody></table>');
+            parts.push(renderBloquesList());
         }
 
         if (esquema.campos && esquema.campos.length) {
@@ -217,6 +405,8 @@
                 }
             });
         });
+
+        bindBloquesSortable();
 
         renderPreview();
         syncHidden();
@@ -263,14 +453,17 @@
                 }
             }
             esquema = buildEsquemaFromArquetipo(codigo);
+            normalizeBloquesOrden();
             renderList();
         });
     }
 
     var saveForm = document.getElementById('sgd-form-designer-save');
-    var publishForm = document.getElementById('sgd-form-designer-publish');
     if (saveForm) saveForm.addEventListener('submit', syncHidden);
-    if (publishForm) publishForm.addEventListener('submit', syncHidden);
+
+    if (esquema.bloques && esquema.bloques.length) {
+        normalizeBloquesOrden();
+    }
 
     renderList();
 })();

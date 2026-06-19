@@ -541,27 +541,17 @@ class UsuarioController
             if ((int)@filesize($tmp) > 3 * 1024 * 1024) {
                 $this->jsonResponse(400, ['ok' => false, 'error' => 'Máximo 3 MB tras comprimir. Acérquese más con el control «Acercar».']);
             }
-            $dir = BASE_PATH . '/public/uploads/usuarios';
-
-            if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) {
-                $this->jsonResponse(500, ['ok' => false, 'error' => 'No se pudo crear la carpeta de subidas']);
-            }
-
-            if (!is_writable($dir)) {
-                $this->jsonResponse(500, [
-                    'ok' => false,
-                    'error' => 'La carpeta de subidas no tiene permiso de escritura para el servidor web',
-                ]);
-            }
-
             $name = 'u_' . bin2hex(random_bytes(8)) . '.' . $ext;
-            $dest = $dir . '/' . $name;
-
-            if (!@move_uploaded_file($tmp, $dest)) {
+            $path = StorageService::instance()->putUploadedFile(
+                StorageService::ZONE_USUARIOS,
+                $name,
+                $f
+            );
+            if ($path === null) {
                 $this->jsonResponse(500, ['ok' => false, 'error' => 'No se pudo guardar el archivo en el servidor']);
             }
 
-            $this->jsonResponse(200, ['ok' => true, 'path' => '/uploads/usuarios/' . $name]);
+            $this->jsonResponse(200, ['ok' => true, 'path' => $path]);
         } catch (Throwable $e) {
             error_log('uploadAsset: ' . $e->getMessage());
             $this->jsonResponse(500, ['ok' => false, 'error' => 'Error interno al subir el archivo']);

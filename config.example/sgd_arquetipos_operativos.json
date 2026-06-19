@@ -5,6 +5,7 @@
       "codigo": "acta",
       "nombre": "Acta estructurada",
       "descripcion": "Reuniones, auditorías, comités. Bloques fijos + tablas repetibles + firmas.",
+      "formato_archivo": "pdf_auto",
       "piloto": "GE-PD3-F1",
       "orden": 10
     },
@@ -12,54 +13,63 @@
       "codigo": "bitacora",
       "nombre": "Bitácora / control periódico",
       "descripcion": "Controles diarios, por turno o por lote con filas repetibles.",
+      "formato_archivo": "dual",
       "orden": 20
     },
     {
       "codigo": "checklist",
       "nombre": "Checklist / verificación",
       "descripcion": "Ítems Sí/No/N/A con observaciones y firma responsable.",
+      "formato_archivo": "dual",
       "orden": 30
     },
     {
       "codigo": "analisis",
       "nombre": "Análisis / informe periódico",
       "descripcion": "Narrativa + tablas de indicadores + plan de acción.",
+      "formato_archivo": "pdf_auto",
       "orden": 40
     },
     {
       "codigo": "consentimiento",
       "nombre": "Consentimiento / autorización",
       "descripcion": "Identificación, cláusulas, checkboxes y firmas.",
+      "formato_archivo": "pdf_auto",
       "orden": 50
     },
     {
       "codigo": "contrato",
       "nombre": "Contrato / acuerdo",
       "descripcion": "Partes, objeto, vigencia, cláusulas y firmas múltiples.",
+      "formato_archivo": "pdf_auto",
       "orden": 60
     },
     {
       "codigo": "lista_maestra",
       "nombre": "Lista maestra / catálogo",
       "descripcion": "Tabla editable (proveedores, tarifas, personal). Versión del listado.",
+      "formato_archivo": "xlsx_upload",
       "orden": 70
     },
     {
       "codigo": "matriz",
       "nombre": "Matriz (MT)",
       "descripcion": "Grilla fija; maestro versionado u operativa periódica según documento.",
+      "formato_archivo": "xlsx_upload",
       "orden": 80
     },
     {
       "codigo": "libre",
       "nombre": "Formulario libre",
       "descripcion": "Composición manual de campos (diseñador plano enriquecido).",
+      "formato_archivo": "dual",
       "orden": 90
     },
     {
       "codigo": "solo_archivo",
       "nombre": "Solo evidencia (adjunto)",
       "descripcion": "PDF/Excel escaneado con metadatos mínimos y firma de recibido.",
+      "formato_archivo": "upload",
       "orden": 100
     }
   ],

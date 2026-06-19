@@ -3,9 +3,15 @@
 // SISTEMA SAVID - PUNTO DE ENTRADA PRINCIPAL
 // ============================================
 
-// Mostrar errores en desarrollo
-ini_set('display_errors', 1);
-error_reporting(E_ALL);
+// Mostrar errores solo fuera de producción
+$appEnv = strtolower(trim((string)(getenv('APP_ENV') ?: 'development')));
+if ($appEnv === 'production') {
+    ini_set('display_errors', '0');
+    error_reporting(E_ALL & ~E_DEPRECATED & ~E_STRICT);
+} else {
+    ini_set('display_errors', '1');
+    error_reporting(E_ALL);
+}
 
 // Definir ruta base
 define('BASE_PATH', dirname(__DIR__));
@@ -40,6 +46,7 @@ SessionManager::start();
 spl_autoload_register(function ($class) {
     $paths = [
         BASE_PATH . '/core/',
+        BASE_PATH . '/app/storage/',
         BASE_PATH . '/app/controllers/',
         BASE_PATH . '/app/models/',
         BASE_PATH . '/app/services/',

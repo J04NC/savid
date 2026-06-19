@@ -362,6 +362,12 @@ div.dt-button-background{
     background:rgba(0,0,0,.45);
 }
 
+/* Evitar que un fondo de menú ColVis quede colgado y bloquee clics en la página */
+body:not(:has(div.dt-button-collection)) div.dt-button-background{
+    display:none !important;
+    pointer-events:none !important;
+}
+
 div.dt-button-collection{
     border-radius:10px;
     border:1px solid rgba(255,255,255,.12);

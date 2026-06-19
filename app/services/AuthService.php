@@ -221,4 +221,19 @@ class AuthService
 
         return ['success' => true];
     }
+
+    public static function verifyPasswordForUserId(int $userId, string $password): bool
+    {
+        if ($userId <= 0 || $password === '') {
+            return false;
+        }
+
+        $database = new Database();
+        $repo = new UserAccessRepository($database->connect());
+        $user = $repo->findActiveUserById($userId);
+
+        return is_array($user)
+            && !empty($user['password'])
+            && password_verify($password, (string)$user['password']);
+    }
 }

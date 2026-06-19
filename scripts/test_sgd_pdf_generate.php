@@ -6,24 +6,8 @@
  */
 define('BASE_PATH', dirname(__DIR__));
 
-$composerAutoload = BASE_PATH . '/vendor/autoload.php';
-if (is_readable($composerAutoload)) {
-    require_once $composerAutoload;
-}
-
-require_once BASE_PATH . '/config.example/Database.php';
-require_once BASE_PATH . '/core/AuditingPDO.php';
-require_once BASE_PATH . '/core/AuditingPDOStatement.php';
-
-spl_autoload_register(static function ($class) {
-    foreach (['/app/services/', '/app/models/', '/app/helpers/'] as $sub) {
-        $file = BASE_PATH . $sub . $class . '.php';
-        if (is_readable($file)) {
-            require_once $file;
-            return;
-        }
-    }
-});
+require_once BASE_PATH . '/core/AppBootstrap.php';
+AppBootstrap::initCore();
 
 $empresaId = isset($argv[1]) ? (int)$argv[1] : 0;
 $documentoId = isset($argv[2]) ? (int)$argv[2] : 0;

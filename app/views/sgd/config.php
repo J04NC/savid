@@ -130,6 +130,18 @@ $patronesCarpetaSugeridos = [
                 $groupClass = 'sgd-anio-group';
                 $inputAttrs = ['min' => '2000', 'max' => '2100'];
                 require BASE_PATH . '/app/views/sgd/_form_field.php';
+
+                $name = 'archivo_word_proteccion_obligatoria';
+                $label = 'Exigir protección contra escritura en archivos Word';
+                $type = 'checkbox';
+                $value = !empty($archivoOficial['word_proteccion_escritura_obligatoria']);
+                $helpId = 'word-proteccion';
+                $helpLabel = 'Protección Word';
+                $helpBody = 'Al subir un archivo .docx como documento oficial, el sistema comprueba si tiene restricción de edición activa (Revisar → Restringir edición en Word).';
+                $helpExample = 'Activado: rechaza Word sin protección. Desactivado: acepta el archivo pero advierte si no hay protección.';
+                $fieldNote = 'Recomendado mantener activo para formatos operativos cuyo archivo oficial debe conservarse sin cambios accidentales.';
+                $groupClass = 'crud-form-field-full sgd-check-group';
+                require BASE_PATH . '/app/views/sgd/_form_field.php';
                 ?>
 
                 <div class="sgd-section-title-inline" style="margin-top:24px;">

@@ -34,39 +34,63 @@ class SgdFormularioService
         $esquema = ['version' => 2, 'arquetipo' => 'libre', 'bloques' => [], 'campos' => []];
         $proposito = 'operativo';
         $codigoDisplay = '';
+        $borradorDesdeVigente = false;
+        $versionVigenteNumero = null;
+        $needsNewVersionConfirm = false;
+        $documentoVersion = null;
 
         if ($empresaId && $documentoId > 0) {
             $documento = $this->repo->findDocumentoById($empresaId, $documentoId);
             if ($documento) {
                 $documento = $this->enrichDocumentoModo($empresaId, $documento);
                 $proposito = $this->resolveProposito($documento);
-                $codigoDisplay = $this->codigoService->buildForRow($documento, [$documentoId => $documento]);
+                $codigoDisplay = $this->codigoService->buildForDocument($empresaId, $documento, $this->repo);
                 $formulario = $this->repo->findFormularioByDocumento($empresaId, $documentoId, $proposito);
-                if ($formulario === null) {
-                    $userId = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : null;
-                    $fid = $this->repo->createFormulario($empresaId, $documentoId, $proposito, $userId);
-                    $formulario = $this->repo->findFormularioByDocumento($empresaId, $documentoId, $proposito)
-                        ?: ['id' => $fid, 'documento_id' => $documentoId, 'proposito' => $proposito];
-                }
+                $userId = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : null;
 
-                $formularioId = (int)$formulario['id'];
-                $versiones = $this->repo->listFormularioVersiones($empresaId, $formularioId);
-                $version = $this->repo->findFormularioBorradorVersion($empresaId, $formularioId);
-                if ($version === null) {
-                    $userId = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : null;
-                    $vid = $this->repo->createFormularioVersion($empresaId, $formularioId, [
-                        'numero' => $this->repo->suggestNextFormularioVersionNumero($empresaId, $formularioId),
-                        'estado_id' => SgdRepository::ESTADO_DOC_BORRADOR,
-                        'esquema_json' => ['version' => 2, 'arquetipo' => 'libre', 'bloques' => [], 'campos' => []],
-                        'created_by' => $userId,
-                    ]);
-                    $version = $this->repo->findFormularioVersionById($empresaId, $vid);
+                if ($proposito === 'operativo') {
+                    $bundleService = new SgdVersionBundleService();
+                    $designerMeta = $bundleService->ensureDesignerBorrador($empresaId, $documentoId, $query, $userId);
+                    $needsNewVersionConfirm = !empty($designerMeta['needsNewVersionConfirm']);
+                    $version = $designerMeta['formulario_version'];
+                    $documentoVersion = $designerMeta['documento_version'];
+                    $borradorDesdeVigente = !empty($designerMeta['clonedFromVigente']);
+                    $versionVigenteNumero = $designerMeta['vigenteNumero'] ?? null;
+                    if ($version) {
+                        $formularioId = (int)($version['formulario_id'] ?? 0);
+                        if ($formularioId > 0) {
+                            $formulario = $this->repo->findFormularioByDocumento($empresaId, $documentoId, 'operativo')
+                                ?: ['id' => $formularioId, 'documento_id' => $documentoId, 'proposito' => 'operativo'];
+                        }
+                    }
+                } else {
+                    if ($formulario === null) {
+                        $fid = $this->repo->createFormulario($empresaId, $documentoId, $proposito, $userId);
+                        $formulario = $this->repo->findFormularioByDocumento($empresaId, $documentoId, $proposito)
+                            ?: ['id' => $fid, 'documento_id' => $documentoId, 'proposito' => $proposito];
+                    }
+                    $formularioId = (int)$formulario['id'];
+                    $borradorMeta = $this->ensureFormularioBorradorVersion($empresaId, $formularioId);
+                    $version = $borradorMeta['version'];
+                    $borradorDesdeVigente = !empty($borradorMeta['clonedFromVigente']);
+                    $versionVigenteNumero = $borradorMeta['vigenteNumero'] ?? null;
                 }
 
                 if ($version) {
                     $esquema = $this->decodeEsquema($version['esquema_json'] ?? null);
                 }
+                $documento['codigo_display'] = $codigoDisplay;
             }
+        }
+
+        $previewMeta = ['canPreview' => false, 'previewPdfUrl' => ''];
+        if ($empresaId && $documentoId > 0 && $proposito === 'operativo') {
+            $previewMeta = $this->getPreviewMeta(
+                $empresaId,
+                $documentoId,
+                $version ? (int)($version['id'] ?? 0) : null,
+                $empresaId ? '&empresa_id=' . (int)$empresaId : ''
+            );
         }
 
         return [
@@ -85,6 +109,12 @@ class SgdFormularioService
             'tiposCampo' => self::TIPOS_CAMPO,
             'arquetipos' => SgdArquetipoOperativoService::listArquetipos(),
             'arquetipoPiloto' => SgdArquetipoOperativoService::ARQUETIPO_PILOTO,
+            'canPreviewPlantilla' => !empty($previewMeta['canPreview']),
+            'previewPdfUrl' => (string)($previewMeta['previewPdfUrl'] ?? ''),
+            'borradorDesdeVigente' => $borradorDesdeVigente ?? false,
+            'versionVigenteNumero' => $versionVigenteNumero ?? null,
+            'needsNewVersionConfirm' => $needsNewVersionConfirm ?? false,
+            'documentoVersion' => $documentoVersion,
         ];
     }
 
@@ -138,7 +168,7 @@ class SgdFormularioService
     /**
      * @return array{success: bool, message: string}
      */
-    public function publish(array $post, array $query): array
+    public function createBorradorFromVigente(array $query, array $post = []): array
     {
         try {
             $empresaId = $this->scope->requireEmpresaId($query);
@@ -150,39 +180,118 @@ class SgdFormularioService
             return ['success' => false, 'message' => 'Sin permiso para esta empresa.'];
         }
 
-        $versionId = isset($post['version_id']) && ctype_digit((string)$post['version_id'])
-            ? (int)$post['version_id']
-            : 0;
-        if ($versionId <= 0) {
-            return ['success' => false, 'message' => 'Versión no válida.'];
-        }
-
-        $version = $this->repo->findFormularioVersionById($empresaId, $versionId);
-        if ($version === null) {
-            return ['success' => false, 'message' => 'Versión no encontrada.'];
-        }
-
-        if ((int)$version['estado_id'] !== SgdRepository::ESTADO_DOC_BORRADOR) {
-            return ['success' => false, 'message' => 'Solo se pueden publicar versiones en borrador.'];
-        }
-
-        if (trim((string)($post['esquema_json'] ?? '')) !== '') {
-            $saved = $this->saveEsquema($post, $query);
-            if (!$saved['success']) {
-                return $saved;
-            }
-            $version = $this->repo->findFormularioVersionById($empresaId, $versionId);
-        }
-
-        $esquema = $this->decodeEsquema($version['esquema_json'] ?? null);
-        if (!$this->esquemaHasContent($esquema)) {
-            return ['success' => false, 'message' => 'Agregue al menos un bloque o campo antes de publicar.'];
+        $documentoId = isset($post['documento_id']) && ctype_digit((string)$post['documento_id'])
+            ? (int)$post['documento_id']
+            : (isset($query['documento_id']) && ctype_digit((string)$query['documento_id'])
+                ? (int)$query['documento_id']
+                : 0);
+        if ($documentoId <= 0) {
+            return ['success' => false, 'message' => 'Documento no válido.'];
         }
 
         $userId = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : null;
-        $this->repo->publishFormularioVersion($empresaId, $versionId, $userId);
+        $query['nueva_version'] = '1';
+        $bundleService = new SgdVersionBundleService();
+        $bundleService->ensureDesignerBorrador($empresaId, $documentoId, $query, $userId);
 
-        return ['success' => true, 'message' => 'Plantilla publicada.'];
+        return [
+            'success' => true,
+            'message' => 'Nuevo borrador creado. Puede editar la plantilla; publique desde Versiones y archivo oficial.',
+        ];
+    }
+
+    /**
+     * @return array{success: bool, message: string}
+     */
+    public function publish(array $post, array $query): array
+    {
+        return [
+            'success' => false,
+            'message' => 'Publique la versión desde el documento: Versiones y archivo oficial.',
+        ];
+    }
+
+    /**
+     * @return array{version: int, arquetipo?: string, bloques?: list<array<string, mixed>>, campos: list<array<string, mixed>>}
+     */
+    public function decodeEsquemaJson(mixed $raw): array
+    {
+        return $this->decodeEsquema($raw);
+    }
+
+    /**
+     * @param array{version?: int, arquetipo?: string, bloques?: list<array<string, mixed>>, campos?: list<array<string, mixed>>} $esquema
+     */
+    public function esquemaTieneContenido(array $esquema): bool
+    {
+        return $this->esquemaHasContent($esquema);
+    }
+
+    /**
+     * @return array{success: bool, message: string, canPreview?: bool, previewPdfUrl?: string}
+     */
+    public function getPreviewMeta(int $empresaId, int $documentoId, ?int $formularioVersionId = null, string $empresaQuery = ''): array
+    {
+        $preview = new SgdFormularioPreviewService();
+        $prepared = $preview->preparePreview($empresaId, $documentoId, $formularioVersionId);
+        if (!$prepared['success']) {
+            return [
+                'success' => false,
+                'message' => (string)($prepared['message'] ?? ''),
+                'canPreview' => false,
+            ];
+        }
+
+        $versionId = (int)($prepared['version']['id'] ?? 0);
+        $url = '?url=sgd/formularioPreviewPdf' . $empresaQuery
+            . '&documento_id=' . $documentoId
+            . ($versionId > 0 ? '&formulario_version_id=' . $versionId : '');
+
+        return [
+            'success' => true,
+            'message' => 'Listo para vista previa.',
+            'canPreview' => true,
+            'previewPdfUrl' => $url,
+        ];
+    }
+
+    /**
+     * Crea borrador de plantilla; si hay versión vigente, copia su esquema.
+     *
+     * @return array{version: array<string, mixed>|null, clonedFromVigente: bool, vigenteNumero: string|null}
+     */
+    private function ensureFormularioBorradorVersion(int $empresaId, int $formularioId): array
+    {
+        $borrador = $this->repo->findFormularioBorradorVersion($empresaId, $formularioId);
+        if ($borrador !== null) {
+            return [
+                'version' => $borrador,
+                'clonedFromVigente' => false,
+                'vigenteNumero' => null,
+            ];
+        }
+
+        $vigente = $this->repo->findFormularioVersionVigente($empresaId, $formularioId);
+        $esquemaSeed = ['version' => 2, 'arquetipo' => 'libre', 'bloques' => [], 'campos' => []];
+        $vigenteNumero = null;
+        if ($vigente !== null) {
+            $esquemaSeed = $this->decodeEsquema($vigente['esquema_json'] ?? null);
+            $vigenteNumero = trim((string)($vigente['numero'] ?? ''));
+        }
+
+        $userId = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : null;
+        $vid = $this->repo->createFormularioVersion($empresaId, $formularioId, [
+            'numero' => $this->repo->suggestNextFormularioVersionNumero($empresaId, $formularioId),
+            'estado_id' => SgdRepository::ESTADO_DOC_BORRADOR,
+            'esquema_json' => $esquemaSeed,
+            'created_by' => $userId,
+        ]);
+
+        return [
+            'version' => $this->repo->findFormularioVersionById($empresaId, $vid),
+            'clonedFromVigente' => $vigente !== null,
+            'vigenteNumero' => $vigenteNumero !== '' ? $vigenteNumero : null,
+        ];
     }
 
     /**

@@ -118,8 +118,10 @@ class SgdDocxImportService
         $formatoPdf = $configExtra['formato_pdf'] ?? SgdSeccionService::defaultFormatoPdf();
         $this->titulosConfig = SgdSeccionService::normalizeTitulosConfig($formatoPdf['titulos'] ?? null);
 
-        $mediaDir = BASE_PATH . '/public/uploads/sgd/' . $empresaId . '/' . $documentoId . '/media';
-        if (!is_dir($mediaDir) && !@mkdir($mediaDir, 0755, true) && !is_dir($mediaDir)) {
+        $storage = StorageService::instance();
+        try {
+            $mediaDir = $storage->localDirectory(StorageService::ZONE_SGD_MEDIA, $empresaId, $documentoId);
+        } catch (RuntimeException) {
             $archive->close();
 
             return ['success' => false, 'message' => 'No se pudo crear carpeta de medios.'];
@@ -912,13 +914,17 @@ class SgdDocxImportService
         }
 
         $filename = 'word_' . date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
-        $fullPath = $mediaDir . '/' . $filename;
-        if (@file_put_contents($fullPath, $binary) === false) {
+        $storage = StorageService::instance();
+        try {
+            $webPath = $storage->putContents(
+                $storage->key(StorageService::ZONE_SGD_MEDIA, $filename, $this->empresaId, $this->documentoId),
+                $binary
+            );
+        } catch (RuntimeException) {
             return '';
         }
 
         $stats['images'] += 1;
-        $webPath = '/uploads/sgd/' . $this->empresaId . '/' . $this->documentoId . '/media/' . $filename;
 
         return '<p class="sgd-word-img-wrap"><img src="' . htmlspecialchars($webPath, ENT_QUOTES, 'UTF-8') . '" alt="" class="sgd-word-img"></p>';
     }

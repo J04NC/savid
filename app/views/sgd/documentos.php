@@ -10,13 +10,47 @@
 /** @var int $selectedGridId */
 /** @var bool $canGuardar */
 /** @var bool $canEliminar */
+/** @var bool $canEliminarVersion */
+/** @var bool $canRevertVigente */
 /** @var list<array<string, mixed>> $versiones */
 /** @var string $suggestedVersionNumero */
 /** @var bool $canAutoGeneratePdf */
+/** @var bool $canPreviewPlantilla */
+/** @var string $previewPlantillaUrl */
+/** @var bool $esOperativo */
+/** @var string $formatoArchivoEsperado */
+/** @var bool $canAutoGenerateEsqueleto */
+/** @var list<string> $uploadExtensions */
+/** @var string $arquetipoOperativo */
 
 $versiones = $versiones ?? [];
 $suggestedVersionNumero = $suggestedVersionNumero ?? '1';
 $canAutoGeneratePdf = !empty($canAutoGeneratePdf);
+$canPreviewPlantilla = !empty($canPreviewPlantilla);
+$previewPlantillaUrl = (string)($previewPlantillaUrl ?? '');
+$esOperativo = !empty($esOperativo);
+$formatoArchivoEsperado = (string)($formatoArchivoEsperado ?? 'pdf_auto');
+$canAutoGenerateEsqueleto = !empty($canAutoGenerateEsqueleto);
+$uploadExtensions = $uploadExtensions ?? ['pdf'];
+$arquetipoOperativo = (string)($arquetipoOperativo ?? 'libre');
+$canAutoPublishVersion = $canAutoGeneratePdf || ($esOperativo && $canAutoGenerateEsqueleto);
+$canEliminarVersion = !empty($canEliminarVersion);
+$canRevertVigente = !empty($canRevertVigente);
+$canVerAccionesVersion = $canGuardar || $canEliminarVersion || $canRevertVigente;
+$uploadAccept = implode(',', array_map(
+    static fn(string $ext): string => match ($ext) {
+        'pdf' => 'application/pdf,.pdf',
+        'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.xlsx',
+        'xls' => 'application/vnd.ms-excel,.xls',
+        'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx',
+        'doc' => 'application/msword,.doc',
+        default => '.' . $ext,
+    },
+    $uploadExtensions
+));
+$uploadLabel = count($uploadExtensions) === 1 && ($uploadExtensions[0] ?? '') === 'pdf'
+    ? 'PDF'
+    : 'archivo';
 
 $sgdDocJs = BASE_PATH . '/public/js/sgd-documentos.js';
 $sgdDocJsV = is_readable($sgdDocJs) ? (int)filemtime($sgdDocJs) : time();
@@ -80,6 +114,11 @@ $formatOption = static function (string $codigo, string $nombre): string {
                     <?php else: ?>
                         <a href="<?= htmlspecialchars('?url=sgd/formularios' . $empresaQuery . '&documento_id=' . (int)$form['id'], ENT_QUOTES, 'UTF-8') ?>"
                            class="sgd-doc-btn" title="Diseñar plantilla operativa">📝 Diseñar plantilla</a>
+                        <?php if ($canPreviewPlantilla && $previewPlantillaUrl !== ''): ?>
+                            <a href="<?= htmlspecialchars($previewPlantillaUrl, ENT_QUOTES, 'UTF-8') ?>"
+                               class="sgd-doc-btn" target="_blank" rel="noopener"
+                               title="Vista previa PDF de la plantilla del formato">📄 Vista previa plantilla</a>
+                        <?php endif; ?>
                     <?php endif; ?>
                 <?php endif; ?>
                 <?php if ($canEliminar && !empty($form['id'])): ?>
@@ -315,13 +354,35 @@ $formatOption = static function (string $codigo, string $nombre): string {
                 <?php if (!empty($form['id'])): ?>
                     <section class="sgd-doc-versions" id="sgd-doc-versions">
                         <header class="sgd-doc-versions-head">
-                            <h4 class="sgd-doc-versions-title">Versiones y PDF oficial</h4>
+                            <h4 class="sgd-doc-versions-title">Versiones y archivo oficial</h4>
                             <span class="sgd-doc-versions-count"><?= count($versiones) ?> versión(es)</span>
                         </header>
-                        <p class="field-note sgd-doc-ver-cloud-note">Si el PDF está en Dropbox o la nube, espere el mensaje «listo para subir» antes de pulsar Subir. Si falla, descárguelo al teléfono y elíjalo desde Archivos.</p>
+                        <?php if ($esOperativo): ?>
+                            <p class="field-note sgd-doc-ver-formato-hint">
+                                Formato operativo (arquetipo <strong><?= htmlspecialchars($arquetipoOperativo, ENT_QUOTES, 'UTF-8') ?></strong>).
+                                <?php if ($formatoArchivoEsperado === 'xlsx_upload'): ?>
+                                    El esqueleto oficial es <strong>Excel (.xlsx)</strong>. Suba la plantilla aquí y publíquela desde el diseñador o desde esta tabla.
+                                <?php elseif ($canAutoGenerateEsqueleto): ?>
+                                    Al publicar desde el <strong>diseñador de plantilla</strong> se generará el PDF esqueleto y quedará vigente aquí.
+                                <?php else: ?>
+                                    Suba el archivo de referencia (PDF o Excel) antes de publicar.
+                                <?php endif; ?>
+                            </p>
+                        <?php endif; ?>
+                        <?php if ($canEliminarVersion): ?>
+                            <p class="field-note sgd-doc-ver-delete-hint">
+                                Puede eliminar versiones en <strong>borrador</strong> u <strong>obsoletas</strong>.
+                            </p>
+                        <?php endif; ?>
+                        <?php if ($canRevertVigente): ?>
+                            <p class="field-note sgd-doc-ver-revert-hint">
+                                <strong>Revertir publicación</strong> (versión vigente): requiere contraseña y solo si no hay registros diligenciados.
+                            </p>
+                        <?php endif; ?>
+                        <p class="field-note sgd-doc-ver-cloud-note">Si el archivo está en Dropbox o la nube, espere el mensaje «listo para subir» antes de pulsar Subir. Si falla, descárguelo al teléfono y elíjalo desde Archivos.</p>
 
                         <?php if ($versiones === []): ?>
-                            <p class="field-note sgd-doc-versions-empty">Sin versiones registradas. Cree una versión en borrador<?= $canAutoGeneratePdf ? ', complete la elaboración y publíquela (el PDF se generará automáticamente)' : ', suba el PDF y publíquela' ?>.</p>
+                            <p class="field-note sgd-doc-versions-empty">Sin versiones registradas. Cree una versión en borrador<?= $canAutoPublishVersion ? ' y publíquela (el archivo se generará al publicar si aplica)' : ', suba el archivo oficial y publíquela' ?>.</p>
                         <?php else: ?>
                             <div class="sgd-doc-versions-table-wrap">
                                 <table class="sgd-doc-versions-table">
@@ -329,9 +390,9 @@ $formatOption = static function (string $codigo, string $nombre): string {
                                         <tr>
                                             <th>Versión</th>
                                             <th>Estado</th>
-                                            <th>PDF</th>
+                                            <th>Archivo</th>
                                             <th>Aprobación</th>
-                                            <?php if ($canGuardar): ?><th>Acciones</th><?php endif; ?>
+                                            <?php if ($canVerAccionesVersion): ?><th>Acciones</th><?php endif; ?>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -340,8 +401,16 @@ $formatOption = static function (string $codigo, string $nombre): string {
                                             $vid = (int)$ver['id'];
                                             $estadoId = (int)($ver['estado_id'] ?? 0);
                                             $esBorrador = $estadoId === SgdRepository::ESTADO_DOC_BORRADOR;
+                                            $esObsoleto = $estadoId === SgdRepository::ESTADO_DOC_OBSOLETO;
                                             $esVigente = (int)($ver['es_vigente'] ?? 0) === 1;
                                             $pdfPath = trim((string)($ver['archivo_ruta'] ?? ''));
+                                            $archivoTipo = trim((string)($ver['archivo_tipo'] ?? ''));
+                                            if ($archivoTipo === '' && $pdfPath !== '') {
+                                                $archivoTipo = SgdArquetipoOperativoService::detectArchivoTipo($pdfPath);
+                                            }
+                                            $archivoLabel = $archivoTipo !== ''
+                                                ? SgdArquetipoOperativoService::archivoTipoLabel($archivoTipo)
+                                                : 'Archivo';
                                             $fechaAprVal = trim((string)($ver['fecha_aprobacion'] ?? ''));
                                             if ($fechaAprVal === '') {
                                                 $fechaAprVal = trim((string)($form['fecha_ultima_aprobacion'] ?? ''));
@@ -351,7 +420,8 @@ $formatOption = static function (string $codigo, string $nombre): string {
                                             }
                                             $fechaEditable = $canGuardar && in_array($estadoId, [SgdRepository::ESTADO_DOC_BORRADOR, SgdRepository::ESTADO_DOC_VIGENTE], true);
                                             $publishFormId = 'sgd-ver-publish-' . $vid;
-                                            $canPublish = $esBorrador && ($pdfPath !== '' || $canAutoGeneratePdf);
+                                            $canPublish = $esBorrador && ($pdfPath !== '' || $canAutoPublishVersion);
+                                            $canDeleteVersion = $canEliminarVersion && !$esVigente && ($esBorrador || $esObsoleto);
                                             ?>
                                             <tr class="sgd-doc-ver-row<?= $esVigente ? ' is-vigente' : '' ?>" data-version-id="<?= $vid ?>">
                                                 <td>
@@ -367,8 +437,8 @@ $formatOption = static function (string $codigo, string $nombre): string {
                                                 </td>
                                                 <td class="sgd-doc-ver-pdf">
                                                     <?php if ($pdfPath !== ''): ?>
-                                                        <a href="<?= htmlspecialchars($pdfPath, ENT_QUOTES, 'UTF-8') ?>" target="_blank" rel="noopener">Ver PDF</a>
-                                                    <?php elseif ($canGuardar && $esBorrador && !$canAutoGeneratePdf): ?>
+                                                        <a href="<?= htmlspecialchars($pdfPath, ENT_QUOTES, 'UTF-8') ?>" target="_blank" rel="noopener">Ver <?= htmlspecialchars($archivoLabel, ENT_QUOTES, 'UTF-8') ?></a>
+                                                    <?php elseif ($canGuardar && $esBorrador): ?>
                                                         <?php
                                                         $verReturnUrl = $listUrl . '&id=' . (int)$form['id'];
                                                         ?>
@@ -380,13 +450,14 @@ $formatOption = static function (string $codigo, string $nombre): string {
                                                             data-return-url="<?= htmlspecialchars($verReturnUrl, ENT_QUOTES, 'UTF-8') ?>"
                                                             data-version-id="<?= $vid ?>"
                                                             data-documento-id="<?= (int)$form['id'] ?>"
+                                                            data-upload-extensions="<?= htmlspecialchars(implode(',', $uploadExtensions), ENT_QUOTES, 'UTF-8') ?>"
                                                         >
                                                             <div class="sgd-doc-ver-upload-row">
                                                                 <label class="sgd-doc-ver-upload">
-                                                                    <span class="sgd-doc-ver-upload-btn">Elegir PDF</span>
+                                                                    <span class="sgd-doc-ver-upload-btn">Elegir <?= htmlspecialchars(ucfirst($uploadLabel), ENT_QUOTES, 'UTF-8') ?></span>
                                                                     <input
                                                                         type="file"
-                                                                        accept="application/pdf,.pdf"
+                                                                        accept="<?= htmlspecialchars($uploadAccept, ENT_QUOTES, 'UTF-8') ?>"
                                                                         class="sgd-doc-ver-file"
                                                                     >
                                                                 </label>
@@ -396,12 +467,9 @@ $formatOption = static function (string $codigo, string $nombre): string {
                                                             </div>
                                                             <span class="sgd-doc-ver-file-name" aria-live="polite"></span>
                                                         </form>
-                                                    <?php elseif ($canAutoGeneratePdf && $esBorrador): ?>
-                                                        <?php
-                                                        $previewUrl = $previewPdfBase . '&documento_id=' . (int)$form['id'] . '&version_id=' . $vid;
-                                                        ?>
-                                                        <a href="<?= htmlspecialchars($previewUrl, ENT_QUOTES, 'UTF-8') ?>" target="_blank" rel="noopener" class="sgd-doc-ver-preview-link">Vista previa</a>
-                                                        <span class="sgd-doc-ver-auto-pdf field-note"> · se generará al publicar</span>
+                                                        <?php if ($canAutoPublishVersion): ?>
+                                                            <p class="field-note sgd-doc-ver-upload-hint">Opcional si sube escaneado; si no, el PDF puede generarse al publicar.</p>
+                                                        <?php endif; ?>
                                                     <?php else: ?>
                                                         <span class="sgd-doc-ver-sin-pdf">—</span>
                                                     <?php endif; ?>
@@ -439,14 +507,22 @@ $formatOption = static function (string $codigo, string $nombre): string {
                                                         <?= htmlspecialchars((string)($ver['fecha_aprobacion'] ?? ''), ENT_QUOTES, 'UTF-8') ?>
                                                     <?php endif; ?>
                                                 </td>
-                                                <?php if ($canGuardar): ?>
+                                                <?php if ($canVerAccionesVersion): ?>
                                                     <td class="sgd-doc-ver-actions">
+                                                        <?php if ($esBorrador && $esOperativo): ?>
+                                                            <a href="<?= htmlspecialchars('?url=sgd/formularios' . $empresaQuery . '&documento_id=' . (int)$form['id'], ENT_QUOTES, 'UTF-8') ?>"
+                                                               class="sgd-doc-btn sgd-doc-ver-btn">Diseñar</a>
+                                                        <?php endif; ?>
                                                         <?php if ($canPublish): ?>
-                                                            <?php if ($canAutoGeneratePdf && $pdfPath === ''): ?>
+                                                            <?php if ($canAutoPublishVersion && $pdfPath === ''): ?>
+                                                                <?php if ($esOperativo && $previewPlantillaUrl !== ''): ?>
+                                                                <a href="<?= htmlspecialchars($previewPlantillaUrl, ENT_QUOTES, 'UTF-8') ?>" target="_blank" rel="noopener" class="sgd-doc-btn sgd-doc-ver-btn">Vista previa</a>
+                                                                <?php else: ?>
                                                                 <?php
                                                                 $previewUrl = $previewPdfBase . '&documento_id=' . (int)$form['id'] . '&version_id=' . $vid;
                                                                 ?>
                                                                 <a href="<?= htmlspecialchars($previewUrl, ENT_QUOTES, 'UTF-8') ?>" target="_blank" rel="noopener" class="sgd-doc-btn sgd-doc-ver-btn">Vista previa PDF</a>
+                                                                <?php endif; ?>
                                                             <?php endif; ?>
                                                             <form
                                                                 id="<?= htmlspecialchars($publishFormId, ENT_QUOTES, 'UTF-8') ?>"
@@ -460,6 +536,29 @@ $formatOption = static function (string $codigo, string $nombre): string {
                                                                 <input type="hidden" name="version_id" value="<?= $vid ?>">
                                                                 <button type="submit" class="sgd-doc-btn sgd-doc-btn-primary sgd-doc-ver-btn">Publicar</button>
                                                             </form>
+                                                        <?php endif; ?>
+                                                        <?php if ($canDeleteVersion): ?>
+                                                            <form
+                                                                method="post"
+                                                                action="<?= htmlspecialchars($formAction, ENT_QUOTES, 'UTF-8') ?>"
+                                                                class="sgd-doc-ver-inline-form"
+                                                                onsubmit="return confirm('Se eliminará permanentemente la versión <?= htmlspecialchars((string)$ver['numero'], ENT_QUOTES, 'UTF-8') ?> (<?= $esBorrador ? 'borrador' : 'obsoleta' ?>) y su archivo asociado.\n\n¿Desea continuar?');"
+                                                            >
+                                                                <input type="hidden" name="_action" value="version_delete">
+                                                                <input type="hidden" name="documento_id" value="<?= (int)$form['id'] ?>">
+                                                                <input type="hidden" name="version_id" value="<?= $vid ?>">
+                                                                <button type="submit" class="sgd-doc-btn sgd-doc-ver-btn sgd-doc-ver-btn-danger" title="Eliminar versión">Eliminar</button>
+                                                            </form>
+                                                        <?php endif; ?>
+                                                        <?php if ($canRevertVigente && $esVigente): ?>
+                                                            <button
+                                                                type="button"
+                                                                class="sgd-doc-btn sgd-doc-ver-btn sgd-doc-ver-btn-warning sgd-btn-revert-vigente"
+                                                                title="Deshacer publicación de esta versión"
+                                                                data-version-id="<?= $vid ?>"
+                                                                data-version-numero="<?= htmlspecialchars((string)$ver['numero'], ENT_QUOTES, 'UTF-8') ?>"
+                                                                data-codigo="<?= htmlspecialchars((string)($form['codigo_display'] ?? ''), ENT_QUOTES, 'UTF-8') ?>"
+                                                            >Revertir publicación</button>
                                                         <?php endif; ?>
                                                     </td>
                                                 <?php endif; ?>
@@ -492,6 +591,7 @@ $formatOption = static function (string $codigo, string $nombre): string {
                                     </div>
                                     <button type="submit" class="sgd-doc-btn">➕ Crear borrador</button>
                                 </form>
+                                <p class="field-note">Crea el par plantilla + versión de archivo con el mismo número.</p>
 
                                 <form method="post" action="<?= htmlspecialchars($formAction, ENT_QUOTES, 'UTF-8') ?>"
                                       class="sgd-doc-ver-obsolete-form"
@@ -503,6 +603,47 @@ $formatOption = static function (string $codigo, string $nombre): string {
                             </div>
                         <?php endif; ?>
                     </section>
+
+                    <?php if ($canRevertVigente && !empty($form['id'])): ?>
+                        <div id="sgd-revert-vigente-modal" class="sgd-revert-modal" hidden aria-hidden="true">
+                            <div class="sgd-revert-backdrop" data-revert-close></div>
+                            <div class="sgd-revert-dialog" role="dialog" aria-modal="true" aria-labelledby="sgd-revert-title">
+                                <header class="sgd-revert-head">
+                                    <h4 id="sgd-revert-title">Revertir publicación</h4>
+                                    <button type="button" class="sgd-revert-close" data-revert-close aria-label="Cerrar">&times;</button>
+                                </header>
+                                <form method="post" action="<?= htmlspecialchars($formAction, ENT_QUOTES, 'UTF-8') ?>" class="sgd-revert-form" id="sgd-revert-vigente-form">
+                                    <input type="hidden" name="_action" value="version_revert_vigente">
+                                    <input type="hidden" name="documento_id" value="<?= (int)$form['id'] ?>">
+                                    <input type="hidden" name="version_id" id="sgd-revert-version-id" value="">
+                                    <p class="field-note sgd-revert-intro">
+                                        La versión <strong id="sgd-revert-version-label"></strong> volverá a <strong>borrador</strong>
+                                        y dejará de ser la versión oficial. Solo es posible si no hay registros diligenciados.
+                                    </p>
+                                    <div class="form-group">
+                                        <label for="sgd_revert_confirm_codigo">Código del documento</label>
+                                        <input type="text" name="confirm_codigo" id="sgd_revert_confirm_codigo" class="form-input" required
+                                               autocomplete="off" spellcheck="false" placeholder="Ej. GE-PD3-F1">
+                                        <p class="field-note">Escriba: <code id="sgd-revert-codigo-hint"></code></p>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="sgd_revert_confirm_version">Número de versión</label>
+                                        <input type="text" name="confirm_version" id="sgd_revert_confirm_version" class="form-input" required
+                                               autocomplete="off" placeholder="Ej. 1">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="sgd_revert_confirm_password">Su contraseña</label>
+                                        <input type="password" name="confirm_password" id="sgd_revert_confirm_password" class="form-input" required
+                                               autocomplete="current-password">
+                                    </div>
+                                    <footer class="sgd-revert-foot">
+                                        <button type="button" class="sgd-doc-btn" data-revert-close>Cancelar</button>
+                                        <button type="submit" class="sgd-doc-btn sgd-doc-ver-btn-warning">Revertir publicación</button>
+                                    </footer>
+                                </form>
+                            </div>
+                        </div>
+                    <?php endif; ?>
                 <?php endif; ?>
 
                 <?php if ($canEliminar && !empty($form['id'])): ?>

@@ -7,9 +7,16 @@ class SessionManager {
     
     public static function start() {
         if (session_status() === PHP_SESSION_NONE) {
+            require_once dirname(__FILE__) . '/SessionConfigurator.php';
+            SessionConfigurator::apply();
+
+            $cookieLifetime = max(60, (int)(getenv('SESSION_LIFETIME') ?: 86400));
+            $secure = in_array(strtolower((string)(getenv('SESSION_COOKIE_SECURE'))), ['1', 'true', 'yes'], true);
+
             session_start([
-                'cookie_lifetime' => 86400,
+                'cookie_lifetime' => $cookieLifetime,
                 'cookie_httponly' => true,
+                'cookie_secure' => $secure,
                 'use_strict_mode' => true
             ]);
             self::$started = true;

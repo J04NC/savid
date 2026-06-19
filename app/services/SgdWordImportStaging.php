@@ -8,24 +8,23 @@ class SgdWordImportStaging
 {
     private const TTL_SECONDS = 3600;
 
-    private static function mediaDir(int $empresaId, int $documentoId): string
+    private static function storage(): StorageService
     {
-        $media = BASE_PATH . '/public/uploads/sgd/' . $empresaId . '/' . $documentoId . '/media';
-        if (!is_dir($media) && !@mkdir($media, 0755, true) && !is_dir($media)) {
-            throw new RuntimeException('No se pudo acceder a la carpeta de medios del documento.');
-        }
-
-        return $media;
+        return StorageService::instance();
     }
 
-    private static function paths(int $empresaId, int $documentoId, string $token): array
+    private static function tokenSafe(string $token): string
     {
-        $dir = self::mediaDir($empresaId, $documentoId);
-        $safe = preg_replace('/[^a-f0-9]/', '', strtolower($token)) ?? '';
+        return preg_replace('/[^a-f0-9]/', '', strtolower($token)) ?? '';
+    }
+
+    private static function keys(int $empresaId, int $documentoId, string $token): array
+    {
+        $safe = self::tokenSafe($token);
 
         return [
-            'html' => $dir . '/import_' . $safe . '.html',
-            'meta' => $dir . '/import_' . $safe . '.json',
+            'html' => self::storage()->key(StorageService::ZONE_SGD_MEDIA, 'import_' . $safe . '.html', $empresaId, $documentoId),
+            'meta' => self::storage()->key(StorageService::ZONE_SGD_MEDIA, 'import_' . $safe . '.json', $empresaId, $documentoId),
         ];
     }
 
@@ -37,10 +36,13 @@ class SgdWordImportStaging
         self::purgeExpired($empresaId, $documentoId);
 
         $token = bin2hex(random_bytes(16));
-        $paths = self::paths($empresaId, $documentoId, $token);
+        $keys = self::keys($empresaId, $documentoId, $token);
+        $storage = self::storage();
 
-        if (@file_put_contents($paths['html'], $html) === false) {
-            throw new RuntimeException('No se pudo guardar el contenido convertido en media/.');
+        try {
+            $storage->putContents($keys['html'], $html);
+        } catch (RuntimeException $e) {
+            throw new RuntimeException('No se pudo guardar el contenido convertido en media/.', 0, $e);
         }
 
         $meta['empresa_id'] = $empresaId;
@@ -49,12 +51,14 @@ class SgdWordImportStaging
         $meta['created_at'] = time();
         $meta['html_chars'] = mb_strlen($html);
 
-        if (@file_put_contents(
-            $paths['meta'],
-            json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE)
-        ) === false) {
-            @unlink($paths['html']);
-            throw new RuntimeException('No se pudo guardar metadatos de la importación.');
+        try {
+            $storage->putContents(
+                $keys['meta'],
+                json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE) ?: '{}'
+            );
+        } catch (RuntimeException $e) {
+            $storage->delete($keys['html']);
+            throw new RuntimeException('No se pudo guardar metadatos de la importación.', 0, $e);
         }
 
         return $token;
@@ -65,17 +69,18 @@ class SgdWordImportStaging
      */
     public static function load(string $token, int $empresaId, int $documentoId, int $userId): ?array
     {
-        $token = preg_replace('/[^a-f0-9]/', '', strtolower($token)) ?? '';
-        if (strlen($token) !== 32) {
+        $safe = self::tokenSafe($token);
+        if (strlen($safe) !== 32) {
             return null;
         }
 
-        $paths = self::paths($empresaId, $documentoId, $token);
-        if (!is_readable($paths['meta']) || !is_readable($paths['html'])) {
+        $keys = self::keys($empresaId, $documentoId, $token);
+        $storage = self::storage();
+        if (!$storage->exists($keys['meta']) || !$storage->exists($keys['html'])) {
             return null;
         }
 
-        $metaRaw = @file_get_contents($paths['meta']);
+        $metaRaw = $storage->get($keys['meta']);
         $meta = is_string($metaRaw) ? json_decode($metaRaw, true) : null;
         if (!is_array($meta)) {
             return null;
@@ -94,7 +99,7 @@ class SgdWordImportStaging
             return null;
         }
 
-        $html = @file_get_contents($paths['html']);
+        $html = $storage->get($keys['html']);
         if (!is_string($html) || $html === '') {
             return null;
         }
@@ -104,25 +109,28 @@ class SgdWordImportStaging
 
     public static function delete(string $token, int $empresaId, int $documentoId): void
     {
-        $token = preg_replace('/[^a-f0-9]/', '', strtolower($token)) ?? '';
-        if (strlen($token) !== 32) {
+        $safe = self::tokenSafe($token);
+        if (strlen($safe) !== 32) {
             return;
         }
-        $paths = self::paths($empresaId, $documentoId, $token);
-        @unlink($paths['html']);
-        @unlink($paths['meta']);
+
+        $keys = self::keys($empresaId, $documentoId, $token);
+        $storage = self::storage();
+        $storage->delete($keys['html']);
+        $storage->delete($keys['meta']);
     }
 
     private static function purgeExpired(int $empresaId, int $documentoId): void
     {
-        $dir = self::mediaDir($empresaId, $documentoId);
+        $storage = self::storage();
         $now = time();
-        foreach (glob($dir . '/import_*.json') ?: [] as $metaPath) {
-            $raw = @file_get_contents($metaPath);
+        foreach ($storage->glob(StorageService::ZONE_SGD_MEDIA, 'import_*.json', $empresaId, $documentoId) as $metaKey) {
+            $raw = $storage->get($metaKey);
             $meta = is_string($raw) ? json_decode($raw, true) : null;
             $created = is_array($meta) ? (int)($meta['created_at'] ?? 0) : 0;
             if ($created > 0 && ($now - $created) > self::TTL_SECONDS) {
-                $token = str_replace('import_', '', basename($metaPath, '.json'));
+                $basename = basename($metaKey, '.json');
+                $token = str_replace('import_', '', $basename);
                 self::delete($token, $empresaId, $documentoId);
             }
         }

@@ -329,6 +329,7 @@
         });
 
         api.on('draw', function () {
+            cleanupDtButtonOverlays();
             document.dispatchEvent(new CustomEvent('savid-datatable-draw', {
                 detail: { table: tableEl, api: api }
             }));
@@ -354,8 +355,17 @@
         return out;
     }
 
+    function cleanupDtButtonOverlays() {
+        if (!document.querySelector('div.dt-button-collection')) {
+            document.querySelectorAll('div.dt-button-background').forEach(function (bg) {
+                bg.remove();
+            });
+        }
+    }
+
     function initAll(root) {
         collectTables(root).forEach(initTable);
+        cleanupDtButtonOverlays();
     }
 
     function collectTablesFromMutations(mutations) {
@@ -388,6 +398,10 @@
 
     document.addEventListener('DOMContentLoaded', function () {
         initAll(document);
+
+        document.addEventListener('click', function () {
+            window.setTimeout(cleanupDtButtonOverlays, 0);
+        });
 
         var observer = new MutationObserver(function (mutations) {
             clearTimeout(debounceTimer);

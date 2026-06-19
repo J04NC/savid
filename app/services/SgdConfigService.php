@@ -177,7 +177,13 @@ class SgdConfigService
             'pie_pagina' => $pie,
         ];
 
-        $merged = array_merge($prev, ['formato_pdf' => $formato]);
+        $archivoOficial = is_array($prev['archivo_oficial'] ?? null) ? $prev['archivo_oficial'] : [];
+        $archivoOficial['word_proteccion_escritura_obligatoria'] = !empty($post['archivo_word_proteccion_obligatoria']);
+
+        $merged = array_merge($prev, [
+            'formato_pdf' => $formato,
+            'archivo_oficial' => $archivoOficial,
+        ]);
 
         return json_encode($merged, JSON_UNESCAPED_UNICODE);
     }
@@ -204,6 +210,24 @@ class SgdConfigService
         }
 
         return $decoded;
+    }
+
+    /**
+     * @param array<string, mixed> $configExtra
+     *
+     * @return array{word_proteccion_escritura_obligatoria: bool}
+     */
+    public static function archivoOficialSettings(array $configExtra): array
+    {
+        $ao = $configExtra['archivo_oficial'] ?? [];
+        if (!is_array($ao)) {
+            $ao = [];
+        }
+
+        return [
+            'word_proteccion_escritura_obligatoria' => !array_key_exists('word_proteccion_escritura_obligatoria', $ao)
+                || !empty($ao['word_proteccion_escritura_obligatoria']),
+        ];
     }
 
     /**

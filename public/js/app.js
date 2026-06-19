@@ -12,8 +12,33 @@ document.addEventListener("DOMContentLoaded", function () {
     initSidebar();
     initModalSystem();
     initContextButton();
+    cleanupStaleOverlays();
 
 });
+
+window.addEventListener("pageshow", cleanupStaleOverlays);
+
+/**
+ * Quita capas invisibles que a veces quedan abiertas y bloquean clics (p. ej. menú Columnas de DataTables).
+ */
+function cleanupStaleOverlays() {
+
+    document.querySelectorAll("div.dt-button-background").forEach(function (bg) {
+        if (!document.querySelector("div.dt-button-collection")) {
+            bg.remove();
+        }
+    });
+
+    const searchOverlay = document.getElementById("searchOverlay");
+    if (searchOverlay && !searchOverlay.classList.contains("active")) {
+        searchOverlay.setAttribute("aria-hidden", "true");
+    }
+
+    const contextModal = document.getElementById("contextModal");
+    if (contextModal && contextModal.classList.contains("hidden")) {
+        document.body.classList.remove("modal-open");
+    }
+}
 
 /* =====================================================
 SIDEBAR

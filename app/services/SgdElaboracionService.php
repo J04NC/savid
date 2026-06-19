@@ -37,7 +37,7 @@ class SgdElaboracionService
             $documento = $this->repo->findDocumentoById($empresaId, $documentoId);
             if ($documento) {
                 $documento = $this->resolveModoDocumento($empresaId, $documento);
-                $codigoDisplay = $this->codigoService->buildForRow($documento, [$documentoId => $documento]);
+                $codigoDisplay = $this->codigoService->buildForDocument($empresaId, $documento, $this->repo);
                 $elaboracion = $this->repo->findDocumentoElaboracion($empresaId, $documentoId);
                 $opcionesRaw = $this->decodeJsonMap($elaboracion['opciones_json'] ?? null);
                 [$opciones, $numeracion] = $this->splitOpcionesNumeracion($opcionesRaw);
@@ -1173,18 +1173,17 @@ class SgdElaboracionService
             return ['success' => false, 'message' => 'Máximo 5 MB por imagen.'];
         }
 
-        $dir = BASE_PATH . '/public/uploads/sgd/' . $empresaId . '/' . $documentoId . '/media';
-        if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
-            return ['success' => false, 'message' => 'No se pudo crear la carpeta de medios.'];
-        }
-
         $name = 'img_' . bin2hex(random_bytes(8)) . '.' . $ext;
-        $dest = $dir . '/' . $name;
-        if (!@move_uploaded_file($tmp, $dest)) {
+        $path = StorageService::instance()->putUploadedFile(
+            StorageService::ZONE_SGD_MEDIA,
+            $name,
+            $file,
+            $empresaId,
+            $documentoId
+        );
+        if ($path === null) {
             return ['success' => false, 'message' => 'No se pudo guardar la imagen.'];
         }
-
-        $path = '/uploads/sgd/' . $empresaId . '/' . $documentoId . '/media/' . $name;
 
         return ['success' => true, 'message' => 'Imagen subida.', 'path' => $path];
     }

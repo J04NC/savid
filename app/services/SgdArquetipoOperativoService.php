@@ -68,6 +68,70 @@ class SgdArquetipoOperativoService
     }
 
     /**
+     * Política de archivo oficial del esqueleto: pdf_auto | dual | xlsx_upload | upload.
+     */
+    public static function resolveFormatoArchivo(string $arquetipoCodigo): string
+    {
+        $arquetipo = self::findArquetipo($arquetipoCodigo);
+        $formato = strtolower(trim((string)($arquetipo['formato_archivo'] ?? 'pdf_auto')));
+        $allowed = ['pdf_auto', 'dual', 'xlsx_upload', 'upload'];
+
+        return in_array($formato, $allowed, true) ? $formato : 'pdf_auto';
+    }
+
+    public static function canAutoGeneratePdfSkeleton(string $arquetipoCodigo): bool
+    {
+        $formato = self::resolveFormatoArchivo($arquetipoCodigo);
+
+        return $formato === 'pdf_auto' || $formato === 'dual';
+    }
+
+    public static function requiresXlsxUpload(string $arquetipoCodigo): bool
+    {
+        return self::resolveFormatoArchivo($arquetipoCodigo) === 'xlsx_upload';
+    }
+
+    public static function requiresArchivoUpload(string $arquetipoCodigo): bool
+    {
+        $formato = self::resolveFormatoArchivo($arquetipoCodigo);
+
+        return $formato === 'upload' || $formato === 'xlsx_upload';
+    }
+
+    /**
+     * @return list<string>
+     */
+    public static function allowedUploadExtensions(string $arquetipoCodigo): array
+    {
+        return match (self::resolveFormatoArchivo($arquetipoCodigo)) {
+            'xlsx_upload' => ['xlsx', 'xls'],
+            'upload' => ['pdf', 'xlsx', 'xls', 'docx', 'doc'],
+            'dual' => ['pdf', 'xlsx', 'xls'],
+            default => ['pdf'],
+        };
+    }
+
+    public static function detectArchivoTipo(?string $archivoRuta): string
+    {
+        $ext = strtolower(pathinfo(trim((string)$archivoRuta), PATHINFO_EXTENSION));
+
+        return match ($ext) {
+            'xlsx', 'xls' => 'xlsx',
+            'docx', 'doc' => 'docx',
+            default => 'pdf',
+        };
+    }
+
+    public static function archivoTipoLabel(string $tipo): string
+    {
+        return match ($tipo) {
+            'xlsx' => 'Excel',
+            'docx' => 'Word',
+            default => 'PDF',
+        };
+    }
+
+    /**
      * @return array<string, string> seccion_codigo => aplica|no_aplica|opcional
      */
     public static function perfilBloques(string $arquetipoCodigo): array
