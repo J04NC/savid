@@ -16,6 +16,8 @@ class StorageService
 
     public const ZONE_SGD_IMPORTS = 'sgd_imports';
 
+    public const ZONE_ACAD_MEDIA = 'acad_media';
+
     private static ?self $instance = null;
 
     private StorageDriverInterface $driver;
@@ -282,6 +284,14 @@ class StorageService
                 'path' => static fn (array $segments): array => array_merge(
                     ['sgd_imports'],
                     array_map(static fn ($s) => (string)$s, $segments)
+                ),
+            ],
+            self::ZONE_ACAD_MEDIA => [
+                'visibility' => 'public',
+                'path' => static fn (array $segments): array => array_merge(
+                    ['acad'],
+                    array_map(static fn ($s) => (string)$s, $segments),
+                    ['media']
                 ),
             ],
         ];

@@ -46,7 +46,7 @@ class ModuleRepository
         $notDeleted = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'item');
 
         $stmt = $this->pdo->prepare("
-            SELECT id, nombre, item_padre_id
+            SELECT id, nombre, nombre_es, item_padre_id
             FROM item
             WHERE id = ?
             {$notDeleted}

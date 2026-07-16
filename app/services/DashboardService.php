@@ -51,7 +51,7 @@ class DashboardService
 
     public function getItemData($itemId)
     {
-        $items = $this->moduleRepository->findChildrenByParentId($itemId);
+        $items = $this->menuService->applyNombreEsLocale($this->moduleRepository->findChildrenByParentId($itemId));
         $currentItem = $this->moduleRepository->findItemDetailById($itemId);
 
         $breadcrumb = '<a href="?url=dashboard">INICIO</a>';
@@ -79,6 +79,8 @@ class DashboardService
             $singleRootSameAsModulo = $modulo !== null
                 && count($path) === 1
                 && strcasecmp(trim((string)($path[0]['nombre'] ?? '')), trim((string)$modulo['nombre'])) === 0;
+
+            $path = $this->menuService->applyNombreEsLocale($path);
 
             if ($modulo && !$singleRootSameAsModulo) {
                 $breadcrumb .= ' <span class="separator"> / </span> ';

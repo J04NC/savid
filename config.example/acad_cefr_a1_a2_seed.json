@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "levels": [
+    {"code": "A1", "name_en": "Breakthrough / Beginner", "order": 10},
+    {"code": "A2", "name_en": "Waystage / Elementary", "order": 20}
+  ],
+  "skills": [
+    {"code": "READING", "name_en": "Reading", "order": 10},
+    {"code": "WRITING", "name_en": "Writing", "order": 20},
+    {"code": "SPEAKING", "name_en": "Speaking", "order": 30}
+  ],
+  "descriptors": [
+    {"level": "A1", "skill": "READING", "code": "A1-R-01", "descriptor_en": "Can understand familiar names, words and very simple sentences, for example on notices and posters or in catalogues.", "order": 10},
+    {"level": "A1", "skill": "READING", "code": "A1-R-02", "descriptor_en": "Can read very short, simple texts.", "order": 20},
+    {"level": "A1", "skill": "READING", "code": "A1-R-03", "descriptor_en": "Can find specific, predictable information in simple everyday material such as advertisements, prospectuses, menus and timetables.", "order": 30},
+    {"level": "A1", "skill": "WRITING", "code": "A1-W-01", "descriptor_en": "Can write a short, simple postcard, for example sending holiday greetings.", "order": 10},
+    {"level": "A1", "skill": "WRITING", "code": "A1-W-02", "descriptor_en": "Can fill in forms with personal details, for example entering name, nationality and address on a hotel registration form.", "order": 20},
+    {"level": "A1", "skill": "WRITING", "code": "A1-W-03", "descriptor_en": "Can write simple isolated phrases and sentences.", "order": 30},
+    {"level": "A1", "skill": "SPEAKING", "code": "A1-S-01", "descriptor_en": "Can interact in a simple way provided the other person is prepared to repeat or rephrase things at a slower rate of speech.", "order": 10},
+    {"level": "A1", "skill": "SPEAKING", "code": "A1-S-02", "descriptor_en": "Can ask and answer simple questions on very familiar topics.", "order": 20},
+    {"level": "A1", "skill": "SPEAKING", "code": "A1-S-03", "descriptor_en": "Can use simple phrases and sentences to describe where they live and people they know.", "order": 30},
+    {"level": "A2", "skill": "READING", "code": "A2-R-01", "descriptor_en": "Can read very short, simple texts.", "order": 10},
+    {"level": "A2", "skill": "READING", "code": "A2-R-02", "descriptor_en": "Can find specific, predictable information in simple everyday material such as advertisements, prospectuses, menus and timetables.", "order": 20},
+    {"level": "A2", "skill": "READING", "code": "A2-R-03", "descriptor_en": "Can understand short simple personal letters.", "order": 30},
+    {"level": "A2", "skill": "WRITING", "code": "A2-W-01", "descriptor_en": "Can write short, simple notes and messages relating to matters in areas of immediate need.", "order": 10},
+    {"level": "A2", "skill": "WRITING", "code": "A2-W-02", "descriptor_en": "Can write a very simple personal letter, for example thanking someone for something.", "order": 20},
+    {"level": "A2", "skill": "WRITING", "code": "A2-W-03", "descriptor_en": "Can describe in simple language family, living conditions, educational background, present or most recent job.", "order": 30},
+    {"level": "A2", "skill": "SPEAKING", "code": "A2-S-01", "descriptor_en": "Can communicate in simple and routine tasks requiring a simple and direct exchange of information.", "order": 10},
+    {"level": "A2", "skill": "SPEAKING", "code": "A2-S-02", "descriptor_en": "Can describe in simple terms aspects of their background, immediate environment and matters in areas of immediate need.", "order": 20},
+    {"level": "A2", "skill": "SPEAKING", "code": "A2-S-03", "descriptor_en": "Can handle very short social exchanges; can ask and answer questions about habits and routines.", "order": 30}
+  ]
+}

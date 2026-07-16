@@ -822,6 +822,11 @@ if (!empty($crudContextTable) && $crudContextTable === 'usuario') {
     $ujsV = ($ujsPath !== '' && is_readable($ujsPath)) ? (int) filemtime($ujsPath) : time();
     echo '<script src="/js/usuario_crud.js?v=' . $ujsV . '"></script>';
 }
+if (!empty($crudContextTable) && $crudContextTable === 'acad_exercise') {
+    $aejsPath = defined('BASE_PATH') ? BASE_PATH . '/public/js/acad-exercise-config.js' : '';
+    $aejsV = ($aejsPath !== '' && is_readable($aejsPath)) ? (int) filemtime($aejsPath) : time();
+    echo '<script src="/js/acad-exercise-config.js?v=' . $aejsV . '"></script>';
+}
 ?>
 
 </div>

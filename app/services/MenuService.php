@@ -129,7 +129,7 @@ class MenuService
                 ORDER BY orden
             ");
             $stmt->execute([$moduloId]);
-            $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            $items = $this->applyNombreEsLocale($stmt->fetchAll(PDO::FETCH_ASSOC));
 
             return $this->buildTree($items);
         }
@@ -146,6 +146,29 @@ class MenuService
         $filtered = $this->filterItemsWithAncestors($items);
 
         return $this->buildTree($filtered);
+    }
+
+    /**
+     * Para superadmin: sustituye `nombre` por `nombre_es` cuando exista,
+     * sin afectar lo que ven docentes/estudiantes (siempre en inglés).
+     *
+     * @param array<int, array<string, mixed>> $items
+     * @return array<int, array<string, mixed>>
+     */
+    public function applyNombreEsLocale(array $items): array
+    {
+        if (empty($_SESSION['es_super_admin'])) {
+            return $items;
+        }
+
+        foreach ($items as &$item) {
+            if (!empty($item['nombre_es'])) {
+                $item['nombre'] = $item['nombre_es'];
+            }
+        }
+        unset($item);
+
+        return $items;
     }
 
     /**
@@ -237,13 +260,15 @@ class MenuService
         $itemNotDeleted = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'item', 'i');
 
         if (!empty($_SESSION['es_super_admin'])) {
-            return $this->pdo->query("
-                SELECT DISTINCT i.nombre, i.ruta
+            $rows = $this->pdo->query("
+                SELECT DISTINCT i.nombre, i.nombre_es, i.ruta
                 FROM item i
                 WHERE i.estado_id = 1
                 {$itemNotDeleted}
                 ORDER BY i.nombre
             ")->fetchAll(PDO::FETCH_ASSOC);
+
+            return $this->applyNombreEsLocale($rows);
         }
 
         $stmt = $this->pdo->query("
