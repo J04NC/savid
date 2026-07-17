@@ -295,6 +295,19 @@
         el.dispatchEvent(new Event("change", { bubbles: true }));
     }
 
+    /**
+     * Autocompleta un campo de foto/firma solo si sigue vacío: evita que una búsqueda
+     * de tercero (numero_documento/username/email) que responde tarde borre una foto
+     * o firma que el usuario ya cargó en esta misma sesión del formulario pero aún no ha guardado.
+     */
+    function setMediaFieldIfEmpty(form, name, value) {
+        const el = form.querySelector('[name="' + name + '"]');
+        if (el && String(el.value || "").trim() !== "") {
+            return;
+        }
+        setField(form, name, value || "");
+    }
+
     function applyTerceroPayload(form, payload, usuario) {
         if (!payload || isFormSubmitting(form)) return;
 
@@ -318,8 +331,8 @@
             setField(form, "nombres", payload.nombres || "");
             setField(form, "apellidos", payload.apellidos || "");
             setField(form, "email", payload.email || "");
-            setField(form, "foto_ruta", payload.foto_ruta || "");
-            setField(form, "firma_ruta", payload.firma_ruta || "");
+            setMediaFieldIfEmpty(form, "foto_ruta", payload.foto_ruta);
+            setMediaFieldIfEmpty(form, "firma_ruta", payload.firma_ruta);
 
             if (usuario) {
                 if (usuario.username) setField(form, "username", usuario.username);
