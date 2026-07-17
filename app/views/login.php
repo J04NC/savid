@@ -11,10 +11,6 @@
 
 <div class="main-container">
     <div class="login-box">
-        <div class="avatar">
-            <img src="/img/avatar.png" alt="Usuario">
-        </div>
-
         <form method="POST" action="?url=login/authenticate">
             <?php
             // 🔥 SIMPLE - FUNCIONA SIEMPRE

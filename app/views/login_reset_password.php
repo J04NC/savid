@@ -11,10 +11,6 @@
 
 <div class="main-container">
     <div class="login-box">
-        <div class="avatar">
-            <img src="/img/avatar.png" alt="Usuario">
-        </div>
-
         <?php if (!$validation['valid']): ?>
 
             <div class="error-message"><?= htmlspecialchars($validation['error']) ?></div>

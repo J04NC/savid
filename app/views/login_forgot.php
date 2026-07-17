@@ -11,10 +11,6 @@
 
 <div class="main-container">
     <div class="login-box">
-        <div class="avatar">
-            <img src="/img/avatar.png" alt="Usuario">
-        </div>
-
         <form method="POST" action="?url=login/forgotSend">
             <?php
             $message = $_SESSION['forgot_message'] ?? null;
