@@ -562,6 +562,9 @@
     });
 
     if (revertModal) {
+        if (revertModal.parentElement && revertModal.parentElement !== document.body) {
+            document.body.appendChild(revertModal);
+        }
         revertModal.querySelectorAll('[data-revert-close]').forEach(function (el) {
             el.addEventListener('click', closeRevertModal);
         });

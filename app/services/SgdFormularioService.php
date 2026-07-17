@@ -8,12 +8,14 @@ class SgdFormularioService
     private SgdRepository $repo;
     private SgdScopeService $scope;
     private SgdDocumentoCodigoService $codigoService;
+    private SgdFormularioEsquemaService $esquemaService;
 
     public function __construct()
     {
         $this->repo = new SgdRepository();
         $this->scope = new SgdScopeService();
         $this->codigoService = new SgdDocumentoCodigoService();
+        $this->esquemaService = new SgdFormularioEsquemaService();
     }
 
     /**
@@ -31,7 +33,7 @@ class SgdFormularioService
         $formulario = null;
         $version = null;
         $versiones = [];
-        $esquema = ['version' => 2, 'arquetipo' => 'libre', 'bloques' => [], 'campos' => []];
+        $esquema = ['version' => 3, 'arquetipo' => 'libre', 'elementos' => []];
         $proposito = 'operativo';
         $codigoDisplay = '';
         $borradorDesdeVigente = false;
@@ -154,11 +156,11 @@ class SgdFormularioService
         if (!is_array($esquema)) {
             return ['success' => false, 'message' => 'Esquema de formulario no válido.'];
         }
-        if (!isset($esquema['campos']) && !isset($esquema['bloques'])) {
+        if (!isset($esquema['elementos']) && !isset($esquema['campos']) && !isset($esquema['bloques'])) {
             return ['success' => false, 'message' => 'Esquema de formulario no válido.'];
         }
 
-        $normalized = $this->normalizeEsquema($esquema);
+        $normalized = $this->esquemaService->normalize($esquema);
         $userId = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : null;
         $this->repo->saveFormularioVersionEsquema($empresaId, $versionId, $normalized, $userId);
 
@@ -216,15 +218,69 @@ class SgdFormularioService
      */
     public function decodeEsquemaJson(mixed $raw): array
     {
-        return $this->decodeEsquema($raw);
+        return $this->esquemaService->normalize($this->decodeEsquemaRaw($raw));
+    }
+
+    /**
+     * @param array{version?: int, arquetipo?: string, elementos?: list<array<string, mixed>>} $esquema
+     */
+    public function esquemaTieneContenido(array $esquema): bool
+    {
+        return $this->esquemaService->tieneContenido($esquema);
+    }
+
+    /**
+     * @return array{version: int, arquetipo?: string, elementos: list<array<string, mixed>>}
+     */
+    private function decodeEsquema(mixed $raw): array
+    {
+        return $this->esquemaService->normalize($this->decodeEsquemaRaw($raw));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function decodeEsquemaRaw(mixed $raw): array
+    {
+        if (is_string($raw) && $raw !== '') {
+            $decoded = json_decode($raw, true);
+            if (is_array($decoded)) {
+                return $decoded;
+            }
+        }
+        if (is_array($raw)) {
+            return $raw;
+        }
+
+        return ['version' => 3, 'arquetipo' => 'libre', 'elementos' => []];
     }
 
     /**
      * @param array{version?: int, arquetipo?: string, bloques?: list<array<string, mixed>>, campos?: list<array<string, mixed>>} $esquema
      */
-    public function esquemaTieneContenido(array $esquema): bool
+    private function esquemaHasContent(array $esquema): bool
     {
-        return $this->esquemaHasContent($esquema);
+        return $this->esquemaService->tieneContenido($esquema);
+    }
+
+    /** @deprecated use SgdFormularioEsquemaService */
+    private function normalizeEsquema(array $esquema): array
+    {
+        return $this->esquemaService->normalize($esquema);
+    }
+
+    /** @deprecated use SgdFormularioEsquemaService */
+    private function normalizeEsquemaV2(array $esquema): array
+    {
+        return $this->esquemaService->normalize($esquema);
+    }
+
+    /** @deprecated use SgdFormularioEsquemaService */
+    private function normalizeEsquemaV1(array $esquema): array
+    {
+        $norm = $this->esquemaService->normalize($esquema);
+
+        return ['campos' => array_values(array_filter($norm['elementos'], static fn($e) => ($e['tipo'] ?? '') === 'campo'))];
     }
 
     /**
@@ -272,7 +328,7 @@ class SgdFormularioService
         }
 
         $vigente = $this->repo->findFormularioVersionVigente($empresaId, $formularioId);
-        $esquemaSeed = ['version' => 2, 'arquetipo' => 'libre', 'bloques' => [], 'campos' => []];
+        $esquemaSeed = ['version' => 3, 'arquetipo' => 'libre', 'elementos' => []];
         $vigenteNumero = null;
         if ($vigente !== null) {
             $esquemaSeed = $this->decodeEsquema($vigente['esquema_json'] ?? null);
@@ -333,150 +389,5 @@ class SgdFormularioService
         }
 
         return 'operativo';
-    }
-
-    /**
-     * @return array{version: int, arquetipo?: string, bloques?: list<array<string, mixed>>, campos: list<array<string, mixed>>}
-     */
-    private function decodeEsquema(mixed $raw): array
-    {
-        if (is_string($raw) && $raw !== '') {
-            $decoded = json_decode($raw, true);
-            if (is_array($decoded)) {
-                return $this->normalizeEsquema($decoded);
-            }
-        }
-        if (is_array($raw)) {
-            return $this->normalizeEsquema($raw);
-        }
-
-        return ['version' => 2, 'arquetipo' => 'libre', 'bloques' => [], 'campos' => []];
-    }
-
-    /**
-     * @param array<string, mixed> $esquema
-     * @return array{version: int, arquetipo?: string, bloques?: list<array<string, mixed>>, campos: list<array<string, mixed>>}
-     */
-    private function normalizeEsquema(array $esquema): array
-    {
-        $version = (int)($esquema['version'] ?? 1);
-        if ($version >= 2 || !empty($esquema['bloques']) || !empty($esquema['arquetipo'])) {
-            return $this->normalizeEsquemaV2($esquema);
-        }
-
-        return array_merge(
-            ['version' => 1, 'campos' => []],
-            $this->normalizeEsquemaV1($esquema)
-        );
-    }
-
-    /**
-     * @param array<string, mixed> $esquema
-     * @return array{version: int, arquetipo: string, bloques: list<array<string, mixed>>, campos: list<array<string, mixed>>}
-     */
-    private function normalizeEsquemaV2(array $esquema): array
-    {
-        $arquetipo = strtolower(trim((string)($esquema['arquetipo'] ?? 'libre')));
-        if (!in_array($arquetipo, SgdArquetipoOperativoService::ARQUETIPOS, true)) {
-            $arquetipo = 'libre';
-        }
-
-        $bloques = [];
-        $orden = 10;
-        foreach ($esquema['bloques'] ?? [] as $bloque) {
-            if (!is_array($bloque) || empty($bloque['seccion_codigo'])) {
-                continue;
-            }
-            $estado = (string)($bloque['estado'] ?? 'aplica');
-            if (!in_array($estado, ['aplica', 'no_aplica', 'opcional'], true)) {
-                $estado = 'aplica';
-            }
-            $item = [
-                'seccion_codigo' => strtolower(trim((string)$bloque['seccion_codigo'])),
-                'nombre' => trim((string)($bloque['nombre'] ?? $bloque['seccion_codigo'])),
-                'widget' => trim((string)($bloque['widget'] ?? 'grupo_campos')),
-                'estado' => $estado,
-                'orden' => (int)($bloque['orden'] ?? $orden),
-            ];
-            if (!empty($bloque['definicion']) && is_array($bloque['definicion'])) {
-                $item['definicion'] = $bloque['definicion'];
-            }
-            $bloques[] = $item;
-            $orden += 10;
-        }
-
-        usort($bloques, static fn($a, $b) => ($a['orden'] ?? 0) <=> ($b['orden'] ?? 0));
-
-        return [
-            'version' => 2,
-            'arquetipo' => $arquetipo,
-            'bloques' => $bloques,
-            'campos' => $this->normalizeEsquemaV1($esquema)['campos'],
-        ];
-    }
-
-    /**
-     * @param array<string, mixed> $esquema
-     * @return array{campos: list<array<string, mixed>>}
-     */
-    private function normalizeEsquemaV1(array $esquema): array
-    {
-        $campos = [];
-        $orden = 10;
-        foreach ($esquema['campos'] ?? [] as $campo) {
-            if (!is_array($campo)) {
-                continue;
-            }
-            $id = $this->slugCampoId((string)($campo['id'] ?? ''));
-            if ($id === '') {
-                continue;
-            }
-            $tipo = strtolower(trim((string)($campo['tipo'] ?? 'texto')));
-            if (!in_array($tipo, self::TIPOS_CAMPO, true)) {
-                $tipo = 'texto';
-            }
-            $item = [
-                'id' => $id,
-                'tipo' => $tipo,
-                'label' => trim((string)($campo['label'] ?? $id)),
-                'requerido' => !empty($campo['requerido']),
-                'orden' => (int)($campo['orden'] ?? $orden),
-            ];
-            if ($tipo === 'lista' && !empty($campo['opciones']) && is_array($campo['opciones'])) {
-                $item['opciones'] = array_values(array_filter(array_map('strval', $campo['opciones'])));
-            }
-            $campos[] = $item;
-            $orden += 10;
-        }
-
-        usort($campos, static fn($a, $b) => ($a['orden'] ?? 0) <=> ($b['orden'] ?? 0));
-
-        return ['campos' => $campos];
-    }
-
-    /**
-     * @param array{version?: int, arquetipo?: string, bloques?: list<array<string, mixed>>, campos?: list<array<string, mixed>>} $esquema
-     */
-    private function esquemaHasContent(array $esquema): bool
-    {
-        if (($esquema['campos'] ?? []) !== []) {
-            return true;
-        }
-        foreach ($esquema['bloques'] ?? [] as $bloque) {
-            if (($bloque['estado'] ?? 'aplica') !== 'no_aplica') {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private function slugCampoId(string $raw): string
-    {
-        $raw = strtolower(trim($raw));
-        $raw = preg_replace('/[^a-z0-9_]+/', '_', $raw) ?? '';
-        $raw = trim($raw, '_');
-
-        return $raw;
     }
 }

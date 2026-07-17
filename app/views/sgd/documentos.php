@@ -48,9 +48,7 @@ $uploadAccept = implode(',', array_map(
     },
     $uploadExtensions
 ));
-$uploadLabel = count($uploadExtensions) === 1 && ($uploadExtensions[0] ?? '') === 'pdf'
-    ? 'PDF'
-    : 'archivo';
+$uploadLabel = SgdArquetipoOperativoService::uploadFormatsLabel($uploadExtensions);
 
 $sgdDocJs = BASE_PATH . '/public/js/sgd-documentos.js';
 $sgdDocJsV = is_readable($sgdDocJs) ? (int)filemtime($sgdDocJs) : time();
@@ -114,6 +112,8 @@ $formatOption = static function (string $codigo, string $nombre): string {
                     <?php else: ?>
                         <a href="<?= htmlspecialchars('?url=sgd/formularios' . $empresaQuery . '&documento_id=' . (int)$form['id'], ENT_QUOTES, 'UTF-8') ?>"
                            class="sgd-doc-btn" title="Diseñar plantilla operativa">📝 Diseñar plantilla</a>
+                        <a href="<?= htmlspecialchars('?url=sgd/registros' . $empresaQuery . '&documento_id=' . (int)$form['id'], ENT_QUOTES, 'UTF-8') ?>"
+                           class="sgd-doc-btn" title="Instancias diligenciadas de este formato">📋 Registros</a>
                         <?php if ($canPreviewPlantilla && $previewPlantillaUrl !== ''): ?>
                             <a href="<?= htmlspecialchars($previewPlantillaUrl, ENT_QUOTES, 'UTF-8') ?>"
                                class="sgd-doc-btn" target="_blank" rel="noopener"
@@ -134,7 +134,7 @@ $formatOption = static function (string $codigo, string $nombre): string {
                     <span class="sgd-doc-count"><?= (int)$total ?> documento(s)</span>
                 </header>
                 <div class="sgd-doc-table-wrap">
-                    <table class="sgd-doc-table savid-datatable" data-dt-page-length="50">
+                    <table class="sgd-doc-table savid-datatable" data-dt-page-length="50" data-dt-buttons="false">
                         <thead>
                             <tr>
                                 <th>Código</th>
@@ -362,10 +362,13 @@ $formatOption = static function (string $codigo, string $nombre): string {
                                 Formato operativo (arquetipo <strong><?= htmlspecialchars($arquetipoOperativo, ENT_QUOTES, 'UTF-8') ?></strong>).
                                 <?php if ($formatoArchivoEsperado === 'xlsx_upload'): ?>
                                     El esqueleto oficial es <strong>Excel (.xlsx)</strong>. Suba la plantilla aquí y publíquela desde el diseñador o desde esta tabla.
+                                <?php elseif ($formatoArchivoEsperado === 'docx_upload'): ?>
+                                    El esqueleto oficial es <strong>Word (.docx)</strong>. Suba la plantilla aquí y publíquela desde el diseñador o desde esta tabla.
                                 <?php elseif ($canAutoGenerateEsqueleto): ?>
                                     Al publicar desde el <strong>diseñador de plantilla</strong> se generará el PDF esqueleto y quedará vigente aquí.
+                                    También puede subir <strong><?= htmlspecialchars($uploadLabel, ENT_QUOTES, 'UTF-8') ?></strong> como archivo oficial.
                                 <?php else: ?>
-                                    Suba el archivo de referencia (PDF o Excel) antes de publicar.
+                                    Suba el archivo de referencia (<strong><?= htmlspecialchars($uploadLabel, ENT_QUOTES, 'UTF-8') ?></strong>) antes de publicar.
                                 <?php endif; ?>
                             </p>
                         <?php endif; ?>
@@ -468,7 +471,7 @@ $formatOption = static function (string $codigo, string $nombre): string {
                                                             <span class="sgd-doc-ver-file-name" aria-live="polite"></span>
                                                         </form>
                                                         <?php if ($canAutoPublishVersion): ?>
-                                                            <p class="field-note sgd-doc-ver-upload-hint">Opcional si sube escaneado; si no, el PDF puede generarse al publicar.</p>
+                                                            <p class="field-note sgd-doc-ver-upload-hint">Opcional si sube <?= htmlspecialchars(strtolower($uploadLabel), ENT_QUOTES, 'UTF-8') ?>; si no, el PDF puede generarse al publicar.</p>
                                                         <?php endif; ?>
                                                     <?php else: ?>
                                                         <span class="sgd-doc-ver-sin-pdf">—</span>

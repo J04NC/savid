@@ -16,6 +16,7 @@ class SgdController
     private SgdElaboracionService $elaboracionService;
     private SgdPdfGenerationService $pdfService;
     private SgdFormularioPreviewService $formularioPreviewService;
+    private SgdRegistroService $registroService;
 
     public function __construct()
     {
@@ -33,6 +34,7 @@ class SgdController
         $this->elaboracionService = new SgdElaboracionService();
         $this->pdfService = new SgdPdfGenerationService();
         $this->formularioPreviewService = new SgdFormularioPreviewService();
+        $this->registroService = new SgdRegistroService();
     }
 
     public function index(): void
@@ -316,17 +318,140 @@ class SgdController
         $canPreviewPlantilla = !empty($page['canPreviewPlantilla']);
         $previewPdfUrl = (string)($page['previewPdfUrl'] ?? '');
         $breadcrumb = $this->moduleService->buildBreadcrumbForRuta('sgd/formularios');
-        $canGuardar = PermisoService::can('sgd/formularios', 'guardar');
+        $canGuardar = PermisoService::can('sgd/formularios', 'guardar')
+            || PermisoService::can('sgd/documentos', 'guardar');
 
         $view = BASE_PATH . '/app/views/sgd/formularios.php';
         require BASE_PATH . '/app/views/layouts/main.php';
+    }
+
+    public function registros(): void
+    {
+        if (!PermisoService::can('sgd/registros', 'ver')) {
+            $this->deny();
+        }
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $this->handleRegistrosPost();
+
+            return;
+        }
+
+        $page = $this->registroService->getListPageData($_GET);
+        $scope = $page['scope'];
+        $empresaId = $page['empresaId'];
+        $documentoId = (int)($page['documentoId'] ?? 0);
+        $documento = $page['documento'];
+        $codigoDisplay = (string)($page['codigoDisplay'] ?? '');
+        $registros = $page['registros'] ?? [];
+        $breadcrumb = $this->moduleService->buildBreadcrumbForRuta('sgd/registros');
+        $canGuardar = PermisoService::can('sgd/registros', 'guardar');
+        $canEliminar = PermisoService::can('sgd/registros', 'eliminar');
+
+        $view = BASE_PATH . '/app/views/sgd/registros.php';
+        require BASE_PATH . '/app/views/layouts/main.php';
+    }
+
+    public function registrosDiligenciar(): void
+    {
+        if (!PermisoService::can('sgd/registros', 'ver')) {
+            $this->deny();
+        }
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $this->handleRegistrosDiligenciarPost();
+
+            return;
+        }
+
+        $page = $this->registroService->getDiligenciarPageData($_GET);
+        $scope = $page['scope'];
+        $empresaId = $page['empresaId'];
+        $registroId = (int)($page['registroId'] ?? 0);
+        $registro = $page['registro'];
+        $documento = $page['documento'];
+        $codigoDisplay = (string)($page['codigoDisplay'] ?? '');
+        $esquema = $page['esquema'];
+        $esquemaJson = (string)($page['esquemaJson'] ?? '{}');
+        $datosJson = (string)($page['datosJson'] ?? '{}');
+        $editable = !empty($page['editable']);
+        $breadcrumb = $this->moduleService->buildBreadcrumbForRuta('sgd/registros');
+        $canGuardar = PermisoService::can('sgd/registros', 'guardar');
+
+        $view = BASE_PATH . '/app/views/sgd/registros_diligenciar.php';
+        require BASE_PATH . '/app/views/layouts/main.php';
+    }
+
+    private function handleRegistrosPost(): void
+    {
+        $action = trim((string)($_POST['_action'] ?? 'crear'));
+
+        if ($action === 'crear' && !PermisoService::can('sgd/registros', 'guardar')) {
+            $this->deny();
+        }
+        if ($action === 'anular' && !PermisoService::can('sgd/registros', 'eliminar')) {
+            $this->deny();
+        }
+
+        $result = match ($action) {
+            'crear' => $this->registroService->crearRegistro($_GET, $_POST),
+            'anular' => $this->registroService->anularRegistro($_POST, $_GET),
+            default => ['success' => false, 'message' => 'Acción no válida.'],
+        };
+
+        if ($this->wantsJsonResponse()) {
+            $this->jsonResponse($result);
+
+            return;
+        }
+
+        $_SESSION['flash_notice'] = $result['message'];
+        $q = $this->empresaQuery();
+        if ($action === 'crear' && !empty($result['success']) && !empty($result['id'])) {
+            header('Location: ?url=sgd/registrosDiligenciar' . $q . '&id=' . (int)$result['id']);
+            exit;
+        }
+
+        $docId = (int)($_POST['documento_id'] ?? $_GET['documento_id'] ?? 0);
+        if ($docId > 0) {
+            $q .= ($q === '' ? '&' : '&') . 'documento_id=' . $docId;
+        }
+        header('Location: ?url=sgd/registros' . $q);
+        exit;
+    }
+
+    private function handleRegistrosDiligenciarPost(): void
+    {
+        if (!PermisoService::can('sgd/registros', 'guardar')) {
+            $this->deny();
+        }
+
+        $action = trim((string)($_POST['_action'] ?? 'guardar'));
+        $result = match ($action) {
+            'guardar' => $this->registroService->guardarDatos($_POST, $_GET),
+            'cerrar' => $this->registroService->cerrarRegistro($_POST, $_GET),
+            default => ['success' => false, 'message' => 'Acción no válida.'],
+        };
+
+        if ($this->wantsJsonResponse()) {
+            $this->jsonResponse($result);
+
+            return;
+        }
+
+        $_SESSION['flash_notice'] = $result['message'];
+        $q = $this->empresaQuery();
+        $registroId = (int)($_POST['registro_id'] ?? $_GET['id'] ?? 0);
+        header('Location: ?url=sgd/registrosDiligenciar' . $q . '&id=' . $registroId);
+        exit;
     }
 
     private function handleFormulariosPost(): void
     {
         $action = trim((string)($_POST['_action'] ?? 'save'));
 
-        if (!PermisoService::can('sgd/formularios', 'guardar')) {
+        if (!PermisoService::can('sgd/formularios', 'guardar')
+            && !PermisoService::can('sgd/documentos', 'guardar')) {
             $this->deny();
         }
 
@@ -858,6 +983,34 @@ class SgdController
         header('Pragma: no-cache');
         echo $binary;
         exit;
+    }
+
+    public function lookupTerceros(): void
+    {
+        if (!PermisoService::can('sgd/registros', 'ver')
+            && !PermisoService::can('sgd/formularios', 'ver')
+            && !PermisoService::can('sgd/documentos', 'ver')) {
+            $this->deny();
+        }
+
+        try {
+            $empresaId = $this->scope->requireEmpresaId($_GET);
+        } catch (RuntimeException $e) {
+            $this->jsonResponse(['success' => false, 'message' => $e->getMessage(), 'items' => []]);
+
+            return;
+        }
+
+        if (!$this->scope->canAccessEmpresa($empresaId, $_GET)) {
+            $this->jsonResponse(['success' => false, 'message' => 'Sin permiso.', 'items' => []]);
+        }
+
+        $q = trim((string)($_GET['q'] ?? ''));
+        $svc = new SgdTerceroLookupService();
+        $this->jsonResponse([
+            'success' => true,
+            'items' => $svc->search($q),
+        ]);
     }
 
     public function formularioPreviewPdf(): void

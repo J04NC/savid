@@ -1129,6 +1129,8 @@ class SgdRepository
                 deleted_by = NULL,
                 estado_id = ?,
                 es_vigente = 0,
+                archivo_ruta = NULL,
+                archivo_tipo = NULL,
                 formulario_version_id = ?,
                 notas = COALESCE(?, notas),
                 updated_at = NOW(3),
@@ -1139,6 +1141,72 @@ class SgdRepository
             self::ESTADO_DOC_BORRADOR,
             $formularioVersionId,
             $notas,
+            $userId,
+            $versionId,
+            $empresaId,
+        ]);
+    }
+
+    /**
+     * Busca versión de plantilla por número incluyendo filas soft-deleted (para reactivar sin violar UNIQUE).
+     */
+    public function findFormularioVersionByNumeroAny(
+        int $empresaId,
+        int $formularioId,
+        string $numero,
+        ?int $sedeId = null
+    ): ?array {
+        if ($sedeId === null) {
+            $stmt = $this->pdo->prepare('
+                SELECT v.*
+                FROM sgd_formulario_version v
+                WHERE v.empresa_id = ? AND v.formulario_id = ? AND v.numero = ? AND v.sede_id IS NULL
+                ORDER BY v.deleted_at IS NULL DESC, v.id DESC
+                LIMIT 1
+            ');
+            $stmt->execute([$empresaId, $formularioId, trim($numero)]);
+        } else {
+            $stmt = $this->pdo->prepare('
+                SELECT v.*
+                FROM sgd_formulario_version v
+                WHERE v.empresa_id = ? AND v.formulario_id = ? AND v.numero = ? AND v.sede_id = ?
+                ORDER BY v.deleted_at IS NULL DESC, v.id DESC
+                LIMIT 1
+            ');
+            $stmt->execute([$empresaId, $formularioId, trim($numero), $sedeId]);
+        }
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row ?: null;
+    }
+
+    /**
+     * @param array<string, mixed>|string|null $esquemaJson
+     */
+    public function reactivateFormularioVersionBorrador(
+        int $empresaId,
+        int $versionId,
+        array|string|null $esquemaJson,
+        ?int $userId = null
+    ): void {
+        if (is_array($esquemaJson)) {
+            $esquemaJson = json_encode($esquemaJson, JSON_UNESCAPED_UNICODE);
+        }
+
+        $stmt = $this->pdo->prepare('
+            UPDATE sgd_formulario_version
+            SET deleted_at = NULL,
+                deleted_by = NULL,
+                estado_id = ?,
+                es_vigente = 0,
+                esquema_json = COALESCE(?, esquema_json),
+                updated_at = NOW(3),
+                updated_by = ?
+            WHERE id = ? AND empresa_id = ?
+        ');
+        $stmt->execute([
+            self::ESTADO_DOC_BORRADOR,
+            $esquemaJson,
             $userId,
             $versionId,
             $empresaId,
@@ -1529,6 +1597,25 @@ class SgdRepository
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
         return $row ?: null;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function listDocumentoBorradorVersiones(int $empresaId, int $documentoId): array
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_documento_version', 'v');
+        $stmt = $this->pdo->prepare("
+            SELECT v.*
+            FROM sgd_documento_version v
+            WHERE v.empresa_id = ? AND v.documento_id = ?
+              AND v.estado_id = ? {$nd}
+            ORDER BY CAST(v.numero AS DECIMAL(10,2)) ASC, v.id ASC
+        ");
+        $stmt->execute([$empresaId, $documentoId, self::ESTADO_DOC_BORRADOR]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        return $rows ?: [];
     }
 
     public function softDeleteFormularioVersion(int $empresaId, int $versionId, ?int $userId = null): void
@@ -2724,6 +2811,224 @@ class SgdRepository
             WHERE id = ? AND empresa_id = ?
         ');
         $stmt->execute([$json, $versionId, $empresaId]);
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function listRegistros(int $empresaId, ?int $documentoId = null): array
+    {
+        if (!$this->tableExists('sgd_registro')) {
+            return [];
+        }
+
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_registro', 'r');
+        $docNd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_documento', 'd');
+        $params = [$empresaId];
+        $docFilter = '';
+        if ($documentoId !== null && $documentoId > 0) {
+            $docFilter = ' AND r.documento_id = ?';
+            $params[] = $documentoId;
+        }
+
+        $stmt = $this->pdo->prepare("
+            SELECT r.id, r.documento_id, r.formulario_version_id, r.documento_version_id,
+                   r.arquetipo, r.titulo, r.estado, r.created_at, r.updated_at, r.created_by,
+                   d.nombre AS documento_nombre,
+                   fv.numero AS formulario_version_numero
+            FROM sgd_registro r
+            INNER JOIN sgd_documento d ON d.id = r.documento_id AND d.empresa_id = r.empresa_id
+            LEFT JOIN sgd_formulario_version fv ON fv.id = r.formulario_version_id
+            WHERE r.empresa_id = ? {$docFilter} {$nd} {$docNd}
+            ORDER BY r.id DESC
+        ");
+        $stmt->execute($params);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function findRegistroById(int $empresaId, int $registroId): ?array
+    {
+        if ($registroId <= 0 || !$this->tableExists('sgd_registro')) {
+            return null;
+        }
+
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_registro', 'r');
+        $stmt = $this->pdo->prepare("
+            SELECT r.*
+            FROM sgd_registro r
+            WHERE r.empresa_id = ? AND r.id = ? {$nd}
+            LIMIT 1
+        ");
+        $stmt->execute([$empresaId, $registroId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$row) {
+            return null;
+        }
+        if (isset($row['datos_json']) && is_string($row['datos_json'])) {
+            $decoded = json_decode($row['datos_json'], true);
+            $row['datos_json'] = is_array($decoded) ? $decoded : [];
+        }
+        if (isset($row['contenido_publicado_json']) && is_string($row['contenido_publicado_json'])) {
+            $decoded = json_decode($row['contenido_publicado_json'], true);
+            $row['contenido_publicado_json'] = is_array($decoded) ? $decoded : null;
+        }
+
+        return $row;
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    public function createRegistro(int $empresaId, array $data): int
+    {
+        if (!$this->tableExists('sgd_registro')) {
+            throw new RuntimeException('Tabla sgd_registro no existe. Ejecute la migración F4.');
+        }
+
+        $datosJson = json_encode($data['datos_json'] ?? [], JSON_UNESCAPED_UNICODE);
+        $stmt = $this->pdo->prepare('
+            INSERT INTO sgd_registro (
+                empresa_id, expediente_id, documento_id, formulario_version_id, documento_version_id,
+                arquetipo, titulo, estado, datos_json, created_at, created_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3), ?)
+        ');
+        $stmt->execute([
+            $empresaId,
+            $data['expediente_id'] ?? null,
+            (int)$data['documento_id'],
+            (int)$data['formulario_version_id'],
+            $data['documento_version_id'] ?? null,
+            (string)($data['arquetipo'] ?? 'libre'),
+            (string)($data['titulo'] ?? ''),
+            'borrador',
+            $datosJson,
+            $data['created_by'] ?? null,
+        ]);
+
+        return (int)$this->pdo->lastInsertId();
+    }
+
+    /**
+     * @param array<string, mixed> $datos
+     */
+    public function saveRegistroDatos(
+        int $empresaId,
+        int $registroId,
+        array $datos,
+        ?int $userId = null,
+        ?string $titulo = null
+    ): void {
+        $json = json_encode($datos, JSON_UNESCAPED_UNICODE);
+        if ($titulo !== null && $titulo !== '') {
+            $stmt = $this->pdo->prepare('
+                UPDATE sgd_registro
+                SET datos_json = ?, titulo = ?, updated_at = NOW(3), updated_by = ?
+                WHERE id = ? AND empresa_id = ?
+            ');
+            $stmt->execute([$json, $titulo, $userId, $registroId, $empresaId]);
+
+            return;
+        }
+
+        $stmt = $this->pdo->prepare('
+            UPDATE sgd_registro
+            SET datos_json = ?, updated_at = NOW(3), updated_by = ?
+            WHERE id = ? AND empresa_id = ?
+        ');
+        $stmt->execute([$json, $userId, $registroId, $empresaId]);
+    }
+
+    /**
+     * @param array<string, mixed> $contenidoPublicado
+     */
+    public function cerrarRegistro(
+        int $empresaId,
+        int $registroId,
+        array $contenidoPublicado,
+        ?int $userId = null
+    ): void {
+        $json = json_encode($contenidoPublicado, JSON_UNESCAPED_UNICODE);
+        $stmt = $this->pdo->prepare('
+            UPDATE sgd_registro
+            SET estado = ?, contenido_publicado_json = ?, updated_at = NOW(3), updated_by = ?
+            WHERE id = ? AND empresa_id = ?
+        ');
+        $stmt->execute(['cerrado', $json, $userId, $registroId, $empresaId]);
+    }
+
+    public function setRegistroEstado(int $empresaId, int $registroId, string $estado, ?int $userId = null): void
+    {
+        $stmt = $this->pdo->prepare('
+            UPDATE sgd_registro
+            SET estado = ?, updated_at = NOW(3), updated_by = ?
+            WHERE id = ? AND empresa_id = ?
+        ');
+        $stmt->execute([$estado, $userId, $registroId, $empresaId]);
+    }
+
+    public function softDeleteCompromisosByRegistro(int $empresaId, int $registroId, ?int $userId = null): void
+    {
+        if (!$this->tableExists('sgd_registro_compromiso')) {
+            return;
+        }
+
+        if (SoftDeleteService::supports($this->pdo, 'sgd_registro_compromiso')) {
+            $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sgd_registro_compromiso', 'c');
+            $stmt = $this->pdo->prepare("
+                UPDATE sgd_registro_compromiso c
+                SET c.deleted_at = NOW(3), c.deleted_by = ?, c.updated_at = NOW(3), c.updated_by = ?
+                WHERE c.empresa_id = ? AND c.registro_id = ? {$nd}
+            ");
+            $stmt->execute([$userId, $userId, $empresaId, $registroId]);
+
+            return;
+        }
+
+        $stmt = $this->pdo->prepare('DELETE FROM sgd_registro_compromiso WHERE empresa_id = ? AND registro_id = ?');
+        $stmt->execute([$empresaId, $registroId]);
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    public function insertRegistroCompromiso(int $empresaId, int $registroId, array $data): int
+    {
+        $stmt = $this->pdo->prepare('
+            INSERT INTO sgd_registro_compromiso (
+                registro_id, empresa_id, orden, descripcion, fecha_limite, observaciones,
+                responsable_usuario_id, responsable_terceroidentificacion_id,
+                created_at, created_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(3), ?)
+        ');
+        $stmt->execute([
+            $registroId,
+            $empresaId,
+            (int)($data['orden'] ?? 0),
+            (string)($data['descripcion'] ?? ''),
+            $data['fecha_limite'] ?? null,
+            ($data['observaciones'] ?? '') !== '' ? (string)$data['observaciones'] : null,
+            $data['responsable_usuario_id'] ?? null,
+            $data['responsable_terceroidentificacion_id'] ?? null,
+            $data['created_by'] ?? null,
+        ]);
+
+        return (int)$this->pdo->lastInsertId();
+    }
+
+    private function tableExists(string $table): bool
+    {
+        $stmt = $this->pdo->prepare('
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema = DATABASE() AND table_name = ?
+            LIMIT 1
+        ');
+        $stmt->execute([$table]);
+
+        return (bool)$stmt->fetchColumn();
     }
 
     /**

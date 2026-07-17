@@ -16,15 +16,20 @@
         </div>
 
         <form method="POST" action="?url=login/authenticate">
-            <?php 
+            <?php
             // 🔥 SIMPLE - FUNCIONA SIEMPRE
             $error = $_SESSION['login_error'] ?? null;
             $username = $_SESSION['login_username'] ?? '';
-            unset($_SESSION['login_error'], $_SESSION['login_username']);
+            $forgotSuccess = $_SESSION['forgot_success'] ?? null;
+            unset($_SESSION['login_error'], $_SESSION['login_username'], $_SESSION['forgot_success']);
             ?>
 
             <?php if ($error): ?>
             <div class="error-message"><?= htmlspecialchars($error) ?></div>
+            <?php endif; ?>
+
+            <?php if ($forgotSuccess): ?>
+            <div class="success-message"><?= htmlspecialchars($forgotSuccess) ?></div>
             <?php endif; ?>
 
             <div class="form-group">

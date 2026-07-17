@@ -251,6 +251,8 @@ class SgdFormularioPreviewService
             . '.sgd-fmt-bloque-title{font-size:11pt;font-weight:700;color:#444;margin:0 0 0.45em;text-transform:uppercase;}'
             . '.sgd-fmt-field{margin:0 0 0.55em;}'
             . '.sgd-fmt-label{font-size:9pt;font-weight:600;display:block;margin:0 0 0.15em;}'
+            . '.sgd-fmt-ayuda{font-size:8.5pt;color:#555;margin:0 0 0.5em;font-style:italic;}'
+            . '.sgd-fmt-default{font-size:8pt;font-weight:400;color:#777;}'
             . '.sgd-fmt-line{border-bottom:1px solid #444;min-height:1.1em;margin:0;}'
             . '.sgd-fmt-box{border:1px solid #888;min-height:2.2cm;padding:4px 6px;margin:0;}'
             . '.sgd-fmt-table{width:100%;border-collapse:collapse;margin:0.3em 0 0;font-size:9pt;}'
@@ -273,18 +275,20 @@ class SgdFormularioPreviewService
      */
     private function renderEsquemaBody(array $esquema): string
     {
+        $esquemaSvc = new SgdFormularioEsquemaService();
         $html = '';
-        foreach ($esquema['bloques'] ?? [] as $bloque) {
-            if (!is_array($bloque) || ($bloque['estado'] ?? 'aplica') === 'no_aplica') {
-                continue;
+        foreach ($esquemaSvc->elementosActivos($esquema) as $el) {
+            if (($el['tipo'] ?? '') === 'bloque') {
+                $html .= $this->renderBloque($el);
+            } elseif (($el['tipo'] ?? '') === 'campo') {
+                $html .= $this->renderCampoLibre([
+                    'id' => $el['id'] ?? '',
+                    'tipo' => $el['tipo_campo'] ?? 'texto',
+                    'label' => $el['label'] ?? '',
+                    'requerido' => !empty($el['requerido']),
+                    'opciones' => $el['opciones'] ?? [],
+                ]);
             }
-            $html .= $this->renderBloque($bloque);
-        }
-        foreach ($esquema['campos'] ?? [] as $campo) {
-            if (!is_array($campo)) {
-                continue;
-            }
-            $html .= $this->renderCampoLibre($campo);
         }
 
         return $html;
@@ -295,19 +299,30 @@ class SgdFormularioPreviewService
      */
     private function renderBloque(array $bloque): string
     {
-        $titulo = htmlspecialchars((string)($bloque['nombre'] ?? $bloque['seccion_codigo'] ?? ''), ENT_QUOTES, 'UTF-8');
+        $catalogDef = SgdArquetipoOperativoService::findBloqueDef((string)($bloque['seccion_codigo'] ?? ''));
+        $titulo = htmlspecialchars(SgdBloqueConfigService::resolveTitulo($bloque), ENT_QUOTES, 'UTF-8');
+        $ayuda = SgdBloqueConfigService::resolveAyuda($bloque, is_array($catalogDef) ? $catalogDef : null);
         $widget = (string)($bloque['widget'] ?? 'grupo_campos');
-        $def = is_array($bloque['definicion'] ?? null) ? $bloque['definicion'] : [];
+        $def = SgdBloqueConfigService::resolveDefinicion($bloque);
+        $secCodigo = (string)($bloque['seccion_codigo'] ?? '');
 
-        $inner = match ($widget) {
-            'tabla_repetible' => $this->renderTablaRepetible($def['columnas'] ?? []),
-            'lista_repetible' => $this->renderListaRepetible($def['item'] ?? []),
-            'texto_enriquecido' => '<div class="sgd-fmt-box"></div>',
-            'bloque_firmas' => $this->renderBloqueFirmas($def['roles'] ?? []),
-            default => $this->renderGrupoCampos($def['campos'] ?? []),
-        };
+        if (SgdChecklistConfigService::isChecklistBlock($secCodigo)) {
+            $inner = $this->renderChecklist($bloque);
+        } else {
+            $inner = match ($widget) {
+                'tabla_repetible' => $this->renderTablaRepetible($def['columnas'] ?? []),
+                'lista_repetible' => $this->renderListaRepetible($def['item'] ?? []),
+                'texto_enriquecido' => '<div class="sgd-fmt-box"></div>',
+                'bloque_firmas' => $this->renderBloqueFirmas($def['roles'] ?? []),
+                default => $this->renderGrupoCampos($def['campos'] ?? []),
+            };
+        }
 
-        return '<section class="sgd-fmt-bloque"><h2 class="sgd-fmt-bloque-title">' . $titulo . '</h2>' . $inner . '</section>';
+        $ayudaHtml = $ayuda !== ''
+            ? '<p class="sgd-fmt-ayuda">' . htmlspecialchars($ayuda, ENT_QUOTES, 'UTF-8') . '</p>'
+            : '';
+
+        return '<section class="sgd-fmt-bloque"><h2 class="sgd-fmt-bloque-title">' . $titulo . '</h2>' . $ayudaHtml . $inner . '</section>';
     }
 
     /**
@@ -334,6 +349,10 @@ class SgdFormularioPreviewService
         $label = htmlspecialchars((string)($campo['label'] ?? $campo['id'] ?? ''), ENT_QUOTES, 'UTF-8');
         $tipo = (string)($campo['tipo'] ?? 'texto');
         $req = !empty($campo['requerido']) ? ' *' : '';
+        $default = trim((string)($campo['default'] ?? ''));
+        $defaultHint = $default !== ''
+            ? ' <span class="sgd-fmt-default">(' . htmlspecialchars($default, ENT_QUOTES, 'UTF-8') . ')</span>'
+            : '';
 
         if ($tipo === 'textarea' || $tipo === 'firma') {
             $inner = '<div class="sgd-fmt-box"></div>';
@@ -344,7 +363,62 @@ class SgdFormularioPreviewService
             $inner = '<p class="sgd-fmt-line">&nbsp;</p>';
         }
 
-        return '<div class="sgd-fmt-field"><span class="sgd-fmt-label">' . $label . $req . '</span>' . $inner . '</div>';
+        return '<div class="sgd-fmt-field"><span class="sgd-fmt-label">' . $label . $req . $defaultHint . '</span>' . $inner . '</div>';
+    }
+
+    /**
+     * @param array<string, mixed> $bloque
+     */
+    private function renderChecklist(array $bloque): string
+    {
+        $columnas = SgdChecklistConfigService::resolveColumnas($bloque);
+        if ($columnas === []) {
+            return '<div class="sgd-fmt-box"></div>';
+        }
+
+        $modo = SgdChecklistConfigService::resolveModo($bloque);
+        $html = '<table class="sgd-fmt-table"><thead><tr>';
+        if ($modo === 'filas_fijas') {
+            $html .= '<th>N°</th>';
+        }
+        foreach ($columnas as $col) {
+            $html .= '<th>' . htmlspecialchars((string)($col['label'] ?? $col['id'] ?? ''), ENT_QUOTES, 'UTF-8') . '</th>';
+        }
+        $html .= '</tr></thead><tbody>';
+
+        if ($modo === 'filas_fijas') {
+            $filas = SgdChecklistConfigService::resolveFilasPlantilla($bloque);
+            if ($filas === []) {
+                $html .= '<tr><td colspan="' . (count($columnas) + 1) . '"><em>Sin filas en plantilla</em></td></tr>';
+            }
+            foreach ($filas as $fila) {
+                $celdas = is_array($fila['celdas'] ?? null) ? $fila['celdas'] : [];
+                $html .= '<tr>';
+                $html .= '<td>' . htmlspecialchars((string)($fila['numero'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td>';
+                foreach ($columnas as $col) {
+                    $id = (string)($col['id'] ?? '');
+                    if (($col['rol'] ?? '') === 'contenido') {
+                        $val = htmlspecialchars((string)($celdas[$id] ?? ''), ENT_QUOTES, 'UTF-8');
+                        $html .= '<td class="sgd-fmt-checklist-contenido">' . ($val !== '' ? nl2br($val) : '&nbsp;') . '</td>';
+                    } else {
+                        $html .= '<td>&nbsp;</td>';
+                    }
+                }
+                $html .= '</tr>';
+            }
+        } else {
+            for ($r = 0; $r < 3; $r++) {
+                $html .= '<tr class="sgd-fmt-empty-row">';
+                foreach ($columnas as $col) {
+                    $html .= '<td>&nbsp;</td>';
+                }
+                $html .= '</tr>';
+            }
+        }
+
+        $html .= '</tbody></table>';
+
+        return $html;
     }
 
     /**

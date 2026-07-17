@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "arquetipos": [
     {
       "codigo": "acta",
@@ -95,7 +95,7 @@
       "nombre": "Asistentes",
       "clase": "operativo",
       "orden": 220,
-      "ayuda": "Tabla de asistentes con nombre, cargo y asistencia/firma.",
+      "ayuda": "Tabla de asistentes con nombre, cargo y asistencia.",
       "widget": "tabla_repetible",
       "columnas": [
         {"id": "nombre", "tipo": "texto", "label": "Nombre", "requerido": true},
@@ -114,10 +114,10 @@
     },
     {
       "codigo": "op_desarrollo",
-      "nombre": "Desarrollo",
+      "nombre": "Desarrollo narrativo",
       "clase": "operativo",
       "orden": 240,
-      "ayuda": "Desarrollo de la reunión por punto o bloque narrativo.",
+      "ayuda": "Desarrollo de reunión, análisis o narrativa extensa.",
       "widget": "texto_enriquecido",
       "requerido": true
     },
@@ -138,17 +138,532 @@
     },
     {
       "codigo": "op_firmas_acta",
-      "nombre": "Firmas / cierre",
+      "nombre": "Firmas acta",
       "clase": "operativo",
       "orden": 260,
-      "ayuda": "Bloque de firmas ordenadas (presidente, secretario, asistentes clave).",
+      "ayuda": "Presidente y secretario del acta.",
       "widget": "bloque_firmas",
       "roles": [
         {"id": "presidente", "label": "Presidente / quien preside", "requerido": true},
         {"id": "secretario", "label": "Secretario / quien redacta", "requerido": true}
       ]
+    },
+    {
+      "codigo": "op_encabezado_comite",
+      "nombre": "Encabezado comité",
+      "clase": "operativo",
+      "orden": 215,
+      "ayuda": "N° acta de comité, constitución, acto administrativo y proceso.",
+      "widget": "grupo_campos",
+      "campos": [
+        {"id": "acta_numero", "tipo": "texto", "label": "Acta de comité N°", "requerido": false},
+        {"id": "nombre_comite", "tipo": "texto", "label": "Nombre del comité", "requerido": true},
+        {"id": "acto_administrativo", "tipo": "texto", "label": "Acto / resolución de constitución", "requerido": false},
+        {"id": "fecha_constitucion", "tipo": "fecha", "label": "Fecha constitución", "requerido": false},
+        {"id": "proceso", "tipo": "texto", "label": "Proceso", "requerido": false}
+      ]
+    },
+    {
+      "codigo": "op_miembros_comite",
+      "nombre": "Miembros del comité",
+      "clase": "operativo",
+      "orden": 225,
+      "ayuda": "Integrantes con rol en el comité.",
+      "widget": "tabla_repetible",
+      "columnas": [
+        {"id": "nombre", "tipo": "texto", "label": "Nombre", "requerido": true},
+        {"id": "cargo", "tipo": "texto", "label": "Cargo / rol", "requerido": true},
+        {"id": "representa", "tipo": "texto", "label": "Representa a", "requerido": false},
+        {"id": "contacto", "tipo": "texto", "label": "Contacto", "requerido": false}
+      ]
+    },
+    {
+      "codigo": "op_acuerdos_adoptados",
+      "nombre": "Acuerdos adoptados",
+      "clase": "operativo",
+      "orden": 235,
+      "ayuda": "Resoluciones o acuerdos de la sesión (lista numerada).",
+      "widget": "lista_repetible",
+      "item": {"id": "acuerdo", "tipo": "textarea", "label": "Acuerdo", "requerido": true}
+    },
+    {
+      "codigo": "op_encabezado_tercero",
+      "nombre": "Datos del tercero / proveedor",
+      "clase": "operativo",
+      "orden": 245,
+      "ayuda": "Identificación del auditado, proveedor o contraparte (p. ej. auditoría ambiental).",
+      "widget": "grupo_campos",
+      "campos": [
+        {"id": "razon_social", "tipo": "texto", "label": "Razón social / nombre", "requerido": true},
+        {"id": "nit", "tipo": "texto", "label": "NIT / documento", "requerido": true},
+        {"id": "actividad", "tipo": "texto", "label": "Actividad económica", "requerido": false},
+        {"id": "municipio", "tipo": "texto", "label": "Municipio", "requerido": false},
+        {"id": "direccion", "tipo": "texto", "label": "Dirección", "requerido": false},
+        {"id": "contacto", "tipo": "texto", "label": "Persona de contacto", "requerido": false},
+        {"id": "telefono", "tipo": "texto", "label": "Teléfono", "requerido": false}
+      ]
+    },
+    {
+      "codigo": "op_encabezado_auditoria",
+      "nombre": "Encabezado auditoría",
+      "clase": "operativo",
+      "orden": 255,
+      "ayuda": "N° acta o informe, tipo de auditoría, fecha, auditor y alcance.",
+      "widget": "grupo_campos",
+      "campos": [
+        {"id": "acta_numero", "tipo": "texto", "label": "Informe / acta N°", "requerido": false},
+        {"id": "tipo_auditoria", "tipo": "texto", "label": "Tipo de auditoría", "requerido": true},
+        {"id": "fecha_auditoria", "tipo": "fecha", "label": "Fecha auditoría", "requerido": true},
+        {"id": "auditor", "tipo": "texto", "label": "Auditor / verificador", "requerido": true},
+        {"id": "alcance", "tipo": "textarea", "label": "Alcance", "requerido": false}
+      ]
+    },
+    {
+      "codigo": "op_temas_capacitacion",
+      "nombre": "Temas de capacitación",
+      "clase": "operativo",
+      "orden": 265,
+      "ayuda": "Temas tratados en socialización o capacitación.",
+      "widget": "lista_repetible",
+      "item": {"id": "tema", "tipo": "textarea", "label": "Tema", "requerido": true}
+    },
+    {
+      "codigo": "op_anexos_referencia",
+      "nombre": "Anexos y referencias",
+      "clase": "operativo",
+      "orden": 275,
+      "ayuda": "Documentos anexos o referencias citadas en el acta.",
+      "widget": "lista_repetible",
+      "item": {"id": "anexo", "tipo": "texto", "label": "Anexo / referencia", "requerido": false}
+    },
+    {
+      "codigo": "op_evaluacion_capacitacion",
+      "nombre": "Evaluación capacitación",
+      "clase": "operativo",
+      "orden": 285,
+      "ayuda": "Cierre de acta de socialización o capacitación.",
+      "widget": "grupo_campos",
+      "campos": [
+        {"id": "nivel_satisfaccion", "tipo": "lista", "label": "Nivel satisfacción", "opciones": ["Alto", "Medio", "Bajo"], "requerido": false},
+        {"id": "observaciones_eval", "tipo": "textarea", "label": "Observaciones evaluación", "requerido": false}
+      ]
+    },
+    {
+      "codigo": "op_encabezado_bitacora",
+      "nombre": "Encabezado bitácora",
+      "clase": "operativo",
+      "orden": 270,
+      "ayuda": "Periodo, turno, área y responsable del registro.",
+      "widget": "grupo_campos",
+      "campos": [
+        {"id": "periodo_desde", "tipo": "fecha", "label": "Periodo desde", "requerido": true},
+        {"id": "periodo_hasta", "tipo": "fecha", "label": "Periodo hasta", "requerido": false},
+        {"id": "turno", "tipo": "texto", "label": "Turno / jornada", "requerido": false},
+        {"id": "area", "tipo": "texto", "label": "Área / servicio", "requerido": true},
+        {"id": "responsable", "tipo": "texto", "label": "Responsable del registro", "requerido": true}
+      ]
+    },
+    {
+      "codigo": "op_registro_eventos",
+      "nombre": "Registro de eventos",
+      "clase": "operativo",
+      "orden": 280,
+      "ayuda": "Filas de control diario, mediciones o eventos.",
+      "widget": "tabla_repetible",
+      "columnas": [
+        {"id": "fecha", "tipo": "fecha", "label": "Fecha", "requerido": true},
+        {"id": "hora", "tipo": "texto", "label": "Hora", "requerido": false},
+        {"id": "descripcion", "tipo": "textarea", "label": "Evento / actividad", "requerido": true},
+        {"id": "valor", "tipo": "texto", "label": "Valor / medida", "requerido": false},
+        {"id": "observacion", "tipo": "textarea", "label": "Observación", "requerido": false},
+        {"id": "responsable", "tipo": "texto", "label": "Responsable", "requerido": false}
+      ]
+    },
+    {
+      "codigo": "op_encabezado_checklist",
+      "nombre": "Encabezado checklist",
+      "clase": "operativo",
+      "orden": 290,
+      "ayuda": "N° acta o registro, contexto de la verificación o auditoría.",
+      "widget": "grupo_campos",
+      "campos": [
+        {"id": "acta_numero", "tipo": "texto", "label": "Acta N°", "requerido": false},
+        {"id": "objeto", "tipo": "texto", "label": "Objeto / proceso verificado", "requerido": true},
+        {"id": "ubicacion", "tipo": "texto", "label": "Ubicación / sede", "requerido": false},
+        {"id": "fecha", "tipo": "fecha", "label": "Fecha verificación", "requerido": true},
+        {"id": "auditor", "tipo": "texto", "label": "Auditor / verificador", "requerido": true},
+        {"id": "auditado", "tipo": "texto", "label": "Auditado / responsable área", "requerido": false}
+      ]
+    },
+    {
+      "codigo": "op_items_checklist",
+      "nombre": "Ítems de verificación",
+      "clase": "operativo",
+      "orden": 300,
+      "ayuda": "Lista de ítems con cumplimiento Sí/No/N/A.",
+      "widget": "tabla_repetible",
+      "columnas": [
+        {"id": "seccion", "tipo": "texto", "label": "Sección / norma", "requerido": false},
+        {"id": "aspecto", "tipo": "textarea", "label": "Aspecto / ítem", "requerido": true},
+        {"id": "referencia", "tipo": "texto", "label": "Artículo / referencia", "requerido": false},
+        {"id": "cumple", "tipo": "lista", "label": "Cumple", "opciones": ["Sí", "No", "N/A"], "requerido": true},
+        {"id": "evidencia", "tipo": "texto", "label": "Evidencia", "requerido": false},
+        {"id": "observacion", "tipo": "textarea", "label": "Observación", "requerido": false}
+      ]
+    },
+    {
+      "codigo": "op_observaciones_generales",
+      "nombre": "Observaciones generales",
+      "clase": "operativo",
+      "orden": 310,
+      "ayuda": "Cierre, hallazgos u observaciones finales.",
+      "widget": "grupo_campos",
+      "campos": [
+        {"id": "observaciones", "tipo": "textarea", "label": "Observaciones generales", "requerido": false},
+        {"id": "conclusion", "tipo": "textarea", "label": "Conclusión", "requerido": false}
+      ]
+    },
+    {
+      "codigo": "op_encabezado_informe",
+      "nombre": "Encabezado informe",
+      "clase": "operativo",
+      "orden": 320,
+      "ayuda": "Periodo y responsable del análisis.",
+      "widget": "grupo_campos",
+      "campos": [
+        {"id": "titulo_informe", "tipo": "texto", "label": "Título del informe", "requerido": true},
+        {"id": "periodo", "tipo": "texto", "label": "Periodo analizado", "requerido": true},
+        {"id": "fecha_elaboracion", "tipo": "fecha", "label": "Fecha elaboración", "requerido": true},
+        {"id": "elaborado_por", "tipo": "texto", "label": "Elaborado por", "requerido": true}
+      ]
+    },
+    {
+      "codigo": "op_resumen_ejecutivo",
+      "nombre": "Resumen ejecutivo",
+      "clase": "operativo",
+      "orden": 330,
+      "ayuda": "Síntesis del análisis o informe.",
+      "widget": "texto_enriquecido",
+      "requerido": true
+    },
+    {
+      "codigo": "op_indicadores",
+      "nombre": "Indicadores",
+      "clase": "operativo",
+      "orden": 340,
+      "ayuda": "Tabla de indicadores, metas y resultados.",
+      "widget": "tabla_repetible",
+      "columnas": [
+        {"id": "indicador", "tipo": "texto", "label": "Indicador", "requerido": true},
+        {"id": "meta", "tipo": "texto", "label": "Meta", "requerido": false},
+        {"id": "resultado", "tipo": "texto", "label": "Resultado", "requerido": true},
+        {"id": "analisis", "tipo": "textarea", "label": "Análisis breve", "requerido": false}
+      ]
+    },
+    {
+      "codigo": "op_plan_accion",
+      "nombre": "Plan de acción",
+      "clase": "operativo",
+      "orden": 350,
+      "ayuda": "Acciones de mejora derivadas del análisis.",
+      "widget": "tabla_repetible",
+      "columnas": [
+        {"id": "accion", "tipo": "textarea", "label": "Acción", "requerido": true},
+        {"id": "responsable", "tipo": "texto", "label": "Responsable", "requerido": true},
+        {"id": "plazo", "tipo": "fecha", "label": "Plazo", "requerido": false},
+        {"id": "estado", "tipo": "lista", "label": "Estado", "opciones": ["Pendiente", "En proceso", "Cumplido"], "requerido": false}
+      ]
+    },
+    {
+      "codigo": "op_identificacion_sujeto",
+      "nombre": "Identificación del sujeto",
+      "clase": "operativo",
+      "orden": 360,
+      "ayuda": "Datos de la persona o entidad que autoriza.",
+      "widget": "grupo_campos",
+      "campos": [
+        {"id": "nombres_apellidos", "tipo": "texto", "label": "Nombres y apellidos", "requerido": true},
+        {"id": "tipo_documento", "tipo": "texto", "label": "Tipo documento", "requerido": true},
+        {"id": "numero_documento", "tipo": "texto", "label": "N° documento", "requerido": true},
+        {"id": "fecha_nacimiento", "tipo": "fecha", "label": "Fecha nacimiento", "requerido": false},
+        {"id": "telefono", "tipo": "texto", "label": "Teléfono", "requerido": false},
+        {"id": "email", "tipo": "texto", "label": "Correo electrónico", "requerido": false}
+      ]
+    },
+    {
+      "codigo": "op_declaracion_clausulas",
+      "nombre": "Declaración y cláusulas",
+      "clase": "operativo",
+      "orden": 370,
+      "ayuda": "Texto legal o informativo del consentimiento.",
+      "widget": "texto_enriquecido",
+      "requerido": true
+    },
+    {
+      "codigo": "op_items_autorizacion",
+      "nombre": "Ítems de autorización",
+      "clase": "operativo",
+      "orden": 380,
+      "ayuda": "Checklist de autorizaciones explícitas.",
+      "widget": "tabla_repetible",
+      "columnas": [
+        {"id": "item", "tipo": "textarea", "label": "Ítem / cláusula", "requerido": true},
+        {"id": "autoriza", "tipo": "lista", "label": "Autoriza", "opciones": ["Sí", "No"], "requerido": true},
+        {"id": "observacion", "tipo": "textarea", "label": "Observación", "requerido": false}
+      ]
+    },
+    {
+      "codigo": "op_partes",
+      "nombre": "Partes del contrato",
+      "clase": "operativo",
+      "orden": 390,
+      "ayuda": "Contratantes, representantes e identificación.",
+      "widget": "tabla_repetible",
+      "columnas": [
+        {"id": "parte", "tipo": "texto", "label": "Parte / rol", "requerido": true},
+        {"id": "nombre_razon", "tipo": "texto", "label": "Nombre o razón social", "requerido": true},
+        {"id": "documento", "tipo": "texto", "label": "NIT / documento", "requerido": true},
+        {"id": "representante", "tipo": "texto", "label": "Representante", "requerido": false},
+        {"id": "domicilio", "tipo": "texto", "label": "Domicilio", "requerido": false}
+      ]
+    },
+    {
+      "codigo": "op_objeto_contrato",
+      "nombre": "Objeto del contrato",
+      "clase": "operativo",
+      "orden": 400,
+      "ayuda": "Descripción del objeto contractual.",
+      "widget": "texto_enriquecido",
+      "requerido": true
+    },
+    {
+      "codigo": "op_vigencia_contrato",
+      "nombre": "Vigencia",
+      "clase": "operativo",
+      "orden": 410,
+      "ayuda": "Plazos y condiciones de vigencia.",
+      "widget": "grupo_campos",
+      "campos": [
+        {"id": "fecha_inicio", "tipo": "fecha", "label": "Fecha inicio", "requerido": true},
+        {"id": "fecha_fin", "tipo": "fecha", "label": "Fecha fin", "requerido": false},
+        {"id": "renovacion", "tipo": "texto", "label": "Renovación automática", "requerido": false},
+        {"id": "valor", "tipo": "texto", "label": "Valor / contraprestación", "requerido": false}
+      ]
+    },
+    {
+      "codigo": "op_clausulas_contrato",
+      "nombre": "Cláusulas",
+      "clase": "operativo",
+      "orden": 420,
+      "ayuda": "Cláusulas numeradas del acuerdo.",
+      "widget": "lista_repetible",
+      "item": {"id": "clausula", "tipo": "textarea", "label": "Cláusula", "requerido": true}
+    },
+    {
+      "codigo": "op_metadatos_lista",
+      "nombre": "Metadatos lista maestra",
+      "clase": "operativo",
+      "orden": 430,
+      "ayuda": "Versión y vigencia del catálogo.",
+      "widget": "grupo_campos",
+      "campos": [
+        {"id": "version_listado", "tipo": "texto", "label": "Versión del listado", "requerido": true},
+        {"id": "fecha_vigencia", "tipo": "fecha", "label": "Fecha vigencia", "requerido": true},
+        {"id": "proceso", "tipo": "texto", "label": "Proceso", "requerido": false},
+        {"id": "responsable", "tipo": "texto", "label": "Responsable actualización", "requerido": true}
+      ]
+    },
+    {
+      "codigo": "op_tabla_catalogo",
+      "nombre": "Tabla catálogo",
+      "clase": "operativo",
+      "orden": 440,
+      "ayuda": "Filas del listado maestro (proveedores, tarifas, etc.).",
+      "widget": "tabla_repetible",
+      "columnas": [
+        {"id": "codigo", "tipo": "texto", "label": "Código", "requerido": false},
+        {"id": "nombre", "tipo": "texto", "label": "Nombre", "requerido": true},
+        {"id": "descripcion", "tipo": "textarea", "label": "Descripción", "requerido": false},
+        {"id": "estado", "tipo": "lista", "label": "Estado", "opciones": ["Activo", "Inactivo"], "requerido": false},
+        {"id": "observaciones", "tipo": "textarea", "label": "Observaciones", "requerido": false}
+      ]
+    },
+    {
+      "codigo": "op_metadatos_matriz",
+      "nombre": "Metadatos matriz",
+      "clase": "operativo",
+      "orden": 450,
+      "ayuda": "Versión y periodo de la matriz.",
+      "widget": "grupo_campos",
+      "campos": [
+        {"id": "version_matriz", "tipo": "texto", "label": "Versión matriz", "requerido": true},
+        {"id": "periodo", "tipo": "texto", "label": "Periodo", "requerido": false},
+        {"id": "responsable", "tipo": "texto", "label": "Responsable", "requerido": true}
+      ]
+    },
+    {
+      "codigo": "op_grilla_matriz",
+      "nombre": "Grilla matriz",
+      "clase": "operativo",
+      "orden": 460,
+      "ayuda": "Celdas de la matriz (riesgos, requisitos, competencias, etc.).",
+      "widget": "tabla_repetible",
+      "columnas": [
+        {"id": "fila", "tipo": "texto", "label": "Fila / criterio", "requerido": true},
+        {"id": "columna_a", "tipo": "texto", "label": "Columna A", "requerido": false},
+        {"id": "columna_b", "tipo": "texto", "label": "Columna B", "requerido": false},
+        {"id": "columna_c", "tipo": "texto", "label": "Columna C", "requerido": false},
+        {"id": "valor", "tipo": "texto", "label": "Valor / calificación", "requerido": false},
+        {"id": "observacion", "tipo": "textarea", "label": "Observación", "requerido": false}
+      ]
+    },
+    {
+      "codigo": "op_metadatos_evidencia",
+      "nombre": "Metadatos evidencia",
+      "clase": "operativo",
+      "orden": 470,
+      "ayuda": "Datos mínimos del archivo adjunto escaneado.",
+      "widget": "grupo_campos",
+      "campos": [
+        {"id": "referencia", "tipo": "texto", "label": "Referencia / código", "requerido": true},
+        {"id": "fecha", "tipo": "fecha", "label": "Fecha documento", "requerido": true},
+        {"id": "origen", "tipo": "texto", "label": "Origen / proveedor", "requerido": false},
+        {"id": "descripcion", "tipo": "textarea", "label": "Descripción breve", "requerido": false}
+      ]
+    },
+    {
+      "codigo": "op_firmas_dual",
+      "nombre": "Firmas auditoría",
+      "clase": "operativo",
+      "orden": 480,
+      "ayuda": "Auditado y auditor / verificador.",
+      "widget": "bloque_firmas",
+      "roles": [
+        {"id": "auditado", "label": "Auditado / responsable", "requerido": true},
+        {"id": "auditor", "label": "Auditor / verificador", "requerido": true}
+      ]
+    },
+    {
+      "codigo": "op_firmas_aprobacion",
+      "nombre": "Firmas aprobación",
+      "clase": "operativo",
+      "orden": 490,
+      "ayuda": "Elabora, revisa y aprueba.",
+      "widget": "bloque_firmas",
+      "roles": [
+        {"id": "elabora", "label": "Elabora", "requerido": true},
+        {"id": "revisa", "label": "Revisa", "requerido": false},
+        {"id": "aprueba", "label": "Aprueba", "requerido": true}
+      ]
+    },
+    {
+      "codigo": "op_firmas_contrato",
+      "nombre": "Firmas contrato",
+      "clase": "operativo",
+      "orden": 500,
+      "ayuda": "Partes y testigos del acuerdo.",
+      "widget": "bloque_firmas",
+      "roles": [
+        {"id": "contratante", "label": "Contratante", "requerido": true},
+        {"id": "contratista", "label": "Contratista", "requerido": true},
+        {"id": "testigo_1", "label": "Testigo 1", "requerido": false},
+        {"id": "testigo_2", "label": "Testigo 2", "requerido": false}
+      ]
+    },
+    {
+      "codigo": "op_firma_recibido",
+      "nombre": "Firma de recibido",
+      "clase": "operativo",
+      "orden": 510,
+      "ayuda": "Quien recibe y archiva la evidencia.",
+      "widget": "bloque_firmas",
+      "roles": [
+        {"id": "recibido_por", "label": "Recibido por", "requerido": true}
+      ]
     }
   ],
+  "biblioteca_arquetipo": {
+    "acta": [
+      "op_encabezado_acta",
+      "op_encabezado_comite",
+      "op_encabezado_tercero",
+      "op_encabezado_auditoria",
+      "op_encabezado_checklist",
+      "op_asistentes",
+      "op_miembros_comite",
+      "op_orden_dia",
+      "op_temas_capacitacion",
+      "op_desarrollo",
+      "op_items_checklist",
+      "op_compromisos",
+      "op_acuerdos_adoptados",
+      "op_observaciones_generales",
+      "op_anexos_referencia",
+      "op_evaluacion_capacitacion",
+      "op_firmas_acta",
+      "op_firmas_dual",
+      "op_firmas_aprobacion"
+    ]
+  },
+  "plantillas_semilla_arquetipo": {
+    "acta": {
+      "op_encabezado_acta": "aplica",
+      "op_asistentes": "aplica",
+      "op_orden_dia": "aplica",
+      "op_desarrollo": "aplica",
+      "op_compromisos": "opcional",
+      "op_firmas_acta": "aplica"
+    },
+    "bitacora": {
+      "op_encabezado_bitacora": "aplica",
+      "op_registro_eventos": "aplica",
+      "op_observaciones_generales": "opcional",
+      "op_firmas_aprobacion": "aplica"
+    },
+    "checklist": {
+      "op_encabezado_checklist": "aplica",
+      "op_items_checklist": "aplica",
+      "op_observaciones_generales": "aplica",
+      "op_firmas_dual": "aplica"
+    },
+    "analisis": {
+      "op_encabezado_informe": "aplica",
+      "op_resumen_ejecutivo": "aplica",
+      "op_indicadores": "aplica",
+      "op_desarrollo": "aplica",
+      "op_plan_accion": "opcional",
+      "op_compromisos": "opcional",
+      "op_firmas_aprobacion": "aplica"
+    },
+    "consentimiento": {
+      "op_identificacion_sujeto": "aplica",
+      "op_declaracion_clausulas": "aplica",
+      "op_items_autorizacion": "aplica",
+      "op_firmas_dual": "aplica"
+    },
+    "contrato": {
+      "op_partes": "aplica",
+      "op_objeto_contrato": "aplica",
+      "op_vigencia_contrato": "aplica",
+      "op_clausulas_contrato": "aplica",
+      "op_firmas_contrato": "aplica"
+    },
+    "lista_maestra": {
+      "op_metadatos_lista": "aplica",
+      "op_tabla_catalogo": "aplica",
+      "op_firmas_aprobacion": "aplica"
+    },
+    "matriz": {
+      "op_metadatos_matriz": "aplica",
+      "op_grilla_matriz": "aplica",
+      "op_firmas_aprobacion": "aplica"
+    },
+    "libre": {},
+    "solo_archivo": {
+      "op_metadatos_evidencia": "aplica",
+      "op_firma_recibido": "aplica"
+    }
+  },
   "perfiles_arquetipo": {
     "acta": {
       "op_encabezado_acta": "aplica",
@@ -157,6 +672,54 @@
       "op_desarrollo": "aplica",
       "op_compromisos": "opcional",
       "op_firmas_acta": "aplica"
+    },
+    "bitacora": {
+      "op_encabezado_bitacora": "aplica",
+      "op_registro_eventos": "aplica",
+      "op_observaciones_generales": "opcional",
+      "op_firmas_aprobacion": "aplica"
+    },
+    "checklist": {
+      "op_encabezado_checklist": "aplica",
+      "op_items_checklist": "aplica",
+      "op_observaciones_generales": "aplica",
+      "op_firmas_dual": "aplica"
+    },
+    "analisis": {
+      "op_encabezado_informe": "aplica",
+      "op_resumen_ejecutivo": "aplica",
+      "op_indicadores": "aplica",
+      "op_desarrollo": "aplica",
+      "op_plan_accion": "opcional",
+      "op_compromisos": "opcional",
+      "op_firmas_aprobacion": "aplica"
+    },
+    "consentimiento": {
+      "op_identificacion_sujeto": "aplica",
+      "op_declaracion_clausulas": "aplica",
+      "op_items_autorizacion": "aplica",
+      "op_firmas_dual": "aplica"
+    },
+    "contrato": {
+      "op_partes": "aplica",
+      "op_objeto_contrato": "aplica",
+      "op_vigencia_contrato": "aplica",
+      "op_clausulas_contrato": "aplica",
+      "op_firmas_contrato": "aplica"
+    },
+    "lista_maestra": {
+      "op_metadatos_lista": "aplica",
+      "op_tabla_catalogo": "aplica",
+      "op_firmas_aprobacion": "aplica"
+    },
+    "matriz": {
+      "op_metadatos_matriz": "aplica",
+      "op_grilla_matriz": "aplica",
+      "op_firmas_aprobacion": "aplica"
+    },
+    "solo_archivo": {
+      "op_metadatos_evidencia": "aplica",
+      "op_firma_recibido": "aplica"
     }
   }
 }

@@ -74,28 +74,61 @@ class SgdVersionBundleService
         }
 
         $formularioId = (int)$formulario['id'];
-        $existingBorrador = $this->repo->findFormularioBorradorVersion($empresaId, $formularioId);
-        if ($existingBorrador !== null) {
-            $docVersion = $this->ensureDocumentoVersionForFormulario(
-                $empresaId,
-                $documentoId,
-                $existingBorrador,
-                $userId,
-                $notas
-            );
-
-            return [
-                'formulario_version' => $existingBorrador,
-                'documento_version' => $docVersion,
-                'clonedFromVigente' => false,
-                'vigenteNumero' => null,
-            ];
-        }
 
         $numero = trim((string)($numero ?? ''));
         if ($numero === '') {
             $numero = $this->suggestNextNumero($empresaId, $documentoId);
         }
+
+        $openBorradores = $this->repo->listDocumentoBorradorVersiones($empresaId, $documentoId);
+        $openNumeros = array_values(array_unique(array_map(
+            static fn(array $row): string => trim((string)($row['numero'] ?? '')),
+            $openBorradores
+        )));
+        $openNumeros = array_values(array_filter($openNumeros, static fn(string $n): bool => $n !== ''));
+
+        if ($openNumeros !== [] && !in_array($numero, $openNumeros, true)) {
+            $lista = implode(', ', array_map(static fn(string $n): string => '«' . $n . '»', $openNumeros));
+
+            throw new RuntimeException(
+                'Hay borrador(es) abierto(s): ' . $lista . '. Publíquelos o elimínelos antes de crear la versión «' . $numero . '».'
+            );
+        }
+
+        if (in_array($numero, $openNumeros, true)) {
+            $targetDoc = null;
+            foreach ($openBorradores as $row) {
+                if (trim((string)($row['numero'] ?? '')) === $numero) {
+                    $targetDoc = $row;
+                    break;
+                }
+            }
+            $formularioVersionId = (int)($targetDoc['formulario_version_id'] ?? 0);
+            $borradorForm = $formularioVersionId > 0
+                ? $this->repo->findFormularioVersionById($empresaId, $formularioVersionId)
+                : null;
+            if ($borradorForm === null) {
+                $borradorForm = $this->repo->findFormularioVersionByNumeroAny($empresaId, $formularioId, $numero);
+            }
+            if ($borradorForm !== null) {
+                $docVersion = $this->ensureDocumentoVersionForFormulario(
+                    $empresaId,
+                    $documentoId,
+                    $borradorForm,
+                    $userId,
+                    $notas
+                );
+
+                return [
+                    'formulario_version' => $borradorForm,
+                    'documento_version' => $docVersion,
+                    'clonedFromVigente' => false,
+                    'vigenteNumero' => null,
+                    'alreadyOpen' => true,
+                ];
+            }
+        }
+
         if ($this->repo->documentoVersionNumeroExists($empresaId, $documentoId, $numero)) {
             throw new RuntimeException('Ya existe la versión «' . $numero . '» para este documento.');
         }
@@ -110,12 +143,13 @@ class SgdVersionBundleService
             }
         }
 
-        $formularioVersionId = $this->repo->createFormularioVersion($empresaId, $formularioId, [
-            'numero' => $numero,
-            'estado_id' => SgdRepository::ESTADO_DOC_BORRADOR,
-            'esquema_json' => $esquemaSeed,
-            'created_by' => $userId,
-        ]);
+        $formularioVersionId = $this->createOrReactivateFormularioVersion(
+            $empresaId,
+            $formularioId,
+            $numero,
+            $esquemaSeed,
+            $userId
+        );
 
         $documentoVersionId = $this->createOrReactivateDocumentoVersion(
             $empresaId,
@@ -185,12 +219,13 @@ class SgdVersionBundleService
         if ($docBorrador !== null) {
             $numero = trim((string)($docBorrador['numero'] ?? ''));
             $esquemaSeed = ['version' => 2, 'arquetipo' => 'libre', 'bloques' => [], 'campos' => []];
-            $formularioVersionId = $this->repo->createFormularioVersion($empresaId, $formularioId, [
-                'numero' => $numero !== '' ? $numero : $this->suggestNextNumero($empresaId, $documentoId),
-                'estado_id' => SgdRepository::ESTADO_DOC_BORRADOR,
-                'esquema_json' => $esquemaSeed,
-                'created_by' => $userId,
-            ]);
+            $formularioVersionId = $this->createOrReactivateFormularioVersion(
+                $empresaId,
+                $formularioId,
+                $numero !== '' ? $numero : $this->suggestNextNumero($empresaId, $documentoId),
+                $esquemaSeed,
+                $userId
+            );
             $this->repo->linkDocumentoVersionFormulario(
                 $empresaId,
                 (int)$docBorrador['id'],
@@ -248,6 +283,22 @@ class SgdVersionBundleService
         }
 
         $formularioVersionId = (int)($version['formulario_version_id'] ?? 0);
+        if ($formularioVersionId <= 0) {
+            $formulario = $this->repo->findFormularioByDocumento($empresaId, (int)$version['documento_id'], 'operativo');
+            if ($formulario !== null) {
+                $numero = trim((string)($version['numero'] ?? ''));
+                if ($numero !== '') {
+                    $linkedForm = $this->repo->findFormularioVersionByNumeroAny(
+                        $empresaId,
+                        (int)$formulario['id'],
+                        $numero
+                    );
+                    if ($linkedForm !== null && empty($linkedForm['deleted_at'])) {
+                        $formularioVersionId = (int)$linkedForm['id'];
+                    }
+                }
+            }
+        }
 
         $this->repo->softDeleteDocumentoVersion($empresaId, $documentoVersionId, $userId);
 
@@ -309,6 +360,29 @@ class SgdVersionBundleService
             'numero' => $numero,
             'formulario_version_id' => $formularioVersionId,
         ];
+    }
+
+    private function createOrReactivateFormularioVersion(
+        int $empresaId,
+        int $formularioId,
+        string $numero,
+        array $esquemaSeed,
+        ?int $userId
+    ): int {
+        $anyNumero = $this->repo->findFormularioVersionByNumeroAny($empresaId, $formularioId, $numero);
+        if ($anyNumero !== null && !empty($anyNumero['deleted_at'])) {
+            $versionId = (int)$anyNumero['id'];
+            $this->repo->reactivateFormularioVersionBorrador($empresaId, $versionId, $esquemaSeed, $userId);
+
+            return $versionId;
+        }
+
+        return $this->repo->createFormularioVersion($empresaId, $formularioId, [
+            'numero' => $numero,
+            'estado_id' => SgdRepository::ESTADO_DOC_BORRADOR,
+            'esquema_json' => $esquemaSeed,
+            'created_by' => $userId,
+        ]);
     }
 
     private function createOrReactivateDocumentoVersion(

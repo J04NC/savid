@@ -67,7 +67,8 @@ if ($sessionIdleMin < 0) {
 
 <div class="user-body hidden" id="userBody">
 
-<img src="/img/avatar.png" class="avatar-sidebar">
+<?php $fotoUsuario = trim((string)($_SESSION['foto_ruta'] ?? '')); ?>
+<img src="<?= $fotoUsuario !== '' ? htmlspecialchars($fotoUsuario, ENT_QUOTES, 'UTF-8') : '/img/avatar.png' ?>" class="avatar-sidebar" alt="Foto de perfil">
 
 <p class="empresa">
 <?php echo $_SESSION['empresa'] ?? 'Sin empresa'; ?>
@@ -146,19 +147,17 @@ autocomplete="off"
 </div>
 
 <script>
+<?php
+$promptContextModal = isset($_SESSION['user_id'])
+    && !ContextGateService::hasOperationalContext();
+?>
 document.addEventListener("DOMContentLoaded", function(){
 
-    let empresa = "<?= $_SESSION['empresa_id'] ?? '' ?>";
-    let sede    = "<?= $_SESSION['sede_id'] ?? '' ?>";
-
-    // abre modal solo si falta empresa o sede
-    if(!empresa || !sede){
-
-        setTimeout(() => {
-            document.getElementById("btnCambiarSede")?.click();
-        }, 300);
-
-    }
+    <?php if ($promptContextModal): ?>
+    setTimeout(function () {
+        document.getElementById("btnCambiarSede")?.click();
+    }, 300);
+    <?php endif; ?>
 
 });
 </script>

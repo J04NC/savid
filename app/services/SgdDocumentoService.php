@@ -82,12 +82,14 @@ class SgdDocumentoService
             $allById[(int)$padre['id']] = $padre;
         }
 
-        $this->codigoService->clearCache();
-        $documentos = $this->attachCodigos($documentos, $empresaId);
-        $catalogos['padres'] = $this->attachCodigos($catalogos['padres'], $empresaId);
+        if ($empresaId) {
+            $this->codigoService->clearCache();
+            $documentos = $this->attachCodigos($documentos, $empresaId);
+            $catalogos['padres'] = $this->attachCodigos($catalogos['padres'], $empresaId);
 
-        if ($edit) {
-            $edit['codigo_display'] = $this->codigoService->buildForDocument($empresaId, $edit, $this->repo);
+            if ($edit) {
+                $edit['codigo_display'] = $this->codigoService->buildForDocument($empresaId, $edit, $this->repo);
+            }
         }
 
         $canPreviewPlantilla = false;

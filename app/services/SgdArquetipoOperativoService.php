@@ -68,13 +68,13 @@ class SgdArquetipoOperativoService
     }
 
     /**
-     * Política de archivo oficial del esqueleto: pdf_auto | dual | xlsx_upload | upload.
+     * Política de archivo oficial del esqueleto: pdf_auto | dual | xlsx_upload | docx_upload | upload.
      */
     public static function resolveFormatoArchivo(string $arquetipoCodigo): string
     {
         $arquetipo = self::findArquetipo($arquetipoCodigo);
         $formato = strtolower(trim((string)($arquetipo['formato_archivo'] ?? 'pdf_auto')));
-        $allowed = ['pdf_auto', 'dual', 'xlsx_upload', 'upload'];
+        $allowed = ['pdf_auto', 'dual', 'xlsx_upload', 'docx_upload', 'upload'];
 
         return in_array($formato, $allowed, true) ? $formato : 'pdf_auto';
     }
@@ -91,11 +91,16 @@ class SgdArquetipoOperativoService
         return self::resolveFormatoArchivo($arquetipoCodigo) === 'xlsx_upload';
     }
 
+    public static function requiresDocxUpload(string $arquetipoCodigo): bool
+    {
+        return self::resolveFormatoArchivo($arquetipoCodigo) === 'docx_upload';
+    }
+
     public static function requiresArchivoUpload(string $arquetipoCodigo): bool
     {
         $formato = self::resolveFormatoArchivo($arquetipoCodigo);
 
-        return $formato === 'upload' || $formato === 'xlsx_upload';
+        return in_array($formato, ['upload', 'xlsx_upload', 'docx_upload'], true);
     }
 
     /**
@@ -105,10 +110,41 @@ class SgdArquetipoOperativoService
     {
         return match (self::resolveFormatoArchivo($arquetipoCodigo)) {
             'xlsx_upload' => ['xlsx', 'xls'],
+            'docx_upload' => ['docx', 'doc'],
             'upload' => ['pdf', 'xlsx', 'xls', 'docx', 'doc'],
-            'dual' => ['pdf', 'xlsx', 'xls'],
-            default => ['pdf'],
+            'dual' => ['pdf', 'xlsx', 'xls', 'docx', 'doc'],
+            default => ['pdf', 'docx', 'doc'],
         };
+    }
+
+    /**
+     * Etiqueta corta para el selector de archivo (p. ej. «PDF o Word»).
+     *
+     * @param list<string> $extensions
+     */
+    public static function uploadFormatsLabel(array $extensions): string
+    {
+        $parts = [];
+        if (in_array('pdf', $extensions, true)) {
+            $parts[] = 'PDF';
+        }
+        if (array_intersect(['xlsx', 'xls'], $extensions) !== []) {
+            $parts[] = 'Excel';
+        }
+        if (array_intersect(['docx', 'doc'], $extensions) !== []) {
+            $parts[] = 'Word';
+        }
+        if ($parts === []) {
+            return 'archivo';
+        }
+        if (count($parts) === 1) {
+            return $parts[0];
+        }
+        if (count($parts) === 2) {
+            return $parts[0] . ' o ' . $parts[1];
+        }
+
+        return implode(', ', array_slice($parts, 0, -1)) . ' o ' . $parts[count($parts) - 1];
     }
 
     public static function detectArchivoTipo(?string $archivoRuta): string
@@ -129,6 +165,122 @@ class SgdArquetipoOperativoService
             'docx' => 'Word',
             default => 'PDF',
         };
+    }
+
+    /**
+     * @return list<string>
+     */
+    public static function bibliotecaBloques(string $arquetipoCodigo): array
+    {
+        $arquetipoCodigo = self::normalizeCodigo($arquetipoCodigo);
+        $catalog = self::loadCatalog();
+        $bib = $catalog['biblioteca_arquetipo'] ?? [];
+        if (!is_array($bib) || empty($bib[$arquetipoCodigo])) {
+            return array_keys(self::perfilBloques($arquetipoCodigo));
+        }
+
+        return array_values(array_filter(array_map('strval', $bib[$arquetipoCodigo])));
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public static function plantillaSemilla(string $arquetipoCodigo): array
+    {
+        $arquetipoCodigo = self::normalizeCodigo($arquetipoCodigo);
+        $catalog = self::loadCatalog();
+        $semillas = $catalog['plantillas_semilla_arquetipo'] ?? $catalog['perfiles_arquetipo'] ?? [];
+        $semilla = $semillas[$arquetipoCodigo] ?? null;
+
+        return is_array($semilla) ? $semilla : [];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public static function findBloqueDef(string $seccionCodigo): ?array
+    {
+        $seccionCodigo = strtolower(trim($seccionCodigo));
+        foreach (self::loadCatalog()['bloques_operativos'] ?? [] as $bloque) {
+            if (is_array($bloque) && strtolower((string)($bloque['codigo'] ?? '')) === $seccionCodigo) {
+                return $bloque;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public static function buildElementoBloque(string $seccionCodigo, string $estado = 'aplica'): ?array
+    {
+        $def = self::findBloqueDef($seccionCodigo);
+        if ($def === null) {
+            return null;
+        }
+
+        return [
+            'tipo' => 'bloque',
+            'seccion_codigo' => (string)$def['codigo'],
+            'nombre' => (string)($def['nombre'] ?? $def['codigo']),
+            'widget' => (string)($def['widget'] ?? 'grupo_campos'),
+            'estado' => $estado,
+            'definicion' => self::extractWidgetDef($def),
+        ];
+    }
+
+    /**
+     * Config inicial al agregar bloque checklist a plantilla.
+     *
+     * @param array<string, mixed> $definicion
+     * @return array<string, mixed>
+     */
+    public static function defaultChecklistPlantillaConfig(array $definicion): array
+    {
+        return SgdChecklistConfigService::buildDefaultConfig($definicion);
+    }
+
+    /**
+     * Esquema v3 semilla (p. ej. GE-PD3-F1) — subconjunto del arquetipo, no la biblioteca completa.
+     *
+     * @return array{version: int, arquetipo: string, elementos: list<array<string, mixed>>}
+     */
+    public static function buildEsquemaSemillaV3(string $arquetipoCodigo): array
+    {
+        $arquetipoCodigo = self::normalizeCodigo($arquetipoCodigo);
+        if ($arquetipoCodigo === 'libre') {
+            return ['version' => 3, 'arquetipo' => 'libre', 'elementos' => []];
+        }
+
+        $semilla = self::plantillaSemilla($arquetipoCodigo);
+        $elementos = [];
+        $orden = 10;
+        foreach ($semilla as $secCodigo => $estado) {
+            if ($estado === 'no_aplica') {
+                continue;
+            }
+            $el = self::buildElementoBloque((string)$secCodigo, (string)$estado);
+            if ($el === null) {
+                continue;
+            }
+            if (SgdChecklistConfigService::isChecklistBlock((string)$secCodigo)) {
+                $def = is_array($el['definicion'] ?? null) ? $el['definicion'] : [];
+                $el['config'] = SgdChecklistConfigService::buildDefaultConfig($def);
+                if ($arquetipoCodigo === 'checklist') {
+                    $el['config']['modo'] = 'filas_fijas';
+                }
+            }
+            $el['orden'] = $orden;
+            $elementos[] = $el;
+            $orden += 10;
+        }
+
+        return [
+            'version' => 3,
+            'arquetipo' => $arquetipoCodigo,
+            'elementos' => $elementos,
+        ];
     }
 
     /**
@@ -159,7 +311,7 @@ class SgdArquetipoOperativoService
             $arquetipoCodigo = 'libre';
         }
 
-        if ($arquetipoCodigo === 'libre' || $arquetipoCodigo === 'solo_archivo') {
+        if ($arquetipoCodigo === 'libre') {
             return [
                 'version' => 2,
                 'arquetipo' => $arquetipoCodigo,

@@ -37,10 +37,15 @@ $pageMetaJson = json_encode([
     'nombre' => (string)($documento['nombre'] ?? ''),
     'version' => (string)($version['numero'] ?? '1'),
     'proceso' => (string)($documento['proceso_nombre'] ?? ''),
+    'canEdit' => !empty($canGuardar) && !empty($esBorrador),
 ], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP);
 
 $sgdFormJs = BASE_PATH . '/public/js/sgd-formularios.js';
 $sgdFormJsV = is_readable($sgdFormJs) ? (int)filemtime($sgdFormJs) : time();
+$sgdBloqueCfgJs = BASE_PATH . '/public/js/sgd-bloque-config.js';
+$sgdBloqueCfgJsV = is_readable($sgdBloqueCfgJs) ? (int)filemtime($sgdBloqueCfgJs) : time();
+$sgdChecklistJs = BASE_PATH . '/public/js/sgd-checklist-config.js';
+$sgdChecklistJsV = is_readable($sgdChecklistJs) ? (int)filemtime($sgdChecklistJs) : time();
 ?>
 <div class="module-container sgd-formularios-page">
     <?php $filterUrl = 'sgd/formularios'; require BASE_PATH . '/app/views/sgd/_empresa_filter.php'; ?>
@@ -129,17 +134,25 @@ $sgdFormJsV = is_readable($sgdFormJs) ? (int)filemtime($sgdFormJs) : time();
                                 <?php endforeach; ?>
                             </select>
                             <button type="button" id="sgd-btn-cargar-arquetipo" class="sgd-doc-btn">
-                                Cargar plantilla del arquetipo
+                                Cargar semilla del arquetipo
                             </button>
                         </div>
                         <p class="field-note">
-                            Piloto F3b: <strong>Acta</strong> (GE-PD3-F1). Los bloques se guardan en el catálogo
-                            <code>sgd_seccion</code> con clase <em>operativo</em> (importar desde Configuración SGD).
+                            La <strong>biblioteca</strong> lista todos los bloques posibles del arquetipo (p. ej. acta reunión, comité, auditoría F6).
+                            La <strong>plantilla</strong> es el subconjunto que lleva este documento; puede agregar, quitar y reordenar bloques y campos.
                         </p>
                     </div>
                 <?php endif; ?>
 
-                <h4 class="sgd-form-section-title">Bloques / campos</h4>
+                <?php if ($canGuardar && $esBorrador): ?>
+                    <section class="sgd-panel sgd-form-biblioteca-panel" id="sgd-form-biblioteca-panel"<?= $arquetipoActual !== 'acta' ? ' hidden' : '' ?>>
+                        <h4 class="sgd-form-section-title">Biblioteca — Acta estructurada</h4>
+                        <p class="field-note">Bloques disponibles según análisis SGI, SIGNT y SGD_DIANA. Pulse <em>Agregar</em> para incluirlos en la plantilla.</p>
+                        <div id="sgd-form-biblioteca-list" class="sgd-form-biblioteca-list"></div>
+                    </section>
+                <?php endif; ?>
+
+                <h4 class="sgd-form-section-title">Plantilla del documento</h4>
 
                 <?php if ($canGuardar && $esBorrador): ?>
                     <form id="sgd-form-add-campo" class="sgd-form-add-campo" onsubmit="return false;">
@@ -211,6 +224,8 @@ $sgdFormJsV = is_readable($sgdFormJs) ? (int)filemtime($sgdFormJs) : time();
         <script type="application/json" id="sgd-form-esquema-inicial"><?= $esquemaJson ?></script>
         <script type="application/json" id="sgd-form-page-meta"><?= $pageMetaJson ?></script>
         <script type="application/json" id="sgd-form-arquetipos-catalog"><?= $arquetiposSemillaJson ?></script>
+        <script src="/js/sgd-bloque-config.js?v=<?= (int)$sgdBloqueCfgJsV ?>"></script>
+        <script src="/js/sgd-checklist-config.js?v=<?= (int)$sgdChecklistJsV ?>"></script>
         <script src="/js/sgd-formularios.js?v=<?= (int)$sgdFormJsV ?>"></script>
     <?php endif; ?>
 </div>

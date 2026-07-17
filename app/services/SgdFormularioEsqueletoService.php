@@ -221,6 +221,15 @@ class SgdFormularioEsqueletoService
                     ];
                 }
             }
+            if ($formatoArchivo === 'docx_upload' && !in_array($archivoTipo, ['docx', 'doc'], true)) {
+                $archivoTipo = SgdArquetipoOperativoService::detectArchivoTipo($archivoRuta);
+                if (!in_array($archivoTipo, ['docx', 'doc'], true)) {
+                    return [
+                        'success' => false,
+                        'message' => 'Este formato requiere plantilla Word (.docx). Suba el archivo en «Versiones y archivo oficial» del documento.',
+                    ];
+                }
+            }
 
             if ($archivoTipo === '') {
                 $archivoTipo = SgdArquetipoOperativoService::detectArchivoTipo($archivoRuta);
@@ -230,10 +239,12 @@ class SgdFormularioEsqueletoService
             return ['success' => true, 'archivo_tipo' => $archivoTipo];
         }
 
-        if ($formatoArchivo === 'xlsx_upload' || $formatoArchivo === 'upload') {
-            $hint = $formatoArchivo === 'xlsx_upload'
-                ? 'Suba la plantilla Excel (.xlsx) en «Versiones y archivo oficial» del documento antes de publicar.'
-                : 'Suba el archivo de referencia (PDF o Excel) en «Versiones y archivo oficial» antes de publicar.';
+        if ($formatoArchivo === 'xlsx_upload' || $formatoArchivo === 'docx_upload' || $formatoArchivo === 'upload') {
+            $hint = match ($formatoArchivo) {
+                'xlsx_upload' => 'Suba la plantilla Excel (.xlsx) en «Versiones y archivo oficial» del documento antes de publicar.',
+                'docx_upload' => 'Suba la plantilla Word (.docx) en «Versiones y archivo oficial» del documento antes de publicar.',
+                default => 'Suba el archivo de referencia (PDF, Word o Excel) en «Versiones y archivo oficial» antes de publicar.',
+            };
 
             return ['success' => false, 'message' => $hint];
         }

@@ -400,8 +400,22 @@ div.dt-button-collection button.dt-button{
     }
 }
 
-/* Scroll vertical solo con muchas filas (50+); horizontal siempre si desbordan columnas */
+/* Scroll horizontal solo si desbordan columnas; sin recorte vertical interno */
 .savid-dt-shell.savid-dt-scrollable{
-    max-height:calc(100vh - 240px);
-    overflow-y:auto;
+    max-height:none;
+    overflow-y:visible;
+}
+
+/* Evitar que capas del propio shell tapen el buscador */
+.savid-dt-shell .dt-search,
+.savid-dt-shell .dataTables_filter{
+    position:relative;
+    z-index:4;
+}
+
+.savid-dt-shell .dt-search input,
+.savid-dt-shell .dataTables_filter input{
+    position:relative;
+    z-index:5;
+    pointer-events:auto;
 }

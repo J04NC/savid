@@ -3,11 +3,11 @@
         'name' => 'savid/sgd',
         'pretty_version' => 'dev-main',
         'version' => 'dev-main',
-        'reference' => '7c00efed44a495a9ed1a0d3e10b439874125ac01',
+        'reference' => 'e5113b2cc3d2f34496c7a9c1d239142e1b6547c2',
         'type' => 'library',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
-        'dev' => false,
+        'dev' => true,
     ),
     'versions' => array(
         'dompdf/dompdf' => array(
@@ -46,6 +46,15 @@
             'aliases' => array(),
             'dev_requirement' => false,
         ),
+        'phpmailer/phpmailer' => array(
+            'pretty_version' => 'v6.12.0',
+            'version' => '6.12.0.0',
+            'reference' => 'd1ac35d784bf9f5e61b424901d5a014967f15b12',
+            'type' => 'library',
+            'install_path' => __DIR__ . '/../phpmailer/phpmailer',
+            'aliases' => array(),
+            'dev_requirement' => false,
+        ),
         'sabberworm/php-css-parser' => array(
             'pretty_version' => 'v9.3.0',
             'version' => '9.3.0.0',
@@ -58,7 +67,7 @@
         'savid/sgd' => array(
             'pretty_version' => 'dev-main',
             'version' => 'dev-main',
-            'reference' => '7c00efed44a495a9ed1a0d3e10b439874125ac01',
+            'reference' => 'e5113b2cc3d2f34496c7a9c1d239142e1b6547c2',
             'type' => 'library',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),

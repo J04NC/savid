@@ -23,14 +23,16 @@ window.addEventListener("pageshow", cleanupStaleOverlays);
  */
 function cleanupStaleOverlays() {
 
-    document.querySelectorAll("div.dt-button-background").forEach(function (bg) {
-        if (!document.querySelector("div.dt-button-collection")) {
-            bg.remove();
-        }
-    });
+    var openCollection = document.querySelector("div.dt-button-collection");
+    if (!openCollection || openCollection.offsetParent === null) {
+        document.querySelectorAll("div.dt-button-background").forEach(function (el) {
+            el.remove();
+        });
+    }
 
     const searchOverlay = document.getElementById("searchOverlay");
     if (searchOverlay && !searchOverlay.classList.contains("active")) {
+        searchOverlay.classList.remove("active");
         searchOverlay.setAttribute("aria-hidden", "true");
     }
 
@@ -39,6 +41,13 @@ function cleanupStaleOverlays() {
         document.body.classList.remove("modal-open");
     }
 }
+
+document.addEventListener("click", function (e) {
+    if (e.target && e.target.closest && e.target.closest("#contextModal, .search-overlay.active, .sgd-revert-modal:not([hidden])")) {
+        return;
+    }
+    window.setTimeout(cleanupStaleOverlays, 0);
+}, true);
 
 /* =====================================================
 SIDEBAR

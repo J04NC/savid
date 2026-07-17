@@ -93,6 +93,12 @@ Ese archivo en `config/` tampoco se versiona. El bootstrap cargara `config/Datab
 - Las credenciales reales deben estar solo en **`config/.env`** o en **`config/Database.php`** local, nunca commiteadas.
 - El repositorio solo incluye **`config.example/`** como referencia segura.
 
+### Recuperacion de contrasena (`login/forgot`)
+
+Flujo: `?url=login/forgot` (pide usuario o correo) → `PasswordResetService::requestReset` genera un token de un solo uso (30 min, solo se persiste su hash SHA-256 en `usuario_password_reset`) y lo envia por correo via `MailerService` (PHPMailer/SMTP) → `?url=login/resetPassword&token=...` valida el token y muestra el formulario de nueva contrasena → `resetPasswordSave` reutiliza `UsuarioFormValidationService::validatePasswordPolicy` (misma politica que el CRUD de usuarios) y marca el token como usado.
+
+La respuesta de `forgotSend` es siempre el mismo mensaje generico, exista o no la cuenta (anti-enumeracion). Requiere variables `SMTP_*` y opcionalmente `APP_URL` en `config/.env` (ver `config.example/env.example`); sin `SMTP_HOST` configurado, `MailerService` registra el intento en el log de PHP y no envia el correo (util en desarrollo, pero el token igual queda creado).
+
 ---
 
 ## Guia rapida (equipo)
@@ -180,15 +186,53 @@ Flujo de request:
 | Autenticacion | `LoginController` | `AuthService` | `UserRepository`, `SubscriptionRepository`, etc. |
 | Usuario (roles / permisos directos) | `UsuarioController` | `UserAccessService` | `UserAccessRepository` |
 | Dashboard | `DashboardController` | `DashboardService` | `MenuService`, `ModuleRepository` |
-| SGD (fase 1) | `SgdController` | `SgdConfigService`, `SgdImportService`, `SgdScopeService` | `SgdRepository` |
+| SGD | `SgdController` | `SgdConfigService`, `SgdImportService`, `SgdScopeService`, `SgdDocumentoService`, `SgdFormularioService`, `SgdRegistroService`, `SgdElaboracionService`, … | `SgdRepository` |
 
-### SGD — fase 1 (catálogos e importación)
+### SGD — Sistema de Gestión Documental
 
-- Migración: `database/migrations/20260524_sgd_fase1.sql` (tablas `sgd_*`, módulo menú, permisos superadmin).
-- Rutas: `?url=sgd`, `sgd/config`, `sgd/importar`; catálogos CRUD: `sgd_proceso`, `sgd_tipo_documental`, `sgd_dependencia`, `sgd_documento`, `sgd_ccd_entrada`, etc.
-- Todo filtrado por `empresa_id` (sesión o filtro superadmin). Tipos documentales desde plantilla JSON (`config/sgd_tipos_plantilla.json`), no hardcodeados en PHP.
-- Importación Excel: lector `scripts/sgd_read_sheet.py` (requiere `python3` + `xlrd` para `.xls`).
-- Diseño funcional: `docs/sgd/FICHA_MODULO_SGD.md`.
+Diseño funcional completo: [`docs/sgd/FICHA_MODULO_SGD.md`](docs/sgd/FICHA_MODULO_SGD.md).
+
+| Fase | Alcance | Estado |
+|------|---------|--------|
+| **F1** | Config empresa, catálogos, import CCD/maestro, multiempresa | ✅ |
+| **F2** | Listado maestro, versiones documento, PDF/archivo oficial | ✅ |
+| **F3a** | Diseñador plantillas operativas (esquema JSON, preview, publicar) | ✅ base |
+| **F3b** | Arquetipos operativos, biblioteca de bloques, esquema **v3**, diligenciamiento piloto acta | 🔄 avanzado |
+| **F3c** | Elaboración maestro M4 (secciones, redacción, import Word, preview PDF) | 🔄 base |
+| **F4** | Expedientes + registros diligenciados (`sgd_registro`) | 🔄 base |
+| **F5–F7** | Firmas colaborador, TRD, variantes sede, indexador `11.42.SGI` | ⏳ |
+
+**Rutas principales** (`?url=…`):
+
+| Ruta | Uso |
+|------|-----|
+| `sgd` | Hub del módulo |
+| `sgd/config` | Configuración SGD por empresa |
+| `sgd/importar` | Importación Excel CCD y listado maestro |
+| `sgd/documentos` | Listado maestro (documentos F/R/PD…) |
+| `sgd/ccd` | Cuadro de clasificación documental |
+| `sgd/formularios` | Diseñador de plantillas **operativas** (modo dinámico F/R) |
+| `sgd/elaboracion` | Elaboración de documentos **maestro** (M/PD/PL…) |
+| `sgd/secciones` | Catálogo de secciones M4 y bloques operativos |
+| `sgd/registros` | Registros diligenciados sobre plantilla publicada |
+
+**Catálogos de referencia** (`config.example/`):
+
+| Archivo | Contenido |
+|---------|-----------|
+| `sgd_tipos_plantilla.json` | Tipos documentales y `modo` (maestro / dinámico / híbrido) |
+| `sgd_arquetipos_operativos.json` | 10 arquetipos, ~31 bloques operativos, biblioteca acta, **semilla por arquetipo** |
+| `sgd_secciones_m4_plantilla.json` | Secciones de elaboración maestro (M4) |
+
+**Migraciones recientes** (`database/migrations/`): `20260605_sgd_formulario.sql`, `20260606_sgd_seccion_elaboracion.sql`, `20260607_sgd_seccion_operativo.sql`, `20260608_sgd_documento_version_archivo.sql`, `20260612_sgd_registro_f4.sql`, permisos versiones (`20260609`–`20260611`).
+
+**Frontend SGD** (`public/js/`): `sgd-formularios.js`, `sgd-bloque-config.js`, `sgd-checklist-config.js`, `sgd-registros.js`, `sgd-elaboracion.js`, `sgd-documentos.js`, …
+
+**Operativa (F3b/F4):** plantillas con esquema **v3** (`elementos[]` unificados: bloques + campos intercalados). El diseñador compone formatos desde la biblioteca de bloques del arquetipo; **semilla** = subconjunto común vacío por arquetipo (sin presets corporativos). Cada registro queda ligado a `formulario_version_id` publicada; cambios en borrador no afectan instancias ya abiertas.
+
+**Importación Excel:** lector `scripts/sgd_read_sheet.py` (requiere `python3` + `xlrd` para `.xls`).
+
+Todo filtrado por `empresa_id` (sesión o filtro superadmin). Tipos documentales desde plantilla JSON, no hardcodeados en PHP.
 
 ---
 

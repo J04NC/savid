@@ -94,6 +94,7 @@ class AuthService
             $_SESSION['nombre'],
             $_SESSION['rol_id'],
             $_SESSION['rol_nombre'],
+            $_SESSION['foto_ruta'],
             $_SESSION['es_super_admin'],
             $_SESSION['empresa_id'],
             $_SESSION['empresa'],
@@ -185,6 +186,7 @@ class AuthService
         $_SESSION['nombre'] = $user['nombre'];
         $_SESSION['rol_id'] = $user['rol_id'];
         $_SESSION['rol_nombre'] = $user['rol_nombre'] ?? '';
+        $_SESSION['foto_ruta'] = $user['foto_ruta'] ?? null;
 
         $idle = $user['sesion_idle_minutos'] ?? null;
         if ($idle !== null && $idle !== '' && (int)$idle > 0) {

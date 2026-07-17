@@ -74,9 +74,14 @@ class SgdDocumentoVersionService
                 $this->repo->updateDocumentoVersionFecha($empresaId, $versionId, $fechaAprobacion, $userId);
             }
 
+            $numeroCreado = (string)($bundle['documento_version']['numero'] ?? '');
+            $message = !empty($bundle['alreadyOpen'])
+                ? 'La versión ' . $numeroCreado . ' ya estaba en borrador (plantilla + archivo).'
+                : 'Versión ' . $numeroCreado . ' creada en borrador (plantilla + archivo).';
+
             return [
                 'success' => true,
-                'message' => 'Versión ' . ($bundle['documento_version']['numero'] ?? '') . ' creada en borrador (plantilla + archivo).',
+                'message' => $message,
                 'id' => $versionId,
             ];
         }

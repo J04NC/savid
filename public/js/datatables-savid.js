@@ -132,15 +132,12 @@
         return '<"savid-dt-bar-top2"lf>rt<"savid-dt-bar-bottom"ip>';
     }
 
-    /** Scroll vertical del recuadro solo con muchas filas por página (p. ej. 50+). */
+    /** Sin scroll vertical interno: toda la tabla se muestra; la página hace scroll si hace falta. */
     function updateShellScroll(tableEl, api) {
         var shell = tableEl.closest('.savid-dt-shell');
-        if (!shell || !api) return;
-        var at = parseInt(tableEl.getAttribute('data-dt-scroll-at') || '50', 10);
-        if (isNaN(at) || at < 1) {
-            at = 50;
+        if (shell) {
+            shell.classList.remove('savid-dt-scrollable');
         }
-        shell.classList.toggle('savid-dt-scrollable', api.page.len() >= at);
     }
 
     function buildOptions(tableEl) {
@@ -150,7 +147,7 @@
             pageLength = 10;
         }
 
-        var withButtons = hasButtonsPlugin();
+        var withButtons = hasButtonsPlugin() && tableEl.getAttribute('data-dt-buttons') !== 'false';
         var order = [[0, 'asc']];
         var orderAttr = tableEl.getAttribute('data-dt-order');
         if (orderAttr) {
