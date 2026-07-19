@@ -16,6 +16,7 @@ class UserRepository
         $stmt = $this->pdo->prepare("
             SELECT u.*,
                 t.foto_ruta,
+                t.email,
                 COALESCE(
                     NULLIF(TRIM(CONCAT_WS(' ', t.nombres, t.apellidos)), ''),
                     u.username
@@ -44,6 +45,49 @@ class UserRepository
             LIMIT 1
         ");
         $stmt->execute([$username]);
+
+        return $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Igual que findActiveByUsername pero por id — usado para retomar el login tras verificar 2FA.
+     */
+    public function findActiveById(int $usuarioId)
+    {
+        $uNd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'usuario', 'u');
+
+        $stmt = $this->pdo->prepare("
+            SELECT u.*,
+                t.foto_ruta,
+                t.email,
+                COALESCE(
+                    NULLIF(TRIM(CONCAT_WS(' ', t.nombres, t.apellidos)), ''),
+                    u.username
+                ) AS nombre,
+                (
+                    SELECT ur.rol_id
+                    FROM usuario_rol ur
+                    WHERE ur.usuario_id = u.id AND ur.estado_id = 1
+                    ORDER BY ur.rol_id
+                    LIMIT 1
+                ) AS rol_id,
+                (
+                    SELECT r.nombre
+                    FROM usuario_rol ur
+                    INNER JOIN rol r ON r.id = ur.rol_id AND r.estado_id = 1
+                    WHERE ur.usuario_id = u.id AND ur.estado_id = 1
+                    ORDER BY ur.rol_id
+                    LIMIT 1
+                ) AS rol_nombre
+            FROM usuario u
+            LEFT JOIN terceroidentificacion ti ON ti.id = u.terceroidentificacion_id
+            LEFT JOIN tercero t ON t.id = ti.tercero_id
+            WHERE u.id = ?
+            AND u.estado_id = 1
+            {$uNd}
+            LIMIT 1
+        ");
+        $stmt->execute([$usuarioId]);
 
         return $stmt->fetch(PDO::FETCH_ASSOC);
     }

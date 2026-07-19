@@ -51,6 +51,16 @@ class LoginController
             exit;
         }
 
+        if (!empty($auth['needs_2fa'])) {
+            header('Location: ' . ($auth['redirect'] ?? '?url=login/verificar2fa'));
+            exit;
+        }
+
+        $this->finishSuccessfulLogin($auth['redirect'] ?? '?url=dashboard');
+    }
+
+    private function finishSuccessfulLogin(string $redirectTarget): void
+    {
         try {
             $tracking = new SesionTrackingService();
             $tracking->openSessionForCurrentUser();
@@ -58,8 +68,7 @@ class LoginController
             error_log('SesionTrackingService (login): ' . $e->getMessage());
         }
 
-        $target = $auth['redirect'] ?? '?url=dashboard';
-        header('Location: ' . $target);
+        header('Location: ' . $redirectTarget);
         exit;
     }
 
@@ -156,5 +165,113 @@ class LoginController
         $_SESSION['forgot_success'] = 'Contraseña actualizada. Ya puedes iniciar sesión.';
         header('Location: ?url=login');
         exit;
+    }
+
+    /**
+     * GET ?url=login/verificar2fa — formulario para ingresar el código de verificación.
+     */
+    public function verificar2fa()
+    {
+        if (SessionManager::userLogged()) {
+            header('Location: ?url=dashboard');
+            exit;
+        }
+
+        if (empty($_SESSION['tfa_pending_user_id'])) {
+            header('Location: ?url=login');
+            exit;
+        }
+
+        require BASE_PATH . '/app/views/login_verificar2fa.php';
+    }
+
+    /**
+     * POST ?url=login/verificar2faReenviar — reenvía el código (con límite de frecuencia).
+     */
+    public function verificar2faReenviar()
+    {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST' || empty($_SESSION['tfa_pending_user_id'])) {
+            header('Location: ?url=login');
+            exit;
+        }
+
+        $userId = (int)$_SESSION['tfa_pending_user_id'];
+
+        try {
+            $userRepository = new UserRepository((new Database())->connect());
+            $user = $userRepository->findActiveById($userId);
+            if ($user) {
+                $service = new TwoFactorService();
+                $result = $service->sendCode(
+                    $userId,
+                    (string)($user['email'] ?? ''),
+                    (string)($user['nombre'] ?? $user['username']),
+                    $_SERVER['REMOTE_ADDR'] ?? null
+                );
+                $_SESSION['tfa_error'] = $result['success']
+                    ? 'Enviamos un nuevo código a tu correo.'
+                    : ($result['error'] ?? 'No se pudo reenviar el código.');
+            }
+        } catch (Throwable $e) {
+            error_log('TwoFactorService::sendCode (reenviar): ' . $e->getMessage());
+            $_SESSION['tfa_error'] = 'No se pudo reenviar el código.';
+        }
+
+        header('Location: ?url=login/verificar2fa');
+        exit;
+    }
+
+    /**
+     * POST ?url=login/verificar2faConfirmar — valida el código e inicia sesión.
+     */
+    public function verificar2faConfirmar()
+    {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST' || empty($_SESSION['tfa_pending_user_id'])) {
+            header('Location: ?url=login');
+            exit;
+        }
+
+        $userId = (int)$_SESSION['tfa_pending_user_id'];
+        $code = trim($_POST['code'] ?? '');
+        $rememberDevice = !empty($_POST['remember_device']);
+
+        $service = new TwoFactorService();
+        $result = $service->verifyCode($userId, $code);
+
+        if (!$result['success']) {
+            $_SESSION['tfa_error'] = $result['error'] ?? 'Código incorrecto.';
+            header('Location: ?url=login/verificar2fa');
+            exit;
+        }
+
+        $auth = $this->authService->completeLoginForUserId($userId);
+
+        if (!$auth['success']) {
+            unset($_SESSION['tfa_pending_user_id']);
+            $_SESSION['login_error'] = $auth['error'] ?? 'No se pudo iniciar sesión';
+            header('Location: ?url=login');
+            exit;
+        }
+
+        if ($rememberDevice) {
+            try {
+                $token = $service->registerTrustedDevice(
+                    $userId,
+                    $_SERVER['REMOTE_ADDR'] ?? null,
+                    $_SERVER['HTTP_USER_AGENT'] ?? null
+                );
+                setcookie(TwoFactorService::DEVICE_COOKIE_NAME, $token, [
+                    'expires' => time() + TwoFactorService::deviceCookieTtlSeconds(),
+                    'path' => '/',
+                    'secure' => !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off',
+                    'httponly' => true,
+                    'samesite' => 'Lax',
+                ]);
+            } catch (Throwable $e) {
+                error_log('TwoFactorService::registerTrustedDevice: ' . $e->getMessage());
+            }
+        }
+
+        $this->finishSuccessfulLogin($auth['redirect'] ?? '?url=dashboard');
     }
 }

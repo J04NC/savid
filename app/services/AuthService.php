@@ -38,6 +38,48 @@ class AuthService
 
         $userId = (int)$user['id'];
 
+        if (!empty($user['two_factor_enabled'])) {
+            $twoFactor = new TwoFactorService();
+            if (!$twoFactor->hasTrustedDeviceCookie($userId)) {
+                $_SESSION['tfa_pending_user_id'] = $userId;
+                $twoFactor->sendCode(
+                    $userId,
+                    (string)($user['email'] ?? ''),
+                    (string)($user['nombre'] ?? $user['username']),
+                    $_SERVER['REMOTE_ADDR'] ?? null
+                );
+
+                return ['success' => true, 'needs_2fa' => true, 'redirect' => '?url=login/verificar2fa'];
+            }
+        }
+
+        return $this->completeLogin($user);
+    }
+
+    /**
+     * Retoma el login de un usuario que ya validó su código de doble factor.
+     *
+     * @return array{success:bool, error?:string, redirect?:string}
+     */
+    public function completeLoginForUserId(int $userId): array
+    {
+        $user = $this->userRepository->findActiveById($userId);
+        if (!$user) {
+            return ['success' => false, 'error' => 'No se pudo completar el inicio de sesión.'];
+        }
+
+        return $this->completeLogin($user);
+    }
+
+    /**
+     * @return array{success:bool, error?:string, redirect?:string}
+     */
+    private function completeLogin(array $user): array
+    {
+        $userId = (int)$user['id'];
+
+        unset($_SESSION['tfa_pending_user_id']);
+
         $this->clearStaleContextKeys();
         $this->setUserSession($user);
 

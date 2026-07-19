@@ -609,6 +609,19 @@ class="form-input <?= $error ? 'input-error' : '' ?>"
 <?= $uppercaseDataAttr ?>
 <?= ($config['title'] ?? '') !== '' ? 'title="' . htmlspecialchars((string)$config['title'], ENT_QUOTES, 'UTF-8') . '"' : '' ?>><?= htmlspecialchars($value) ?></textarea>
 
+<?php elseif($config['type'] === 'checkbox'): ?>
+
+<input type="hidden" name="<?= $campo ?>" value="0">
+<input
+type="checkbox"
+name="<?= $campo ?>"
+value="1"
+<?= ((string)$value !== '' && (string)$value !== '0') ? 'checked' : '' ?>
+data-label="<?= htmlspecialchars($fieldLabel, ENT_QUOTES, 'UTF-8') ?>"
+data-rules="<?= $config['rules'] ?>"
+class="form-checkbox <?= $error ? 'input-error' : '' ?>"
+<?= ($config['title'] ?? '') !== '' ? 'title="' . htmlspecialchars((string)$config['title'], ENT_QUOTES, 'UTF-8') . '"' : '' ?>>
+
 <?php else: ?>
 
 <input

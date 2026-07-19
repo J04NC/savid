@@ -1212,6 +1212,14 @@ function crudSetSelectValueSafely(sel, value) {
 }
 
 function crudSetFieldValue(form, field, value, displayLabel) {
+    const checkboxInput = form.querySelector('input[type="checkbox"][name="' + field + '"]');
+    if (checkboxInput) {
+        const checkedVal = value === null || value === undefined ? "" : String(value);
+        checkboxInput.checked = checkedVal !== "" && checkedVal !== "0";
+        checkboxInput.dispatchEvent(new Event("change", { bubbles: true }));
+        return;
+    }
+
     const input = form.querySelector('[name="' + field + '"]');
     if (!input) return;
 
@@ -1463,6 +1471,11 @@ function initCrudNuevo() {
             input.classList.remove("input-error");
             input.style.border = "";
 
+        });
+
+        document.querySelectorAll(".form-checkbox").forEach(input => {
+            input.checked = false;
+            input.classList.remove("input-error");
         });
 
         document.querySelectorAll(".crud-catalog-wrap").forEach((wrap) => {
@@ -2012,6 +2025,10 @@ function crudResetUsuarioForm() {
         } else {
             input.value = "";
         }
+        input.classList.remove("input-error");
+    });
+    document.querySelectorAll(".form-checkbox").forEach(input => {
+        input.checked = false;
         input.classList.remove("input-error");
     });
     const hiddenId = document.getElementById("crud_id");
