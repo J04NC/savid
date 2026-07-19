@@ -3468,9 +3468,6 @@ AGREGAR AL FINAL DE public/css/app.css
 }
 
 .role-table thead th{
-    position:sticky;
-    top:0;
-    z-index:5;
     padding:12px 10px;
     font-size:13px;
     text-align:center;
@@ -3602,9 +3599,6 @@ AGREGAR AL FINAL DE public/css/app.css
 
 .modal-permisos .rol-permisos-scope,
 .modal-permisos .usuario-permisos-toolbar{
-    position:sticky;
-    top:0;
-    z-index:6;
     margin:-8px -24px 10px;
     padding:12px 24px;
 }
