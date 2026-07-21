@@ -2134,6 +2134,11 @@ function initCrudAcciones() {
                     "lg",
                     "Cargando usuarios..."
                 ],
+                renovar_suscripcion: [
+                    "suscripcion/renovar/" + selectedId,
+                    "sm",
+                    "Cargando..."
+                ],
                 item_accion: [
                     "item/acciones/" + selectedId,
                     "lg",

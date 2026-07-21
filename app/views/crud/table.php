@@ -807,6 +807,17 @@ if ($rawPath !== null && $rawPath !== '') {
 ?>
 <?php elseif ($crudContextTable === 'usuario' && $campo === 'documento_dv' && ($valor === null || $valor === '')): ?>
 <span class="crud-dv-cell-empty">—</span>
+<?php elseif ($crudContextTable === 'suscripcion' && $campo === 'fecha_fin' && $valor !== null && $valor !== ''): ?>
+<?php
+$diasRestantes = (int) floor((strtotime((string)$valor) - strtotime(date('Y-m-d'))) / 86400);
+$vencClass = '';
+if ($diasRestantes < 0) {
+    $vencClass = 'susc-vencida';
+} elseif ($diasRestantes <= 30) {
+    $vencClass = 'susc-por-vencer';
+}
+?>
+<span class="<?= $vencClass ?>" title="<?= $diasRestantes >= 0 ? htmlspecialchars((string)$diasRestantes . ' días restantes', ENT_QUOTES, 'UTF-8') : htmlspecialchars('Venció hace ' . abs($diasRestantes) . ' días', ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars((string)$valor, ENT_QUOTES, 'UTF-8') ?></span>
 <?php else: ?>
 <?= htmlspecialchars((string)$valor) ?>
 <?php endif; ?>

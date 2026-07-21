@@ -29,8 +29,13 @@ class TrackableColumnsService
 
         $meta = self::getMeta($pdo, $parsed['table']);
 
+        // Normalizado (trim + espacios colapsados): stampInsert() ancla su regex a ^,
+        // por lo que un SQL con salto de línea/indentación inicial (heredoc típico de
+        // los repositorios) haría fallar el match silenciosamente.
+        $normalizedSql = trim(preg_replace('/\s+/', ' ', $sql) ?? $sql);
+
         if ($parsed['action'] === 'INSERT' || $parsed['action'] === 'REPLACE') {
-            return self::stampInsert($sql, $params, $meta);
+            return self::stampInsert($normalizedSql, $params, $meta);
         }
 
         if ($parsed['action'] === 'UPDATE') {

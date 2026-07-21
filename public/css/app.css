@@ -3908,6 +3908,35 @@ AGREGAR AL FINAL DE public/css/app.css
     box-shadow:inset 0 0 0 1px rgba(251,113,133,.4);
 }
 
+/* Suscripción: fecha_fin próxima a vencer o ya vencida */
+.susc-por-vencer{
+    display:inline-block;
+    padding:2px 8px;
+    border-radius:6px;
+    font-weight:600;
+    background:rgba(245,158,11,.16);
+    color:#b45309;
+}
+
+.dark-mode .susc-por-vencer{
+    background:rgba(245,158,11,.2);
+    color:#fbbf24;
+}
+
+.susc-vencida{
+    display:inline-block;
+    padding:2px 8px;
+    border-radius:6px;
+    font-weight:600;
+    background:rgba(225,29,72,.14);
+    color:#b91c1c;
+}
+
+.dark-mode .susc-vencida{
+    background:rgba(225,29,72,.22);
+    color:#fca5a5;
+}
+
 .role-footer{
     display:flex;
     justify-content:flex-end;
