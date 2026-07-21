@@ -57,6 +57,20 @@ class UsuarioSesionRepository
         ]);
     }
 
+    public function findById(int $id): ?array
+    {
+        $stmt = $this->pdo->prepare('
+            SELECT *
+            FROM usuario_sesion
+            WHERE id = ?
+            AND deleted_at IS NULL
+        ');
+        $stmt->execute([$id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row ?: null;
+    }
+
     public function closeSession(int $sesionId, string $motivo): void
     {
         $motivo = substr(preg_replace('/[^a-z_]/', '', strtolower($motivo)), 0, 32);

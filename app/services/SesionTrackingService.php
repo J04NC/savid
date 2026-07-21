@@ -56,6 +56,24 @@ class SesionTrackingService
         );
     }
 
+    /**
+     * true si un administrador cerró esta sesión desde el reporte de sesiones
+     * (la sesión PHP del usuario sigue viva; se detecta en el siguiente ping()).
+     */
+    public function wasCurrentSessionClosedByAdmin(): bool
+    {
+        $sesionId = (int)($_SESSION['usuario_sesion_id'] ?? 0);
+        if ($sesionId <= 0) {
+            return false;
+        }
+
+        $row = $this->repo->findById($sesionId);
+
+        return $row !== null
+            && $row['logout_at'] !== null
+            && ($row['logout_motivo'] ?? '') === 'admin';
+    }
+
     public function closeCurrentSession(string $motivo = 'logout'): void
     {
         $sesionId = (int)($_SESSION['usuario_sesion_id'] ?? 0);

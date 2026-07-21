@@ -139,8 +139,8 @@ $sesionesJsV = is_readable($assetSesiones) ? (int)filemtime($assetSesiones) : ti
         </span>
     </div>
 
-    <div class="crud-table auditoria-table-wrap savid-dt-host">
-        <table class="auditoria-table sesiones-table savid-datatable" data-dt-paging="false">
+    <div class="crud-table auditoria-table-wrap">
+        <table class="auditoria-table sesiones-table savid-datatable">
             <thead>
                 <tr>
                     <th>Estado</th>
@@ -153,12 +153,13 @@ $sesionesJsV = is_readable($assetSesiones) ? (int)filemtime($assetSesiones) : ti
                     <th>Duración</th>
                     <th>IP</th>
                     <th>Motivo cierre</th>
+                    <th class="auditoria-th-actions" aria-label="Acciones">Acciones</th>
                 </tr>
             </thead>
             <tbody id="sesionesTableBody">
                 <?php if ($rows === []): ?>
                     <tr class="auditoria-empty-row">
-                        <td colspan="10">No hay sesiones con los filtros actuales.</td>
+                        <td colspan="11">No hay sesiones con los filtros actuales.</td>
                     </tr>
                 <?php else: ?>
                     <?php foreach ($rows as $r): ?>
@@ -190,6 +191,15 @@ $sesionesJsV = is_readable($assetSesiones) ? (int)filemtime($assetSesiones) : ti
                             <td><?= htmlspecialchars(sesiones_format_duracion($r['duracion_segundos'] ?? null)) ?></td>
                             <td><?= htmlspecialchars((string)($r['ip'] ?? '—')) ?></td>
                             <td><?= htmlspecialchars((string)($r['logout_motivo'] ?? '—')) ?></td>
+                            <td class="auditoria-td-actions">
+                                <?php if ($estado !== 'cerrada'): ?>
+                                    <button type="button" class="auditoria-btn-secondary btn-cerrar-sesion" data-sesion-id="<?= (int)($r['id'] ?? 0) ?>">
+                                        🔒 Cerrar
+                                    </button>
+                                <?php else: ?>
+                                    —
+                                <?php endif; ?>
+                            </td>
                         </tr>
                     <?php endforeach; ?>
                 <?php endif; ?>

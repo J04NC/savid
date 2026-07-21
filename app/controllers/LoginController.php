@@ -74,7 +74,10 @@ class LoginController
 
     public function logout()
     {
-        $motivo = (isset($_GET['motivo']) && $_GET['motivo'] === 'idle') ? 'idle' : 'logout';
+        $motivosValidos = ['idle', 'admin'];
+        $motivo = (isset($_GET['motivo']) && in_array($_GET['motivo'], $motivosValidos, true))
+            ? $_GET['motivo']
+            : 'logout';
         $tracking = new SesionTrackingService();
         $tracking->closeCurrentSession($motivo);
 

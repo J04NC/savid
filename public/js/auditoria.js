@@ -100,7 +100,7 @@
         });
     }
 
-    /* Búsqueda en página: la gestiona DataTables (datatables-savid.js) */
+    /* Búsqueda en página: filtro vanilla en crud.js (initCrudSearch), tabla sin DataTables */
 
     const btnArch = document.getElementById('btnArchivarAuditoria');
     if (btnArch) {

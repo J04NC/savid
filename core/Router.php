@@ -70,6 +70,9 @@ class Router
 
         $sgdElaboracionJsonMethods = ['elaboracionUploadMedia', 'elaboracionImportWord', 'elaboracionImportWordFetch', 'elaboracionPreviewPdf'];
 
+        /* Latido de actividad: para todo usuario logueado, no solo quien puede ver el reporte de sesiones. */
+        $sesionesJsonMethods = ['ping'];
+
         if (SessionManager::userLogged()
             && $controllerName === 'UsuarioController'
             && in_array($method, $usuarioJsonLookupMethods, true)
@@ -94,6 +97,7 @@ class Router
             && class_exists('PermisoService')
             && !($controllerName === 'UsuarioController' && in_array($method, $usuarioJsonLookupMethods, true))
             && !($controllerName === 'EmpresaController' && in_array($method, $empresaJsonApiMethods, true))
+            && !($controllerName === 'SesionesController' && in_array($method, $sesionesJsonMethods, true))
             && !($controllerName === 'SgdController'
                 && in_array($method, $sgdElaboracionJsonMethods, true)
                 && (

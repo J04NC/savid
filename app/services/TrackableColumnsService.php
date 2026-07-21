@@ -117,7 +117,7 @@ class TrackableColumnsService
     private static function stampInsert(string $sql, array $params, array $meta): array
     {
         if (!preg_match(
-            '/^(INSERT\s+(?:IGNORE\s+)?INTO|REPLACE\s+INTO)\s+`?([a-zA-Z0-9_]+)`?\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)/is',
+            '/^(INSERT\s+(?:IGNORE\s+)?INTO|REPLACE\s+INTO)\s+`?([a-zA-Z0-9_]+)`?\s*\(([^)]+)\)\s*VALUES\s*\((.+)\)/is',
             $sql,
             $m
         )) {

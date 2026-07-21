@@ -5,7 +5,14 @@
     'use strict';
 
     function ping() {
-        fetch('?url=sesiones/ping', { credentials: 'same-origin' }).catch(function () {});
+        fetch('?url=sesiones/ping', { credentials: 'same-origin' })
+            .then(function (r) { return r.json(); })
+            .then(function (j) {
+                if (j && j.forced_logout) {
+                    window.location.href = '?url=login/logout&motivo=admin';
+                }
+            })
+            .catch(function () {});
     }
 
     ping();

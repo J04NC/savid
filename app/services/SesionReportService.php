@@ -26,6 +26,39 @@ class SesionReportService
     }
 
     /**
+     * Cierra una sesión ajena (admin), solo si está dentro del alcance del usuario actual.
+     *
+     * @return array{success: bool, error?: string}
+     */
+    public function close(int $sesionId): array
+    {
+        if (!$this->canView()) {
+            return ['success' => false, 'error' => 'No tiene permiso para gestionar sesiones.'];
+        }
+
+        $row = $this->repo->findById($sesionId);
+        if (!$row) {
+            return ['success' => false, 'error' => 'Sesión no encontrada.'];
+        }
+
+        if ($row['logout_at'] !== null) {
+            return ['success' => false, 'error' => 'Esa sesión ya estaba cerrada.'];
+        }
+
+        $scope = $this->scopeService->buildForReports([]);
+        $empresaId = $row['empresa_id'] !== null ? (int)$row['empresa_id'] : null;
+        $sedeId = $row['sede_id'] !== null ? (int)$row['sede_id'] : null;
+
+        if (!$this->scopeService->canAccessRecord($scope, $empresaId, $sedeId)) {
+            return ['success' => false, 'error' => 'No tiene alcance sobre esa sesión.'];
+        }
+
+        $this->repo->closeSession($sesionId, 'admin');
+
+        return ['success' => true];
+    }
+
+    /**
      * @return array{rows: list<array<string, mixed>>, total: int, page: int, pages: int, summary: array{activas: int, total_hoy: int}}
      */
     public function listPage(array $query, int $perPage = 50): array

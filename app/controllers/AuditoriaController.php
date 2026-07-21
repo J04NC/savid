@@ -19,7 +19,10 @@ class AuditoriaController
             exit;
         }
 
-        $list = $this->auditQuery->listPage($_GET, 50);
+        // Auditoría ya tiene ~99k filas con snapshots JSON pesados: traer todo agota la memoria de PHP.
+        // DataTables pagina en el navegador (10 por página) dentro de este lote; use los filtros de fecha
+        // para acotar, y "Siguiente" del reporte para moverse entre lotes.
+        $list = $this->auditQuery->listPage($_GET, 200);
         $tablas = $this->auditQuery->getTableNames();
         $reportScope = $list['reportScope'] ?? [];
         $breadcrumb = $this->moduleService->buildBreadcrumbForRuta('auditoria');

@@ -146,8 +146,8 @@ $auditoriaJsV = is_readable($assetAuditoria) ? (int)filemtime($assetAuditoria) :
         </span>
     </div>
 
-    <div class="crud-table auditoria-table-wrap savid-dt-host">
-        <table class="auditoria-table savid-datatable" data-dt-paging="false">
+    <div class="crud-table auditoria-table-wrap">
+        <table class="auditoria-table savid-datatable">
             <thead>
                 <tr>
                     <th>Fecha</th>

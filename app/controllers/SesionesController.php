@@ -24,7 +24,8 @@ class SesionesController
             exit;
         }
 
-        $list = $this->reportService->listPage($_GET, 50);
+        // DataTables pagina en el navegador (10 por página, como usuario/tercero); traemos todo el set filtrado.
+        $list = $this->reportService->listPage($_GET, 100000);
         $reportScope = $list['reportScope'] ?? [];
 
         $breadcrumb = $this->moduleService->buildBreadcrumbForRuta('sesiones');
@@ -48,7 +49,8 @@ class SesionesController
     }
 
     /**
-     * Latido de actividad (JSON). Actualiza last_activity_at de la sesión actual.
+     * Latido de actividad (JSON). Actualiza last_activity_at de la sesión actual
+     * y avisa si un administrador cerró esta sesión desde el reporte.
      */
     public function ping(): void
     {
@@ -61,6 +63,12 @@ class SesionesController
             return;
         }
 
+        if ($this->trackingService->wasCurrentSessionClosedByAdmin()) {
+            echo json_encode(['ok' => true, 'forced_logout' => true], JSON_UNESCAPED_UNICODE);
+
+            return;
+        }
+
         if (!isset($_SESSION['usuario_sesion_id'])) {
             $this->trackingService->openSessionForCurrentUser();
         } else {
@@ -68,5 +76,31 @@ class SesionesController
         }
 
         echo json_encode(['ok' => true], JSON_UNESCAPED_UNICODE);
+    }
+
+    /**
+     * POST ?url=sesiones/cerrar/{id} — cierra una sesión ajena (admin / alcance).
+     */
+    public function cerrar($sesionId = null): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            http_response_code(405);
+            echo json_encode(['ok' => false, 'error' => 'Método no permitido'], JSON_UNESCAPED_UNICODE);
+
+            return;
+        }
+
+        $result = $this->reportService->close((int)$sesionId);
+
+        if (!$result['success']) {
+            http_response_code(403);
+            echo json_encode(['ok' => false, 'error' => $result['error']], JSON_UNESCAPED_UNICODE);
+
+            return;
+        }
+
+        echo json_encode(['ok' => true, 'message' => 'Sesión cerrada.'], JSON_UNESCAPED_UNICODE);
     }
 }
