@@ -12,12 +12,13 @@ use PHPMailer\PHPMailer\Exception as PHPMailerException;
  */
 class MailerService
 {
-    public function send(string $toEmail, string $toName, string $subject, string $htmlBody): bool
+    public function send(string $toEmail, string $toName, string $subject, string $htmlBody, ?string &$error = null): bool
     {
         Database::bootstrapEnv();
 
         $host = getenv('SMTP_HOST') ?: '';
         if ($host === '') {
+            $error = 'SMTP_HOST no configurado en config/.env';
             error_log('MailerService: SMTP_HOST no configurado; correo no enviado a ' . $toEmail);
 
             return false;
@@ -58,6 +59,7 @@ class MailerService
 
             return true;
         } catch (PHPMailerException $e) {
+            $error = $mail->ErrorInfo ?: $e->getMessage();
             error_log('MailerService: fallo al enviar correo a ' . $toEmail . ': ' . $mail->ErrorInfo);
 
             return false;
