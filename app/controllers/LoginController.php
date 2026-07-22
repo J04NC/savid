@@ -114,7 +114,7 @@ class LoginController
         if ($identificador !== '') {
             try {
                 $service = new PasswordResetService();
-                $service->requestReset($identificador, $_SERVER['REMOTE_ADDR'] ?? null);
+                $service->requestReset($identificador, RequestIpService::current());
             } catch (Throwable $e) {
                 error_log('PasswordResetService::requestReset: ' . $e->getMessage());
             }
@@ -209,7 +209,7 @@ class LoginController
                     $userId,
                     (string)($user['email'] ?? ''),
                     (string)($user['nombre'] ?? $user['username']),
-                    $_SERVER['REMOTE_ADDR'] ?? null
+                    RequestIpService::current()
                 );
                 $_SESSION['tfa_error'] = $result['success']
                     ? 'Enviamos un nuevo código a tu correo.'
@@ -260,7 +260,7 @@ class LoginController
             try {
                 $token = $service->registerTrustedDevice(
                     $userId,
-                    $_SERVER['REMOTE_ADDR'] ?? null,
+                    RequestIpService::current(),
                     $_SERVER['HTTP_USER_AGENT'] ?? null
                 );
                 setcookie(TwoFactorService::DEVICE_COOKIE_NAME, $token, [

@@ -32,7 +32,7 @@ class SesionTrackingService
             $phpSid !== '' ? $phpSid : null,
             $empresaId > 0 ? $empresaId : null,
             $sedeId > 0 ? $sedeId : null,
-            $_SERVER['REMOTE_ADDR'] ?? null,
+            RequestIpService::current(),
             isset($_SERVER['HTTP_USER_AGENT']) ? mb_substr((string)$_SERVER['HTTP_USER_AGENT'], 0, 255) : null
         );
 

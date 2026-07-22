@@ -30,11 +30,26 @@ class AuthService
             return ['success' => false, 'error' => 'Todos los campos son obligatorios'];
         }
 
+        $ip = (string)(RequestIpService::current() ?? '');
+        $throttle = new LoginThrottleService();
+
+        $blockCheck = $throttle->checkBlocked($username, $ip);
+        if ($blockCheck['blocked']) {
+            return [
+                'success' => false,
+                'error' => 'Demasiados intentos fallidos. Intente de nuevo en ' . $blockCheck['retryAfterMinutes'] . ' minutos.',
+            ];
+        }
+
         $user = $this->userRepository->findActiveByUsername($username);
 
         if (!$user || !password_verify($password, $user['password'])) {
+            $throttle->recordFailure($username, $ip);
+
             return ['success' => false, 'error' => 'Usuario o contraseña incorrectos'];
         }
+
+        $throttle->recordSuccess($username, $ip);
 
         $userId = (int)$user['id'];
 
@@ -46,7 +61,7 @@ class AuthService
                     $userId,
                     (string)($user['email'] ?? ''),
                     (string)($user['nombre'] ?? $user['username']),
-                    $_SERVER['REMOTE_ADDR'] ?? null
+                    RequestIpService::current()
                 );
 
                 return ['success' => true, 'needs_2fa' => true, 'redirect' => '?url=login/verificar2fa'];

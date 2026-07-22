@@ -257,7 +257,7 @@ class AuditService
             'usuario_id' => $uid > 0 ? $uid : null,
             'empresa_id' => $eid,
             'sede_id' => $sid,
-            'ip' => $_SERVER['REMOTE_ADDR'] ?? null,
+            'ip' => RequestIpService::current(),
             'user_agent' => isset($_SERVER['HTTP_USER_AGENT'])
                 ? mb_substr((string)$_SERVER['HTTP_USER_AGENT'], 0, 255)
                 : null,

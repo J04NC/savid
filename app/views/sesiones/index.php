@@ -47,6 +47,52 @@ function sesiones_estado_class(string $estado): string
         : 'sesiones-badge-default';
 }
 
+/**
+ * Lectura amigable del User-Agent crudo: "Chrome en Android", "Safari en iOS", etc.
+ * No identifica el equipo (los navegadores no exponen esa info) — solo navegador + sistema operativo.
+ */
+function sesiones_format_user_agent(?string $ua): string
+{
+    $ua = trim((string)$ua);
+    if ($ua === '') {
+        return '—';
+    }
+
+    if (preg_match('/Edg\//', $ua)) {
+        $browser = 'Edge';
+    } elseif (preg_match('/OPR\//', $ua)) {
+        $browser = 'Opera';
+    } elseif (preg_match('/SamsungBrowser\//', $ua)) {
+        $browser = 'Samsung Internet';
+    } elseif (preg_match('/Firefox\//', $ua)) {
+        $browser = 'Firefox';
+    } elseif (preg_match('/CriOS\//', $ua)) {
+        $browser = 'Chrome';
+    } elseif (preg_match('/Chrome\//', $ua)) {
+        $browser = 'Chrome';
+    } elseif (preg_match('/Version\/[\d.]+.*Safari/', $ua) || stripos($ua, 'Safari') !== false) {
+        $browser = 'Safari';
+    } else {
+        $browser = 'Navegador desconocido';
+    }
+
+    if (preg_match('/Windows NT/', $ua)) {
+        $os = 'Windows';
+    } elseif (preg_match('/Android\s?([\d.]+)?/', $ua, $m)) {
+        $os = 'Android' . (!empty($m[1]) ? ' ' . $m[1] : '');
+    } elseif (preg_match('/iPhone|iPad|iPod/', $ua)) {
+        $os = 'iOS';
+    } elseif (preg_match('/Mac OS X/', $ua)) {
+        $os = 'macOS';
+    } elseif (preg_match('/Linux/', $ua)) {
+        $os = 'Linux';
+    } else {
+        $os = 'sistema desconocido';
+    }
+
+    return $browser . ' en ' . $os;
+}
+
 function sesiones_format_duracion($segundos): string
 {
     if ($segundos === null || $segundos === '') {
@@ -152,6 +198,7 @@ $sesionesJsV = is_readable($assetSesiones) ? (int)filemtime($assetSesiones) : ti
                     <th>Cierre</th>
                     <th>Duración</th>
                     <th>IP</th>
+                    <th>Dispositivo</th>
                     <th>Motivo cierre</th>
                     <th class="auditoria-th-actions" aria-label="Acciones">Acciones</th>
                 </tr>
@@ -159,7 +206,7 @@ $sesionesJsV = is_readable($assetSesiones) ? (int)filemtime($assetSesiones) : ti
             <tbody id="sesionesTableBody">
                 <?php if ($rows === []): ?>
                     <tr class="auditoria-empty-row">
-                        <td colspan="11">No hay sesiones con los filtros actuales.</td>
+                        <td colspan="12">No hay sesiones con los filtros actuales.</td>
                     </tr>
                 <?php else: ?>
                     <?php foreach ($rows as $r): ?>
@@ -190,6 +237,9 @@ $sesionesJsV = is_readable($assetSesiones) ? (int)filemtime($assetSesiones) : ti
                             <td class="auditoria-td-datetime"><?= htmlspecialchars(sesiones_format_dt($r['logout_at'] ?? null)) ?></td>
                             <td><?= htmlspecialchars(sesiones_format_duracion($r['duracion_segundos'] ?? null)) ?></td>
                             <td><?= htmlspecialchars((string)($r['ip'] ?? '—')) ?></td>
+                            <td title="<?= htmlspecialchars((string)($r['user_agent'] ?? ''), ENT_QUOTES, 'UTF-8') ?>">
+                                <?= htmlspecialchars(sesiones_format_user_agent($r['user_agent'] ?? null)) ?>
+                            </td>
                             <td><?= htmlspecialchars((string)($r['logout_motivo'] ?? '—')) ?></td>
                             <td class="auditoria-td-actions">
                                 <?php if ($estado !== 'cerrada'): ?>
