@@ -3,8 +3,6 @@
 
     const modal = document.getElementById('auditoriaModal');
     const body = document.getElementById('auditoriaModalBody');
-    const searchInput = document.getElementById('auditoriaTableSearch');
-    const tableBody = document.getElementById('auditoriaTableBody');
 
     function esc(s) {
         const d = document.createElement('div');
@@ -99,8 +97,6 @@
             }
         });
     }
-
-    /* Búsqueda en página: filtro vanilla en crud.js (initCrudSearch), tabla sin DataTables */
 
     const btnArch = document.getElementById('btnArchivarAuditoria');
     if (btnArch) {

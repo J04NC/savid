@@ -19,8 +19,15 @@ class AuditRepository
      * } $scope
      * @return array{rows: list<array<string, mixed>>, total: int}
      */
-    public function search(array $filters, int $limit, int $offset, bool $includeArchive = false, array $scope = []): array
-    {
+    public function search(
+        array $filters,
+        int $limit,
+        int $offset,
+        bool $includeArchive = false,
+        array $scope = [],
+        string $orderColumn = 'a.occurred_at',
+        string $orderDir = 'desc'
+    ): array {
         $table = $includeArchive ? 'auditoria_archivo' : 'auditoria';
         $where = ['1=1'];
         $params = [];
@@ -87,13 +94,22 @@ class AuditRepository
         $countStmt->execute($params);
         $total = (int)$countStmt->fetchColumn();
 
+        $allowedOrderColumns = ['a.occurred_at', 'a.accion', 'a.tabla', 'a.registro_id', 'u.username', 'a.empresa_id', 'a.sede_id'];
+        if (!in_array($orderColumn, $allowedOrderColumns, true)) {
+            $orderColumn = 'a.occurred_at';
+        }
+        $orderDir = strtolower($orderDir) === 'asc' ? 'ASC' : 'DESC';
+
+        // Solo columnas livianas: los snapshots JSON (datos_anteriores/datos_nuevos/campos_cambiados)
+        // no se usan en el listado, solo en el modal de detalle (findById), que sí trae la fila completa.
         $sql = "
-            SELECT a.*,
+            SELECT a.id, a.occurred_at, a.accion, a.tabla, a.registro_id,
+                   a.usuario_id, a.empresa_id, a.sede_id,
                    u.username AS usuario_username
             FROM `{$table}` a
             LEFT JOIN usuario u ON u.id = a.usuario_id
             WHERE {$whereSql}
-            ORDER BY a.occurred_at DESC, a.id DESC
+            ORDER BY {$orderColumn} {$orderDir}, a.id DESC
             LIMIT " . (int)$limit . ' OFFSET ' . (int)$offset;
 
         $stmt = $this->pdo->prepare($sql);
@@ -101,6 +117,31 @@ class AuditRepository
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
         return ['rows' => $rows, 'total' => $total];
+    }
+
+    /**
+     * Total de filas visibles para el alcance (empresa/sede) del usuario, sin sus filtros propios.
+     * Es el "recordsTotal" que espera DataTables en modo servidor.
+     *
+     * @param array{esSuperAdmin: bool, allowedEmpresaIds: list<int>, allowedSedeIds: list<int>, filterEmpresaId: ?int, filterSedeId: ?int} $scope
+     */
+    public function countScoped(bool $includeArchive, array $scope): int
+    {
+        $table = $includeArchive ? 'auditoria_archivo' : 'auditoria';
+        $where = ['1=1'];
+        $params = [];
+
+        if ($scope !== []) {
+            $scopeService = new ReportScopeService();
+            $scopeService->applyEmpresaScope($where, $params, 'a.empresa_id', $scope, $scope['filterEmpresaId'] ?? null);
+            $scopeService->applySedeScope($where, $params, 'a.sede_id', $scope, $scope['filterSedeId'] ?? null);
+        }
+
+        $whereSql = implode(' AND ', $where);
+        $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM `{$table}` a WHERE {$whereSql}");
+        $stmt->execute($params);
+
+        return (int)$stmt->fetchColumn();
     }
 
     /**

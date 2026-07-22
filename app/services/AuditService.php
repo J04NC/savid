@@ -202,7 +202,9 @@ class AuditService
     ): void {
         $before = self::sanitizeRow($before);
         $after = self::sanitizeRow($after);
-        $changed = self::diffFields($before, $after);
+        // Diff campo a campo solo tiene sentido cuando existen ambos lados (UPDATE);
+        // en INSERT/DELETE, un lado es null y "todo cambió" no aporta nada sobre datos_anteriores/datos_nuevos.
+        $changed = ($before !== null && $after !== null) ? self::diffFields($before, $after) : null;
         $registroId = self::extractRegistroId($before ?? $after ?? $extra);
 
         $ctx = self::requestContext();

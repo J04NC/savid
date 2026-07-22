@@ -19,12 +19,10 @@ class AuditoriaController
             exit;
         }
 
-        // Auditoría ya tiene ~99k filas con snapshots JSON pesados: traer todo agota la memoria de PHP.
-        // DataTables pagina en el navegador (10 por página) dentro de este lote; use los filtros de fecha
-        // para acotar, y "Siguiente" del reporte para moverse entre lotes.
-        $list = $this->auditQuery->listPage($_GET, 200);
+        // DataTables pide las filas al servidor página por página (modo servidor, ver datos()):
+        // aquí solo se arma el formulario de filtros, sin traer registros de auditoría.
         $tablas = $this->auditQuery->getTableNames();
-        $reportScope = $list['reportScope'] ?? [];
+        $reportScope = $this->auditQuery->getReportScope($_GET);
         $breadcrumb = $this->moduleService->buildBreadcrumbForRuta('auditoria');
 
         $filters = [
@@ -45,6 +43,42 @@ class AuditoriaController
 
         $view = BASE_PATH . '/app/views/auditoria/index.php';
         require BASE_PATH . '/app/views/layouts/main.php';
+    }
+
+    /**
+     * GET ?url=auditoria/datos — fuente de datos para DataTables en modo servidor.
+     */
+    public function datos(): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+
+        if (!$this->auditQuery->canView()) {
+            http_response_code(403);
+            echo json_encode(['error' => 'Sin permiso'], JSON_UNESCAPED_UNICODE);
+
+            return;
+        }
+
+        $draw = (int)($_GET['draw'] ?? 0);
+        $start = max(0, (int)($_GET['start'] ?? 0));
+        // El listado ya no trae los snapshots JSON pesados (ver AuditRepository::search), así que
+        // 1000 filas acotadas es seguro; el límite real evita un valor arbitrario/negativo del cliente.
+        $length = (int)($_GET['length'] ?? 10);
+        if ($length <= 0 || $length > 1000) {
+            $length = 10;
+        }
+        $orderColIndex = (int)($_GET['order'][0]['column'] ?? 0);
+        $orderDir = (string)($_GET['order'][0]['dir'] ?? 'desc');
+        $globalSearch = (string)($_GET['search']['value'] ?? '');
+
+        $result = $this->auditQuery->listForDataTable($_GET, $start, $length, $orderColIndex, $orderDir, $globalSearch);
+
+        echo json_encode([
+            'draw' => $draw,
+            'recordsTotal' => $result['recordsTotal'],
+            'recordsFiltered' => $result['recordsFiltered'],
+            'data' => $result['data'],
+        ], JSON_UNESCAPED_UNICODE);
     }
 
     public function detalle(): void

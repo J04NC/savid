@@ -1,52 +1,10 @@
 <?php
-/** @var array $list */
 /** @var array $filters */
 /** @var list<string> $tablas */
 /** @var bool $esSuperAdmin */
 /** @var string $breadcrumb */
 
-$rows = $list['rows'] ?? [];
-$total = (int)($list['total'] ?? 0);
-$page = (int)($list['page'] ?? 1);
-$pages = (int)($list['pages'] ?? 1);
 $desdeArchivo = !empty($filters['archivo']);
-
-function auditoria_query_string(array $filters, int $page = 1): string
-{
-    $q = array_filter([
-        'url' => 'auditoria',
-        'desde' => $filters['desde'] ?? '',
-        'hasta' => $filters['hasta'] ?? '',
-        'tabla' => $filters['tabla'] ?? '',
-        'accion' => $filters['accion'] ?? '',
-        'usuario_id' => $filters['usuario_id'] ?? '',
-        'empresa_id' => $filters['empresa_id'] ?? '',
-        'sede_id' => $filters['sede_id'] ?? '',
-        'registro_id' => $filters['registro_id'] ?? '',
-        'q' => $filters['q'] ?? '',
-        'archivo' => !empty($filters['archivo']) ? '1' : '',
-        'page' => $page > 1 ? (string)$page : '',
-    ], static fn($v) => $v !== '' && $v !== null);
-
-    return '?' . http_build_query($q);
-}
-
-function auditoria_format_datetime(?string $dt): string
-{
-    if ($dt === null || trim($dt) === '') {
-        return '—';
-    }
-    $ts = strtotime($dt);
-
-    return $ts ? date('d/m/Y H:i:s', $ts) : $dt;
-}
-
-function auditoria_accion_class(string $accion): string
-{
-    $a = strtolower(trim($accion));
-
-    return in_array($a, ['insert', 'update', 'delete'], true) ? 'auditoria-badge-' . $a : 'auditoria-badge-default';
-}
 
 $assetAuditoria = BASE_PATH . '/public/js/auditoria.js';
 $auditoriaJsV = is_readable($assetAuditoria) ? (int)filemtime($assetAuditoria) : time();
@@ -136,18 +94,15 @@ $auditoriaJsV = is_readable($assetAuditoria) ? (int)filemtime($assetAuditoria) :
         </div>
     </form>
 
-    <div class="crud-list-search auditoria-list-meta savid-dt-legacy-search">
-        <label class="crud-list-search-label" for="auditoriaTableSearch">Buscar en página</label>
-        <input type="search" id="auditoriaTableSearch" class="crud-search" placeholder="Filtrar filas visibles…" autocomplete="off">
-        <span class="auditoria-meta-pill">
-            <?= number_format($total, 0, ',', '.') ?> registro<?= $total === 1 ? '' : 's' ?>
-            · Pág. <?= (int)$page ?> / <?= (int)$pages ?>
-            <?php if ($desdeArchivo): ?> · <strong>Archivo</strong><?php endif; ?>
-        </span>
-    </div>
+    <?php if ($desdeArchivo): ?>
+        <p class="auditoria-meta-pill">Consultando <strong>archivo histórico</strong>.</p>
+    <?php endif; ?>
 
     <div class="crud-table auditoria-table-wrap">
-        <table class="auditoria-table savid-datatable">
+        <table class="auditoria-table savid-datatable"
+               data-dt-server="1"
+               data-dt-server-url="?url=auditoria/datos"
+               data-dt-order='[[0,"desc"]]'>
             <thead>
                 <tr>
                     <th>Fecha</th>
@@ -160,69 +115,9 @@ $auditoriaJsV = is_readable($assetAuditoria) ? (int)filemtime($assetAuditoria) :
                     <th class="auditoria-th-actions">Detalle</th>
                 </tr>
             </thead>
-            <tbody id="auditoriaTableBody">
-                <?php if ($rows === []): ?>
-                    <tr class="auditoria-empty-row">
-                        <td colspan="8">No hay registros con los filtros actuales.</td>
-                    </tr>
-                <?php else: ?>
-                    <?php foreach ($rows as $r): ?>
-                        <?php
-                        $accion = (string)($r['accion'] ?? '');
-                        $searchHay = strtolower(implode(' ', [
-                            (string)($r['occurred_at'] ?? ''),
-                            $accion,
-                            (string)($r['tabla'] ?? ''),
-                            (string)($r['registro_id'] ?? ''),
-                            (string)($r['usuario_username'] ?? ''),
-                            (string)($r['usuario_id'] ?? ''),
-                            (string)($r['sql_resumen'] ?? ''),
-                        ]));
-                        ?>
-                        <tr class="crud-row auditoria-row" data-search="<?= htmlspecialchars($searchHay, ENT_QUOTES, 'UTF-8') ?>">
-                            <td class="auditoria-td-datetime" title="<?= htmlspecialchars((string)($r['occurred_at'] ?? ''), ENT_QUOTES, 'UTF-8') ?>">
-                                <?= htmlspecialchars(auditoria_format_datetime($r['occurred_at'] ?? null)) ?>
-                            </td>
-                            <td>
-                                <span class="auditoria-badge <?= auditoria_accion_class($accion) ?>">
-                                    <?= htmlspecialchars($accion !== '' ? $accion : '—') ?>
-                                </span>
-                            </td>
-                            <td><code class="auditoria-code"><?= htmlspecialchars((string)($r['tabla'] ?? '—')) ?></code></td>
-                            <td><?= htmlspecialchars((string)($r['registro_id'] ?? '—')) ?></td>
-                            <td class="auditoria-td-user">
-                                <?= htmlspecialchars((string)($r['usuario_username'] ?? '')) ?>
-                                <?php if (!empty($r['usuario_id'])): ?>
-                                    <span class="auditoria-muted">#<?= (int)$r['usuario_id'] ?></span>
-                                <?php endif; ?>
-                            </td>
-                            <td><?= !empty($r['empresa_id']) ? (int)$r['empresa_id'] : '—' ?></td>
-                            <td><?= !empty($r['sede_id']) ? (int)$r['sede_id'] : '—' ?></td>
-                            <td class="auditoria-td-actions">
-                                <button type="button"
-                                    class="auditoria-btn-icon btn-auditoria-detalle"
-                                    title="Ver detalle"
-                                    data-id="<?= (int)($r['id'] ?? 0) ?>"
-                                    data-archivo="<?= $desdeArchivo ? '1' : '0' ?>">👁</button>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                <?php endif; ?>
-            </tbody>
+            <tbody id="auditoriaTableBody"></tbody>
         </table>
     </div>
-
-    <?php if ($pages > 1): ?>
-        <nav class="auditoria-pagination" aria-label="Paginación">
-            <?php if ($page > 1): ?>
-                <a href="<?= htmlspecialchars(auditoria_query_string($filters, $page - 1)) ?>" class="auditoria-btn-secondary">← Anterior</a>
-            <?php endif; ?>
-            <span class="auditoria-pagination-info">Página <?= (int)$page ?> de <?= (int)$pages ?></span>
-            <?php if ($page < $pages): ?>
-                <a href="<?= htmlspecialchars(auditoria_query_string($filters, $page + 1)) ?>" class="auditoria-btn-secondary">Siguiente →</a>
-            <?php endif; ?>
-        </nav>
-    <?php endif; ?>
 
 </div>
 

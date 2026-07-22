@@ -140,6 +140,22 @@
         }
     }
 
+    /* No copiar params de enrutamiento: pisarían el url= propio del endpoint de datos del ajax. */
+    var DT_SERVER_EXCLUDED_PARAMS = ['url', 'modulo', 'page'];
+
+    /** Junta los filtros del formulario actual (query string de la página) con los parámetros propios de DataTables. */
+    function mergeCurrentFilters(d) {
+        var params = new URLSearchParams(window.location.search);
+        params.forEach(function (value, key) {
+            if (DT_SERVER_EXCLUDED_PARAMS.indexOf(key) !== -1) {
+                return;
+            }
+            if (!(key in d)) {
+                d[key] = value;
+            }
+        });
+    }
+
     function buildOptions(tableEl) {
         var paging = tableEl.getAttribute('data-dt-paging') !== 'false';
         var pageLength = parseInt(tableEl.getAttribute('data-dt-page-length') || '10', 10);
@@ -157,6 +173,10 @@
                 order = [[0, 'asc']];
             }
         }
+
+        var serverUrl = tableEl.getAttribute('data-dt-server') === '1'
+            ? tableEl.getAttribute('data-dt-server-url')
+            : null;
 
         var opts = {
             language: SPANISH,
@@ -176,6 +196,15 @@
                 { targets: '.auditoria-th-actions', orderable: false, searchable: false }
             ]
         };
+
+        if (serverUrl) {
+            opts.serverSide = true;
+            opts.processing = true;
+            opts.ajax = {
+                url: serverUrl,
+                data: mergeCurrentFilters
+            };
+        }
 
         if (withButtons) {
             opts.buttons = [
@@ -298,9 +327,10 @@
         var tbody = tableEl.querySelector('tbody');
         if (!tbody) return null;
 
+        var isServerSide = tableEl.getAttribute('data-dt-server') === '1';
         var rows = tbody.querySelectorAll('tr');
         var onlyEmpty = rows.length === 1 && rows[0].querySelector('td[colspan]');
-        if (rows.length === 0 || (onlyEmpty && tableEl.classList.contains('skip-dt-empty'))) {
+        if (!isServerSide && (rows.length === 0 || (onlyEmpty && tableEl.classList.contains('skip-dt-empty')))) {
             return null;
         }
 
@@ -318,7 +348,9 @@
         }
 
         markReady(tableEl);
-        addColumnFilters(api, tableEl);
+        if (!isServerSide) {
+            addColumnFilters(api, tableEl);
+        }
         updateShellScroll(tableEl, api);
 
         api.on('length.dt', function () {
