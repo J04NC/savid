@@ -56,6 +56,7 @@ document.addEventListener("DOMContentLoaded", function () {
     initCrudEmpresaNitLookup();
     initCrudEmpresaRepresentanteLookup();
     initCrudUpload();
+    initCrudPasswordToggle();
 
 });
 
@@ -1976,6 +1977,32 @@ function initCrudSearch() {
                 : "none";
 
         });
+
+    });
+
+}
+
+/* =====================================================
+   MOSTRAR/OCULTAR CONTRASEÑA
+===================================================== */
+
+function initCrudPasswordToggle() {
+
+    document.addEventListener("click", function (e) {
+
+        const btn = e.target.closest(".btn-toggle-password");
+        if (!btn) return;
+
+        const input = btn.closest(".crud-password-wrap")?.querySelector('input[data-password="1"]');
+        if (!input) return;
+
+        const isHidden = input.type === "password";
+        input.type = isHidden ? "text" : "password";
+        btn.textContent = isHidden ? "🙈" : "👁";
+        btn.setAttribute(
+            "title",
+            isHidden ? "Ocultar contraseña" : "Mostrar contraseña"
+        );
 
     });
 

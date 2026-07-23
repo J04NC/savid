@@ -539,6 +539,7 @@ data-zona-tipo="<?= htmlspecialchars(strtolower((string) $opt['tipo']), ENT_QUOT
 
 <?php if($config['type'] == 'password'): ?>
 
+<div class="crud-password-wrap">
 <input
 type="password"
 name="<?= $campo ?>"
@@ -550,6 +551,8 @@ data-label="<?= htmlspecialchars($fieldLabel, ENT_QUOTES, 'UTF-8') ?>"
 data-rules="<?= $config['rules'] ?>"
 class="form-input <?= $error ? 'input-error' : '' ?>"
 <?= ($config['title'] ?? '') !== '' ? 'title="' . htmlspecialchars((string)$config['title'], ENT_QUOTES, 'UTF-8') . '"' : '' ?>>
+<button type="button" class="btn-toggle-password" title="Mostrar/ocultar contraseña" aria-label="Mostrar/ocultar contraseña">👁</button>
+</div>
 
 <?php elseif($config['type'] === 'upload'): ?>
 <?php

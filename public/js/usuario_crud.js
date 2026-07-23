@@ -1085,6 +1085,18 @@
     document.addEventListener("crud-usuario-row-filled", function (ev) {
         const form = ev.detail && ev.detail.form;
         if (!form || form.getAttribute("data-crud-context") !== "usuario") return;
+
+        // Cargar la fila dispara un "change" sintético en tipodocumento_id (para refrescar
+        // el DV de NIT), que agenda una búsqueda de tercero por numero_documento. Como el
+        // usuario cargado ya es dueño de ese numero_documento, esa búsqueda no aporta nada
+        // nuevo — pero si en esos ~450ms el admin ya escribió algo en email/nombres/apellidos,
+        // la respuesta tardía lo pisaría con el valor viejo del tercero. Se suprime esa
+        // búsqueda puntual (no las que el admin dispare después, editando de verdad).
+        skipTipoNumeroLookup = true;
+        window.setTimeout(function () {
+            skipTipoNumeroLookup = false;
+        }, 800);
+
         syncDvVisibility(form);
         syncEmailBaseline(form);
     });
