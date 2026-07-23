@@ -106,6 +106,10 @@ if ($sessionIdleMin < 0) {
 <?= $breadcrumb ?? '' ?>
 </div>
 
+<button type="button" id="btnOpenSearch" class="topbar-search-btn" title="Buscar en el sistema (Ctrl+K)" aria-label="Buscar en el sistema">
+🔍 <span class="topbar-search-btn-hint">Ctrl+K</span>
+</button>
+
 </header>
 
 <main class="content">

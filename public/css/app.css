@@ -435,8 +435,56 @@ button:hover{
 }
 
 .topbar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:16px;
     padding:15px 30px;
     border-bottom:1px solid #1f2937;
+}
+
+.topbar .breadcrumb{
+    flex:1;
+    min-width:0;
+}
+
+.topbar-search-btn{
+    flex:0 0 auto;
+    display:flex;
+    align-items:center;
+    gap:6px;
+    padding:8px 14px;
+    border-radius:20px;
+    border:1px solid rgba(255,255,255,.12);
+    background:rgba(255,255,255,.04);
+    color:inherit;
+    cursor:pointer;
+    font-size:14px;
+    transition:.15s ease;
+}
+
+.topbar-search-btn:hover{
+    border-color:#1dd1a1;
+    background:rgba(29,209,161,.1);
+}
+
+.topbar-search-btn-hint{
+    font-size:11px;
+    opacity:.6;
+    border:1px solid currentColor;
+    border-radius:4px;
+    padding:1px 5px;
+}
+
+.light-mode .topbar-search-btn{
+    border-color:#d1d5db;
+    background:#f9fafb;
+}
+
+@media(max-width:640px){
+    .topbar-search-btn-hint{
+        display:none;
+    }
 }
 
 .content{
@@ -2933,8 +2981,23 @@ BUSCADOR GLOBAL (Ctrl+K)
     border-bottom:0;
 }
 
-.search-item:hover{
+.search-item:hover,
+.search-item.active{
     background:rgba(29,209,161,.12);
+}
+
+.search-item mark{
+    background:rgba(29,209,161,.35);
+    color:inherit;
+    border-radius:3px;
+    padding:0 1px;
+}
+
+.search-empty{
+    padding:14px;
+    text-align:center;
+    opacity:.7;
+    font-size:14px;
 }
 
 .light-mode .search-item{
