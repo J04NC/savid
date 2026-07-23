@@ -201,4 +201,12 @@ class AuditQueryService
     {
         return $this->repo->archiveOlderThanMonths($retentionMonths);
     }
+
+    /**
+     * @return array{totalActual: int, totalArchivo: int, ultimoArchivado: ?string}
+     */
+    public function getArchiveStatus(): array
+    {
+        return $this->repo->archiveStatus();
+    }
 }

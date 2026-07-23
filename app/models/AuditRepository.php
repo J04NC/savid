@@ -181,6 +181,26 @@ class AuditRepository
     }
 
     /**
+     * Estado del archivado histórico: tamaño actual de `auditoria`, tamaño de `auditoria_archivo`
+     * y la fecha del movimiento más reciente (proxy de "última vez archivado", ya que el proceso
+     * de archivado no persiste su propia bitácora de ejecución).
+     *
+     * @return array{totalActual: int, totalArchivo: int, ultimoArchivado: ?string}
+     */
+    public function archiveStatus(): array
+    {
+        $totalActual = (int)$this->pdo->query('SELECT COUNT(*) FROM auditoria')->fetchColumn();
+        $totalArchivo = (int)$this->pdo->query('SELECT COUNT(*) FROM auditoria_archivo')->fetchColumn();
+        $ultimoArchivado = $this->pdo->query('SELECT MAX(archived_at) FROM auditoria_archivo')->fetchColumn();
+
+        return [
+            'totalActual' => $totalActual,
+            'totalArchivo' => $totalArchivo,
+            'ultimoArchivado' => ($ultimoArchivado !== false && $ultimoArchivado !== null) ? (string)$ultimoArchivado : null,
+        ];
+    }
+
+    /**
      * @return list<string>
      */
     public function listDistinctTables(): array

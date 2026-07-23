@@ -71,4 +71,34 @@ class LoginIntentoRepository
 
         return $value !== false && $value !== null ? (string)$value : null;
     }
+
+    /**
+     * Últimos intentos fallidos (uso global, exclusivo de vistas de superadmin — la tabla no
+     * distingue empresa/sede).
+     *
+     * @return list<array{username: string, ip: string, created_at: string}>
+     */
+    public function listRecentFailures(int $limit = 20): array
+    {
+        $stmt = $this->pdo->prepare('
+            SELECT username, ip, created_at
+            FROM login_intento
+            WHERE exitoso = 0
+            ORDER BY created_at DESC
+            LIMIT ' . max(1, (int)$limit) . '
+        ');
+        $stmt->execute();
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    public function countFailuresSince(string $sinceDateTime): int
+    {
+        $stmt = $this->pdo->prepare('
+            SELECT COUNT(*) FROM login_intento WHERE exitoso = 0 AND created_at >= ?
+        ');
+        $stmt->execute([$sinceDateTime]);
+
+        return (int)$stmt->fetchColumn();
+    }
 }

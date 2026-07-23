@@ -26,6 +26,25 @@ $auditoriaJsV = is_readable($assetAuditoria) ? (int)filemtime($assetAuditoria) :
         </div>
     </div>
 
+    <?php if ($esSuperAdmin && $archiveStatus): ?>
+        <div class="auditoria-archive-status">
+            <span class="auditoria-archive-status-item">
+                📊 <?= number_format((int)$archiveStatus['totalActual'], 0, ',', '.') ?> registros activos en <code>auditoria</code>
+            </span>
+            <span class="auditoria-archive-status-item">
+                <?php if (!empty($archiveStatus['ultimoArchivado'])): ?>
+                    <?php
+                        $ultimoTs = strtotime((string)$archiveStatus['ultimoArchivado']);
+                        $dias = (int)floor((time() - $ultimoTs) / 86400);
+                    ?>
+                    📦 Último archivado hace <?= $dias ?> día<?= $dias === 1 ? '' : 's' ?> (<?= date('d/m/Y', $ultimoTs) ?>, <?= number_format((int)$archiveStatus['totalArchivo'], 0, ',', '.') ?> registros históricos)
+                <?php else: ?>
+                    <span class="auditoria-archive-status-warning">⚠️ Nunca se ha archivado — <?= number_format((int)$archiveStatus['totalActual'], 0, ',', '.') ?> registros acumulados</span>
+                <?php endif; ?>
+            </span>
+        </div>
+    <?php endif; ?>
+
     <form method="get" class="auditoria-filters-form" action="">
         <input type="hidden" name="url" value="auditoria">
 

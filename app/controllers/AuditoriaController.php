@@ -39,6 +39,7 @@ class AuditoriaController
         ];
 
         $esSuperAdmin = PermisoService::isSuperAdminSession();
+        $archiveStatus = $esSuperAdmin ? $this->auditQuery->getArchiveStatus() : null;
         $reportUrl = 'auditoria';
 
         $view = BASE_PATH . '/app/views/auditoria/index.php';

@@ -270,4 +270,30 @@ class UsuarioSesionRepository
 
         return ['activas' => $activas, 'total_hoy' => $hoy];
     }
+
+    /**
+     * Sesiones activas agrupadas por empresa (sin scope: uso exclusivo de vistas de superadmin).
+     *
+     * @return list<array{empresa_id: ?int, empresa_nombre: string, activas: int}>
+     */
+    public function countActivasPorEmpresa(): array
+    {
+        $stmt = $this->pdo->query("
+            SELECT
+                us.empresa_id,
+                COALESCE(t.razon_social, 'Sin empresa') AS empresa_nombre,
+                COUNT(*) AS activas
+            FROM usuario_sesion us
+            INNER JOIN usuario u ON u.id = us.usuario_id
+            LEFT JOIN empresa e ON e.id = us.empresa_id
+            LEFT JOIN tercero t ON t.id = e.tercero_id
+            WHERE us.deleted_at IS NULL
+            AND us.logout_at IS NULL
+            AND us.last_activity_at >= DATE_SUB(NOW(3), INTERVAL COALESCE(NULLIF(u.sesion_idle_minutos, 0), 30) MINUTE)
+            GROUP BY us.empresa_id, t.razon_social
+            ORDER BY activas DESC
+        ");
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
 }
