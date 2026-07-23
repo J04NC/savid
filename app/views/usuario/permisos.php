@@ -47,6 +47,10 @@
     <?php endif; ?>
 </div>
 
+<div class="role-filter-bar">
+    <input type="text" id="usuarioPermisosFiltro" class="form-input" placeholder="🔍 Filtrar por módulo o ítem..." autocomplete="off">
+</div>
+
 <div id="permisosMatriz" class="role-wrapper">
 <?php foreach ($matriz as $modulo => $bloque): ?>
 <?php
@@ -227,6 +231,7 @@ async function refreshMatrizFromServer() {
     bindChecks();
     actualizarTodo();
     captureBaseline();
+    aplicarFiltroModulos();
 }
 
 async function flushPendingBatch(opts) {
@@ -349,6 +354,32 @@ function escapeHtml(str) {
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;");
 }
+
+/* ==========================================
+FILTRO RÁPIDO POR MÓDULO/ÍTEM
+========================================== */
+const filtroInput = document.getElementById("usuarioPermisosFiltro");
+
+function aplicarFiltroModulos() {
+    if (!filtroInput) return;
+    const q = filtroInput.value.trim().toLowerCase();
+    document.querySelectorAll("#permisosMatriz .role-module").forEach(function (box) {
+        const labelSpan = box.querySelector(".role-module-label span");
+        const moduloTexto = labelSpan ? labelSpan.textContent.toLowerCase() : "";
+        const moduloCoincide = q === "" || moduloTexto.includes(q);
+        let algunItemVisible = false;
+        box.querySelectorAll("tbody tr").forEach(function (tr) {
+            const itemCell = tr.querySelector(".item-name");
+            const itemTexto = itemCell ? itemCell.textContent.toLowerCase() : "";
+            const visible = moduloCoincide || itemTexto.includes(q);
+            tr.style.display = visible ? "" : "none";
+            if (visible) algunItemVisible = true;
+        });
+        box.style.display = (moduloCoincide || algunItemVisible) ? "" : "none";
+    });
+}
+
+filtroInput?.addEventListener("input", aplicarFiltroModulos);
 
 function renderMatriz(data) {
     const container = document.getElementById("permisosMatriz");
@@ -473,6 +504,7 @@ async function recargarMatriz(empresaId, sedeId) {
         bindChecks();
         actualizarTodo();
         captureBaseline();
+        aplicarFiltroModulos();
     } catch (e) {
         container.innerHTML = '<div class="usuario-permisos-loading" style="color:var(--danger,#c00);">❌ Error cargando permisos</div>';
     }

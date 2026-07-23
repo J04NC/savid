@@ -3436,6 +3436,14 @@ AGREGAR AL FINAL DE public/css/app.css
     gap:18px;
 }
 
+.role-filter-bar{
+    margin-bottom:14px;
+}
+
+.role-filter-bar .form-input{
+    width:100%;
+}
+
 .role-module{
     border-radius:18px;
     overflow:hidden;
