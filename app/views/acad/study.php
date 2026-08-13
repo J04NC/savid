@@ -1,9 +1,11 @@
 <?php
 /** @var list<array<string, mixed>> $levels */
+/** @var list<array<string, mixed>> $modules */
 /** @var list<array<string, mixed>> $units */
 /** @var list<array<string, mixed>> $lessons */
 /** @var list<array<string, mixed>> $exercises */
 /** @var array<string, mixed>|null $currentLevel */
+/** @var array<string, mixed>|null $currentModule */
 /** @var array<string, mixed>|null $currentUnit */
 /** @var array<string, mixed>|null $currentLesson */
 
@@ -17,7 +19,7 @@ if (!function_exists('acadH')) {
 $skillIcons = ['READING' => '📖', 'WRITING' => '✍️', 'SPEAKING' => '🗣️'];
 ?>
 <div class="module-container">
-    <p class="field-note sgd-page-lead">Browse the CEFR curriculum: level → unit → lesson → exercise.</p>
+    <p class="field-note sgd-page-lead">Browse the CEFR curriculum: level → module → unit → lesson → exercise.</p>
 
     <section class="sgd-panel">
         <header class="sgd-panel-head">
@@ -40,15 +42,35 @@ $skillIcons = ['READING' => '📖', 'WRITING' => '✍️', 'SPEAKING' => '🗣�
     <?php if ($currentLevel): ?>
     <section class="sgd-panel">
         <header class="sgd-panel-head">
-            <h3 class="sgd-panel-title">Units — <?= acadH($currentLevel['codigo']) ?></h3>
+            <h3 class="sgd-panel-title">Modules — <?= acadH($currentLevel['codigo']) ?></h3>
+        </header>
+        <div class="sgd-doc-table-wrap">
+            <?php if ($modules === []): ?>
+                <p class="sgd-doc-empty">No modules yet for this level.</p>
+            <?php else: ?>
+                <?php foreach ($modules as $module): ?>
+                    <a class="sgd-doc-btn<?= (int)($currentModule['id'] ?? 0) === (int)$module['id'] ? ' sgd-doc-btn-primary' : '' ?>"
+                       href="?url=acad/study&level_id=<?= (int)$currentLevel['id'] ?>&module_id=<?= (int)$module['id'] ?>">
+                        <?= acadH($module['titulo_en']) ?>
+                    </a>
+                <?php endforeach; ?>
+            <?php endif; ?>
+        </div>
+    </section>
+    <?php endif; ?>
+
+    <?php if ($currentModule): ?>
+    <section class="sgd-panel">
+        <header class="sgd-panel-head">
+            <h3 class="sgd-panel-title">Units — <?= acadH($currentModule['titulo_en']) ?></h3>
         </header>
         <div class="sgd-doc-table-wrap">
             <?php if ($units === []): ?>
-                <p class="sgd-doc-empty">No units yet for this level.</p>
+                <p class="sgd-doc-empty">No units yet for this module.</p>
             <?php else: ?>
                 <?php foreach ($units as $unit): ?>
                     <a class="sgd-doc-btn<?= (int)($currentUnit['id'] ?? 0) === (int)$unit['id'] ? ' sgd-doc-btn-primary' : '' ?>"
-                       href="?url=acad/study&level_id=<?= (int)$currentLevel['id'] ?>&unit_id=<?= (int)$unit['id'] ?>">
+                       href="?url=acad/study&level_id=<?= (int)$currentLevel['id'] ?>&module_id=<?= (int)$currentModule['id'] ?>&unit_id=<?= (int)$unit['id'] ?>">
                         <?= acadH($unit['titulo_en']) ?>
                     </a>
                 <?php endforeach; ?>
@@ -68,7 +90,7 @@ $skillIcons = ['READING' => '📖', 'WRITING' => '✍️', 'SPEAKING' => '🗣�
             <?php else: ?>
                 <?php foreach ($lessons as $lesson): ?>
                     <a class="sgd-doc-btn<?= (int)($currentLesson['id'] ?? 0) === (int)$lesson['id'] ? ' sgd-doc-btn-primary' : '' ?>"
-                       href="?url=acad/study&level_id=<?= (int)$currentLevel['id'] ?>&unit_id=<?= (int)$currentUnit['id'] ?>&lesson_id=<?= (int)$lesson['id'] ?>">
+                       href="?url=acad/study&level_id=<?= (int)$currentLevel['id'] ?>&module_id=<?= (int)$currentModule['id'] ?>&unit_id=<?= (int)$currentUnit['id'] ?>&lesson_id=<?= (int)$lesson['id'] ?>">
                         <?= acadH($lesson['titulo_en']) ?>
                     </a>
                 <?php endforeach; ?>

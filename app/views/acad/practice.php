@@ -17,7 +17,7 @@ $estadoLabels = [14 => 'Pending review', 15 => 'Graded', 16 => 'Auto-graded'];
         <p class="field-note sgd-page-empty">Exercise not found. Go back to <a href="?url=acad/study">Study</a>.</p>
     <?php else: ?>
         <p class="field-note sgd-page-lead">
-            <a href="?url=acad/study&level_id=<?= (int)$exercise['level_id'] ?>&unit_id=<?= (int)$exercise['unit_id'] ?>&lesson_id=<?= (int)$exercise['lesson_id'] ?>">← Back to lesson</a>
+            <a href="?url=acad/study&level_id=<?= (int)$exercise['level_id'] ?>&module_id=<?= (int)$exercise['module_id'] ?>&unit_id=<?= (int)$exercise['unit_id'] ?>&lesson_id=<?= (int)$exercise['lesson_id'] ?>">← Back to lesson</a>
         </p>
 
         <section class="sgd-panel" id="acadPracticePanel"

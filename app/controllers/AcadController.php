@@ -44,10 +44,12 @@ class AcadController
 
         $empresaId = (int)($_SESSION['empresa_id'] ?? 0);
         $levelId = (int)($_GET['level_id'] ?? 0);
+        $moduleId = (int)($_GET['module_id'] ?? 0);
         $unitId = (int)($_GET['unit_id'] ?? 0);
 
         $levels = $empresaId > 0 ? $this->repo->getLevels($empresaId) : [];
-        $units = $levelId > 0 ? $this->repo->getUnitsByLevel($empresaId, $levelId) : [];
+        $modules = $levelId > 0 ? $this->repo->getModulesByLevel($empresaId, $levelId) : [];
+        $units = $moduleId > 0 ? $this->repo->getUnitsByModule($empresaId, $moduleId) : [];
         $lessons = $unitId > 0 ? $this->repo->getLessonsByUnit($empresaId, $unitId) : [];
         $exercises = [];
         $currentLesson = null;
@@ -58,6 +60,7 @@ class AcadController
         }
 
         $currentLevel = $levelId > 0 ? $this->repo->findLevel($empresaId, $levelId) : null;
+        $currentModule = $moduleId > 0 ? $this->repo->findModule($empresaId, $moduleId) : null;
         $currentUnit = $unitId > 0 ? $this->repo->findUnit($empresaId, $unitId) : null;
 
         $breadcrumb = $this->moduleService->buildBreadcrumbForRuta('acad/study');

@@ -50,15 +50,40 @@ class AcadRepository
     }
 
     /** @return list<array<string, mixed>> */
-    public function getUnitsByLevel(int $empresaId, int $levelId): array
+    public function getModulesByLevel(int $empresaId, int $levelId): array
     {
-        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'acad_unit');
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'acad_module');
         $stmt = $this->pdo->prepare("
-            SELECT * FROM acad_unit
+            SELECT * FROM acad_module
             WHERE empresa_id = ? AND level_id = ? AND estado_id = 1 {$nd}
             ORDER BY orden, id
         ");
         $stmt->execute([$empresaId, $levelId]);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    public function findModule(int $empresaId, int $moduleId): ?array
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'acad_module');
+        $stmt = $this->pdo->prepare("
+            SELECT * FROM acad_module WHERE empresa_id = ? AND id = ? {$nd} LIMIT 1
+        ");
+        $stmt->execute([$empresaId, $moduleId]);
+
+        return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function getUnitsByModule(int $empresaId, int $moduleId): array
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'acad_unit');
+        $stmt = $this->pdo->prepare("
+            SELECT * FROM acad_unit
+            WHERE empresa_id = ? AND module_id = ? AND estado_id = 1 {$nd}
+            ORDER BY orden, id
+        ");
+        $stmt->execute([$empresaId, $moduleId]);
 
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
@@ -121,12 +146,14 @@ class AcadRepository
         $stmt = $this->pdo->prepare("
             SELECT e.*, s.codigo AS skill_codigo, t.codigo AS exercise_type_codigo,
                    l.titulo_en AS lesson_titulo_en, l.unit_id AS unit_id,
-                   u.titulo_en AS unit_titulo_en, u.level_id AS level_id
+                   u.titulo_en AS unit_titulo_en, u.module_id AS module_id,
+                   mo.level_id AS level_id
             FROM acad_exercise e
             INNER JOIN acad_skill s ON s.id = e.skill_id
             INNER JOIN acad_exercise_type t ON t.id = e.exercise_type_id
             INNER JOIN acad_lesson l ON l.id = e.lesson_id
             INNER JOIN acad_unit u ON u.id = l.unit_id
+            INNER JOIN acad_module mo ON mo.id = u.module_id
             WHERE e.empresa_id = ? AND e.id = ?
             LIMIT 1
         ");
