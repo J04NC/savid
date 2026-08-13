@@ -51,6 +51,18 @@ class LoginThrottleService
             return;
         }
         $this->repo->record($username, $ip, false);
+
+        // Notificar solo en el momento exacto en que se cruza el umbral (no en cada
+        // intento posterior mientras ya está bloqueado: checkBlocked() corta el flujo
+        // de autenticación antes de llegar aquí una vez bloqueado).
+        $fails = $this->repo->countRecentFailuresSinceLastSuccess($username, $ip, self::VENTANA_MINUTOS);
+        if ($fails === self::MAX_INTENTOS) {
+            try {
+                (new SecurityAlertService())->notificarBloqueoFuerzaBruta($username, $ip);
+            } catch (Throwable $e) {
+                error_log('SecurityAlertService::notificarBloqueoFuerzaBruta: ' . $e->getMessage());
+            }
+        }
     }
 
     public function recordSuccess(string $username, string $ip): void

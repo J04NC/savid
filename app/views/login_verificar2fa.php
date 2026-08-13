@@ -2,6 +2,7 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Verificación en dos pasos | Savid</title>
     <link rel="stylesheet" href="/css/login.css">
 </head>
@@ -12,6 +13,7 @@
 <div class="main-container">
     <div class="login-box">
         <form method="POST" action="?url=login/verificar2faConfirmar">
+            <input type="hidden" name="csrf_token" value="<?= CsrfService::token() ?>">
             <?php
             $error = $_SESSION['tfa_error'] ?? null;
             unset($_SESSION['tfa_error']);
@@ -42,6 +44,7 @@
         </form>
 
         <form method="POST" action="?url=login/verificar2faReenviar" style="margin-top: 10px; text-align: center;">
+            <input type="hidden" name="csrf_token" value="<?= CsrfService::token() ?>">
             <button type="submit" class="btn secondary" style="width:100%;">Reenviar código</button>
         </form>
 

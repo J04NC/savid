@@ -57,4 +57,38 @@ class PasswordResetRepository
         ");
         $stmt->execute([$id]);
     }
+
+    /**
+     * Cantidad de solicitudes de reseteo (a cualquier destinatario) hechas desde esta IP
+     * en la ventana dada — para limitar el abuso masivo desde un mismo origen.
+     */
+    public function countRecentByIp(string $ip, int $windowMinutes): int
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT COUNT(*)
+            FROM usuario_password_reset
+            WHERE ip_origen = ?
+            AND created_at >= DATE_SUB(NOW(3), INTERVAL ? MINUTE)
+        ");
+        $stmt->execute([$ip, $windowMinutes]);
+
+        return (int)$stmt->fetchColumn();
+    }
+
+    /**
+     * Momento de la última solicitud para este usuario (usada o no, vencida o no),
+     * para aplicar un cooldown y evitar reenvíos inmediatos al mismo correo.
+     */
+    public function lastRequestedAtForUser(int $usuarioId): ?string
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT MAX(created_at)
+            FROM usuario_password_reset
+            WHERE usuario_id = ?
+        ");
+        $stmt->execute([$usuarioId]);
+        $value = $stmt->fetchColumn();
+
+        return ($value !== false && $value !== null) ? (string)$value : null;
+    }
 }

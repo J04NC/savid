@@ -11,6 +11,7 @@ $dtDir = BASE_PATH . '/public/vendor/datatables';
 $jqueryPath = BASE_PATH . '/public/vendor/jquery/jquery.min.js';
 $cssDtSavid = BASE_PATH . '/public/css/datatables-savid.css';
 $jsDtSavid = BASE_PATH . '/public/js/datatables-savid.js';
+$jsCsrf = BASE_PATH . '/public/js/csrf.js';
 $assetsV = max(
     is_readable($assetRef) ? (int)filemtime($assetRef) : time(),
     is_readable($cssTokens) ? (int)filemtime($cssTokens) : 0,
@@ -18,6 +19,7 @@ $assetsV = max(
     is_readable($cssDtSavid) ? (int)filemtime($cssDtSavid) : 0,
     is_readable($jsCrud) ? (int)filemtime($jsCrud) : 0,
     is_readable($jsDtSavid) ? (int)filemtime($jsDtSavid) : 0,
+    is_readable($jsCsrf) ? (int)filemtime($jsCsrf) : 0,
     is_readable($dtDir . '/datatables.min.js') ? (int)filemtime($dtDir . '/datatables.min.js') : 0,
     is_readable($dtDir . '/buttons.colVis.min.js') ? (int)filemtime($dtDir . '/buttons.colVis.min.js') : 0,
     is_readable($jqueryPath) ? (int)filemtime($jqueryPath) : 0,
@@ -32,6 +34,7 @@ $assetsV = max(
 <head>
 
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SAVID</title>
 
 <link rel="stylesheet" href="/css/tokens.css?v=<?= (int)$assetsV ?>">
@@ -167,6 +170,10 @@ document.addEventListener("DOMContentLoaded", function(){
 </script>
 
 <script>
+window.CSRF_TOKEN = "<?= CsrfService::token() ?>";
+</script>
+
+<script>
 
 const systemRoutes = [
 
@@ -183,6 +190,7 @@ url:"?url=<?php echo $item['ruta']; ?>"
 
 </script>
 
+<script src="/js/csrf.js?v=<?= (int)$assetsV ?>"></script>
 <script src="/js/app.js?v=<?= (int)$assetsV ?>"></script>
 <script src="/js/theme.js?v=<?= (int)$assetsV ?>"></script>
 <script src="/js/search.js?v=<?= (int)$assetsV ?>"></script>

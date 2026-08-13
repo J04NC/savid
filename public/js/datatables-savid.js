@@ -282,7 +282,8 @@
         'table.item-acciones-table',
         'table.empresa-sedes-table',
         'table.empresa-usuarios-table',
-        'table.sgd-ref-table'
+        'table.sgd-ref-table',
+        'table.seguridad-table'
     ];
 
     function isWordEditorTable(tableEl) {

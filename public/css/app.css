@@ -7958,6 +7958,25 @@ label.sgd-word-tool.sgd-word-import-trigger{
     margin:0;
 }
 
+.estado-backup-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+    margin-bottom:12px;
+}
+
+.estado-backup-header .seguridad-panel-title{
+    margin:0;
+}
+
+.estado-backup-status{
+    min-height:18px;
+    font-size:13px;
+    margin:0 0 10px;
+}
+
 .seguridad-table{
     width:100%;
     border-collapse:collapse;

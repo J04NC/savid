@@ -44,6 +44,17 @@ class Router
     private function middleware($controllerName, $method)
     {
         /*
+         * CSRF: toda request POST (formularios nativos vía $_POST['csrf_token'], fetch/XHR
+         * vía header X-CSRF-Token inyectado por public/js/csrf.js) debe traer el token de
+         * la sesión actual. Corre antes que cualquier otra verificación porque $_SESSION ya
+         * está activo desde public/index.php para cualquier visitante, incluso sin login.
+         */
+        if ($_SERVER['REQUEST_METHOD'] === 'POST' && class_exists('CsrfService') && !CsrfService::verifyRequest()) {
+            http_response_code(403);
+            exit('Token de seguridad inválido o expirado. Recargue la página e intente de nuevo.');
+        }
+
+        /*
          * Sesión obligatoria en todo el sistema salvo pantallas de Login.
          * (Antes se excluían index/modulo/item y cualquier usuario podía pegar ?url=usuario sin sesión.)
          */

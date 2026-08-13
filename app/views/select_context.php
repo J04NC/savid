@@ -7,6 +7,8 @@ $contextoSedeId = $contextoSedeId ?? null;
 
 <form method="POST" id="contextForm" data-preselect-sede="<?= $contextoSedeId !== null ? (int)$contextoSedeId : '' ?>">
 
+<input type="hidden" name="csrf_token" value="<?= CsrfService::token() ?>">
+
 <div class="form-group">
 <label>Empresa</label>
 

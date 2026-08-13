@@ -30,6 +30,14 @@ class RolePermissionService
             $sedeId = null;
         }
 
+        // La sede debe pertenecer a la empresa ya normalizada — evita que se guarden
+        // combinaciones inconsistentes (empresa_id de una, sede_id de otra) vía manipulación
+        // directa de parámetros HTTP.
+        if ($sedeId !== null && $empresaId !== null
+            && !$this->branchRepository->findActiveByIdAndEmpresaId($sedeId, $empresaId)) {
+            $sedeId = null;
+        }
+
         return [$empresaId, $sedeId];
     }
 

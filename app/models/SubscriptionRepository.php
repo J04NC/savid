@@ -64,4 +64,35 @@ class SubscriptionRepository
 
         return (int)$this->pdo->lastInsertId();
     }
+
+    /**
+     * Suscripciones activas que vencen dentro de $diasUmbral días y todavía no
+     * dispararon el aviso por correo.
+     *
+     * @return list<array{id: int, empresa_id: int, fecha_fin: string, razon_social: string}>
+     */
+    public function findProximasAVencerSinAlertar(int $diasUmbral): array
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT s.id, s.empresa_id, s.fecha_fin, t.razon_social
+            FROM suscripcion s
+            INNER JOIN empresa e ON e.id = s.empresa_id
+            INNER JOIN tercero t ON t.id = e.tercero_id
+            WHERE s.activa = 1
+            AND s.estado_id = 1
+            AND s.alerta_vencimiento_enviada_at IS NULL
+            AND s.fecha_fin BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL ? DAY)
+        ");
+        $stmt->execute([$diasUmbral]);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    public function marcarAlertaVencimientoEnviada(int $suscripcionId): void
+    {
+        $stmt = $this->pdo->prepare('
+            UPDATE suscripcion SET alerta_vencimiento_enviada_at = NOW(3) WHERE id = ?
+        ');
+        $stmt->execute([$suscripcionId]);
+    }
 }

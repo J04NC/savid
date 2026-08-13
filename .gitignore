@@ -3,3 +3,6 @@
 /public/uploads/
 /docs/
 /storage/sgd_imports/
+/storage/backups/*
+!/storage/backups/.gitkeep
+/storage/locks/*.lock

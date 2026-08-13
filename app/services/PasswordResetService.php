@@ -3,6 +3,9 @@
 class PasswordResetService
 {
     private const TOKEN_TTL_MINUTES = 30;
+    private const IP_MAX_REQUESTS = 5;
+    private const IP_WINDOW_MINUTES = 15;
+    private const USER_COOLDOWN_SECONDS = 120;
 
     private PDO $pdo;
     private UserRepository $userRepository;
@@ -33,12 +36,23 @@ class PasswordResetService
             return;
         }
 
+        $ip = (string)($ip ?? '');
+        if ($ip !== '' && $this->resetRepository->countRecentByIp($ip, self::IP_WINDOW_MINUTES) >= self::IP_MAX_REQUESTS) {
+            return;
+        }
+
         $user = $this->userRepository->findActiveByUsernameOrEmail($identificador);
         if (!$user || empty($user['email'])) {
             return;
         }
 
         $usuarioId = (int)$user['id'];
+
+        $lastRequestedAt = $this->resetRepository->lastRequestedAtForUser($usuarioId);
+        if ($lastRequestedAt !== null && (time() - strtotime($lastRequestedAt)) < self::USER_COOLDOWN_SECONDS) {
+            return;
+        }
+
         $token = bin2hex(random_bytes(32));
         $tokenHash = hash('sha256', $token);
         $expiresAt = (new DateTime('+' . self::TOKEN_TTL_MINUTES . ' minutes'))->format('Y-m-d H:i:s.v');

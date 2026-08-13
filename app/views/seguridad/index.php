@@ -53,7 +53,7 @@ $diasUmbral = $data['diasInactividadUmbral'];
             <?php if (empty($sesionesPorEmpresa)): ?>
                 <p class="seguridad-panel-empty">No hay sesiones activas en este momento.</p>
             <?php else: ?>
-                <table class="seguridad-table no-datatable">
+                <table class="seguridad-table">
                     <thead>
                         <tr>
                             <th>Empresa</th>
@@ -77,7 +77,7 @@ $diasUmbral = $data['diasInactividadUmbral'];
             <?php if (empty($intentosFallidos)): ?>
                 <p class="seguridad-panel-empty">No hay intentos fallidos registrados.</p>
             <?php else: ?>
-                <table class="seguridad-table no-datatable">
+                <table class="seguridad-table">
                     <thead>
                         <tr>
                             <th>Usuario</th>
@@ -103,7 +103,7 @@ $diasUmbral = $data['diasInactividadUmbral'];
             <?php if (empty($cuentasInactivas)): ?>
                 <p class="seguridad-panel-empty">Todas las cuentas activas tienen actividad reciente.</p>
             <?php else: ?>
-                <table class="seguridad-table no-datatable">
+                <table class="seguridad-table">
                     <thead>
                         <tr>
                             <th>Usuario</th>
