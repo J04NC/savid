@@ -12,7 +12,7 @@ Documentacion unica del proyecto: guia rapida para el dia a dia y detalle tecnic
 2. [Guia rapida (equipo)](#guia-rapida-equipo)
 3. [Arquitectura y flujo](#arquitectura-y-flujo)
 4. [Modulos refactorizados](#modulos-refactorizados)
-5. [CRUD automatico y acciones especiales](#crud-automatico-y-acciones-especiales) (tercero / `zona.tipo`, [comentarios MySQL](#opciones-reconocidas-en-column_comment-mysql))
+5. [CRUD automatico y acciones especiales](#crud-automatico-y-acciones-especiales) (tercero / `zona` catalogo, [comentarios MySQL](#opciones-reconocidas-en-column_comment-mysql))
 6. [Como agregar funcionalidad](#como-agregar-funcionalidad)
 7. [Detalle tecnico (capas y contratos)](#detalle-tecnico-capas-y-contratos)
 8. [Checklist y verificacion](#checklist-y-verificacion)
@@ -137,7 +137,7 @@ La vista CRUD necesita estas variables (si falta `relations`, se rompen los sele
 
 - `$data`, `$columns`, `$acciones`, `$relations`, `$relationData`
 
-En el CRUD de **`tercero`**, el modo urbano/rural se basa en **`zona.tipo`** (no en columna `zona_ubicacion`); el detalle esta en la subseccion **Tercero: modo urbano o rural** dentro de [CRUD automatico y acciones especiales](#crud-automatico-y-acciones-especiales). Las directivas del comentario de columna (`type:`, `relmode:`, etc.) estan descritas en [Opciones reconocidas en COLUMN_COMMENT](#opciones-reconocidas-en-column_comment-mysql).
+En el CRUD de **`tercero`**, `zona` es un catalogo de dos filas (urbana/rural) y la jerarquia es unica (`comuna` -> `barrio`), con etiqueta dinamica segun la zona; el detalle esta en la subseccion **Tercero: direccion urbana o rural** dentro de [CRUD automatico y acciones especiales](#crud-automatico-y-acciones-especiales). Las directivas del comentario de columna (`type:`, `relmode:`, etc.) estan descritas en [Opciones reconocidas en COLUMN_COMMENT](#opciones-reconocidas-en-column_comment-mysql).
 
 ### Acciones especiales (botones)
 
@@ -264,26 +264,49 @@ Para **ocultar** la columna en la grilla pero dejarla solo en el formulario, añ
 
 Recomendacion: columna `password` de longitud **al menos 255** para hashes bcrypt/argon.
 
-### Tercero: modo urbano o rural (`zona_id` + `zona.tipo`)
+### Tercero: direccion urbana o rural (`zona` como catalogo)
 
-El formulario CRUD de la tabla **`tercero`** alterna bloques de ubicacion segun el **tipo de la zona** elegida (`tercero.zona_id` → `zona.tipo`). **No** se usa ninguna columna `zona_ubicacion` en base de datos.
+`zona` es un **catalogo de dos filas** (`U` Urbana / `R` Rural, con
+`codigo_sispro` para reporte nacional), **no** una entidad territorial. La
+jerarquia es **una sola** y la zona vive en la comuna:
 
-| `zona.tipo` | Campos visibles (el otro bloque se oculta y se limpia) |
-|-------------|--------------------------------------------------------|
-| `rural` (comparacion en minusculas) | **Corregimiento** y **vereda** |
-| Cualquier otro valor (p. ej. `urbana`) | **Comuna** y **barrio** |
+```
+zona (2 filas)          municipio (1122)
+                           |
+                           +-- comuna (municipio_id + zona_id) -- barrio
+```
 
-**Condiciones para activar el toggle en la vista** (`data-crud-zona-ubicacion-toggle` en `app/views/crud/table.php`):
+Un **corregimiento** es una comuna con zona rural; una **vereda**, un barrio con
+zona rural. No existen tablas `corregimiento` ni `vereda`, ni las columnas
+`tercero.corregimiento_id` / `tercero.vereda_id`.
 
-- Contexto de tabla `tercero`.
-- Columna `zona_id`.
-- Al menos una columna entre `comuna_id`, `barrio_id`, `corregimiento_id`, `vereda_id`.
+Antes `zona` tenia una fila por municipio y por tipo (2244 filas), lo que obligaba
+a que un `zona_id` mezclara *que municipio* con *urbano o rural*, duplicaba cuatro
+tablas identicas y exigia ocultar y limpiar bloques del formulario con JS. El
+modelo actual sigue el de SIHOS (`CodiZona` / `CodiComu` / `CodiBarr`), adaptado a
+claves subrogadas `id` en vez de las claves compuestas de aquel esquema.
 
-**Datos y API:** en `app/services/CrudService.php`, cuando la tabla referenciada es **`zona`** y existe la columna **`tipo`**, tanto `getRelationData` como `searchCatalogOptions` (autocomplete del catalogo) devuelven `tipo` para que el front pueda etiquetar opciones y celdas con `data-zona-tipo`.
+**Etiqueta dinamica.** Los campos son siempre `comuna_id` y `barrio_id`, pero se
+**reetiquetan** segun la zona elegida, para conservar el vocabulario habitual:
 
-**Front:** `public/js/crud.js` lee el tipo desde el `<select name="zona_id">` o desde el input oculto del catalogo (`dataset.zonaTipo`), aplica clases `crud-zona-urban` / `crud-zona-rural` y ajusta `required` y limpieza de grupos.
+| `zona.tipo` | `comuna_id` se muestra como | `barrio_id` se muestra como |
+|-------------|-----------------------------|------------------------------|
+| `urbana`    | Comuna                      | Barrio                       |
+| `rural`     | Corregimiento               | Vereda                       |
 
-**Migracion:** el archivo `database/migrations/add_tercero_zona_ubicacion_comuna_corregimiento.sql` quedo como **obsoleto** (solo comentario + `SELECT 1`). No ejecutar un ALTER que anada `zona_ubicacion` ni duplique `comuna_id` / `corregimiento_id` si el esquema maestro de territorio ya esta aplicado.
+**Como funciona:** la vista (`app/views/crud/table.php`) marca esos dos grupos con
+la clase `crud-zona-label` y los atributos `data-zona-label-urbana` /
+`data-zona-label-rural`; `crudZonaUbicacionApplyFromForm` en `public/js/crud.js`
+lee el tipo de la zona seleccionada y cambia el texto de la etiqueta. Ya **no** se
+ocultan ni se limpian campos.
+
+**Datos y API:** en `app/services/CrudService.php`, cuando la tabla referenciada es
+**`zona`** y existe la columna **`tipo`**, tanto `getRelationData` como
+`searchCatalogOptions` devuelven `tipo`, que es lo que permite el reetiquetado.
+
+**Migracion:** `database/migrations/20260822_zona_catalogo_y_jerarquia_unica.sql`
+(respaldo previo en `storage/backups/territorio_pre_rediseno_*.sql`). El antiguo
+`add_tercero_zona_ubicacion_comuna_corregimiento.sql` sigue obsoleto: no ejecutarlo.
 
 ### Autocomplete del catalogo (teclado)
 
@@ -313,6 +336,43 @@ En MySQL, el comentario de cada columna (`COLUMN_COMMENT`) puede llevar **varias
 ```sql
 COMMENT 'type:text|uppercase|order:15|placeholder:Numero de documento'
 ```
+
+#### Cuando marcar `uppercase` (criterio del proyecto)
+
+**Si** el valor es un dato de **identificacion oficial** o un **codigo de negocio que
+el usuario escribe y lee**:
+
+- Nombres y apellidos de persona natural, razon social de persona juridica
+  (`tercero.nombres`, `tercero.apellidos`, `tercero.razon_social`).
+- Numero de documento / identificacion.
+- Codigos y siglas de negocio: `acad_level.codigo` (A1, B2),
+  `fin_impuesto_tipo.codigo` (IVA19), `sgd_tipo_documental.codigo` (PD, F, MT).
+
+**No** en el resto: email, `username`, contraseñas (forzar caja rompe el login y
+algunos correos distinguen mayusculas), direcciones, texto libre
+(observaciones, descripciones) y el `nombre` de catalogos internos
+(sede, rol, item de menu), que escribe el propio equipo.
+
+**Nunca** en **claves tecnicas** que el codigo compara literalmente, aunque la
+columna se llame `codigo`. Forzarlas a mayuscula rompe el sistema:
+
+| Columna | Valores | Quien los compara |
+|---|---|---|
+| `accion.codigo` | `ver`, `guardar`, `eliminar` | `switch` sobre `data-accion` en `public/js/crud.js` y la resolucion de permisos |
+| `sgd_seccion.codigo` | `alcance`, `control_cambios` | catalogos JSON de `config.example/sgd_secciones_m4_plantilla.json` |
+
+Los codigos DIVIPOLA/DANE (`departamento`, `municipio`, `barrio`, `vereda`) son
+numericos y de datos semilla: la directiva no aportaria nada.
+
+**Donde se aplica.** El motor CRUD generico normaliza al guardar la tabla propia
+del item. Los formularios de `empresa` y `usuario` escriben ademas en `tercero`
+desde sus propios resolvers, que corren **antes** de esa normalizacion; por eso
+`UppercaseColumnService` es el punto unico que consultan todos, leyendo el
+`COLUMN_COMMENT` real. **Marcar la columna en la base de datos es suficiente**:
+queda cubierta en cliente y en servidor por todas las rutas. Ojo con los campos
+**sinteticos** definidos a mano en `CrudService` (formulario de `usuario`, de
+`empresa`): esos no leen el comentario de la BD y hay que anotarles la directiva
+en su propia cadena.
 
 **Ejemplo combinado** (como en maestros / `tercero`):
 
@@ -407,7 +467,7 @@ rg "data-accion|btn-accion|accion_codigo" public/js app/views
 - [ ] Permisos por ruta y por accion coherentes.
 - [ ] Contexto `empresa_id` / `sede_id` intacto.
 
-**Humo rapido CRUD:** nuevo, editar fila, select `*_id`, eliminar, boton especial si aplica. Si el item es **tercero** con `zona_id` y `zona.tipo`, comprobar que al cambiar de zona urbana a rural (y viceversa) se muestran u ocultan comuna/barrio frente a corregimiento/vereda.
+**Humo rapido CRUD:** nuevo, editar fila, select `*_id`, eliminar, boton especial si aplica. Si el item es **tercero** con `zona_id`, comprobar que al cambiar de zona urbana a rural (y viceversa) las etiquetas de `comuna_id`/`barrio_id` pasan de Comuna/Barrio a Corregimiento/Vereda sin perder el valor seleccionado.
 
 ---
 
@@ -484,7 +544,7 @@ El CRUD no permite editar estos campos desde el formulario (se excluyen en `Crud
 | Riesgo | Mitigacion |
 |--------|------------|
 | Regresion de selects en CRUD | Verificar que `relations` llegue a `crud/table.php`. |
-| Toggle tercero incoherente | Comprobar que `zona` tenga `tipo` y valores acordes (`rural` vs resto); revisar `data-zona-tipo` en grilla y catalogo. |
+| Etiqueta comuna/barrio no cambia con la zona | Comprobar que `zona` tenga las 2 filas con `tipo` (`urbana`/`rural`) y que los grupos lleven `crud-zona-label` + `data-zona-label-*`; revisar `data-zona-tipo` en grilla y catalogo. |
 | Migraciones duplicadas en territorio | No reejecutar `add_tercero_zona_ubicacion_comuna_corregimiento.sql` como ALTER legacy. |
 | Accion en BD sin JS | Checklist accion especial (punto 4 arriba). |
 | Logica repartida en controllers | Regla controller delgado; mover a Service. |

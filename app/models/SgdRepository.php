@@ -189,13 +189,18 @@ class SgdRepository
             $del->execute([$empresaId, $tipoDocumentalId]);
 
             if ($padreTipoIds !== []) {
-                $ins = $this->pdo->prepare('
-                    INSERT INTO sgd_tipo_documental_padre
-                        (empresa_id, tipo_documental_id, tipo_padre_id, estado_id, created_at, created_by)
-                    VALUES (?, ?, ?, 1, NOW(3), ?)
-                ');
+                // Preparar dentro del bucle: hoy sgd_tipo_documental_padre no
+                // tiene updated_at/updated_by, así que este INSERT no dispara la
+                // reescritura de TrackableColumnsService, pero si esas columnas
+                // se agregan a la tabla se rompería del mismo modo que en
+                // replaceTipoDocumentalSecciones. Se previene aquí igual.
                 $userId = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : null;
                 foreach ($padreTipoIds as $padreId) {
+                    $ins = $this->pdo->prepare('
+                        INSERT INTO sgd_tipo_documental_padre
+                            (empresa_id, tipo_documental_id, tipo_padre_id, estado_id, created_at, created_by)
+                        VALUES (?, ?, ?, 1, NOW(3), ?)
+                    ');
                     $ins->execute([$empresaId, $tipoDocumentalId, (int)$padreId, $userId]);
                 }
             }
@@ -2739,17 +2744,25 @@ class SgdRepository
             ');
             $stmt->execute([$empresaId, $tipoDocumentalId]);
 
-            $ins = $this->pdo->prepare('
-                INSERT INTO sgd_tipo_documental_seccion (
-                    empresa_id, tipo_documental_id, seccion_id, estado_seccion, estado_id, created_at, created_by
-                ) VALUES (?, ?, ?, ?, 1, NOW(3), ?)
-            ');
+            // Se prepara dentro del bucle: sgd_tipo_documental_seccion también
+            // tiene updated_at/updated_by, que no están en la lista de columnas
+            // de este INSERT. TrackableColumnsService reescribe el statement en
+            // el primer execute() (añade placeholders) y AuditingPDOStatement
+            // muta el objeto en sitio; reutilizarlo en la siguiente vuelta con
+            // los mismos 5 valores originales viola el número de parámetros que
+            // el statement ya reescrito espera (SQLSTATE[HY093]). Reproducido
+            // seleccionando 2+ secciones "aplica"/"opcional" a la vez.
             foreach ($seccionEstados as $seccionId => $estado) {
                 $sid = (int)$seccionId;
                 $est = in_array($estado, $valid, true) ? $estado : 'no_aplica';
                 if ($sid <= 0 || $est === 'no_aplica') {
                     continue;
                 }
+                $ins = $this->pdo->prepare('
+                    INSERT INTO sgd_tipo_documental_seccion (
+                        empresa_id, tipo_documental_id, seccion_id, estado_seccion, estado_id, created_at, created_by
+                    ) VALUES (?, ?, ?, ?, 1, NOW(3), ?)
+                ');
                 $ins->execute([$empresaId, $tipoDocumentalId, $sid, $est, $userId]);
             }
             $this->pdo->commit();

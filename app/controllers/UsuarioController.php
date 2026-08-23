@@ -31,6 +31,19 @@ class UsuarioController
     /**
      * Impide gestionar usuarios fuera de la empresa en sesión o cuentas superadmin.
      */
+    /**
+     * Traza del guardado de permisos por lote, para diagnosticar por qué el
+     * modal recibe respuestas que no son JSON. Solo identificadores técnicos.
+     */
+    private function logGuardadoPermisos(string $texto): void
+    {
+        @file_put_contents(
+            BASE_PATH . '/storage/debug_permisos_http.log',
+            sprintf("[%s] %s\n", date('Y-m-d H:i:s'), $texto),
+            FILE_APPEND
+        );
+    }
+
     private function requireUsuarioGestionableEnSesion(int $usuarioId): void
     {
         if ($usuarioId <= 0) {
@@ -242,6 +255,12 @@ class UsuarioController
     {
         SessionManager::requireLogin();
 
+        // El modal se carga con fetch() y su HTML incluye el JS de la matriz.
+        // Sin esto el navegador lo cachea por heurística y puede seguir
+        // ejecutando una versión anterior del script tras un despliegue.
+        header('Cache-Control: no-store, no-cache, must-revalidate');
+        header('Pragma: no-cache');
+
         if (!$usuarioId) {
             $_SESSION['error'] = "Usuario no especificado";
             header("Location: ?url=usuario");
@@ -300,8 +319,17 @@ class UsuarioController
         $sedeId = $_GET['sede_id'] ?? ($_SESSION['sede_id'] ?? null);
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            header('Content-Type: application/json; charset=utf-8');
+
             $raw = file_get_contents('php://input');
             $json = json_decode($raw, true);
+
+            $this->logGuardadoPermisos(sprintf(
+                'ENTRA usuario=%s bytes=%d json_valido=%s',
+                (string)$usuarioId,
+                strlen($raw),
+                is_array($json) ? 'si' : 'no'
+            ));
 
             if (!is_array($json)) {
                 echo json_encode(['success' => false, 'message' => 'JSON inválido']);
@@ -327,14 +355,27 @@ class UsuarioController
                 $esSuperAdmin
             );
 
-            echo json_encode($this->userAccessService->saveUsuarioPermisosBatch(
+            $resultado = $this->userAccessService->saveUsuarioPermisosBatch(
                 (int)$usuarioId,
                 $grantIds,
                 $denyIds,
                 $removeIds,
                 $empresaId,
                 $sedeId
+            );
+
+            $this->logGuardadoPermisos(sprintf(
+                'SALE usuario=%s empresa=%s sede=%s grant=%d deny=%d remove=%d ok=%s',
+                (string)$usuarioId,
+                $empresaId === null ? 'null' : (string)$empresaId,
+                $sedeId === null ? 'null' : (string)$sedeId,
+                count($grantIds),
+                count($denyIds),
+                count($removeIds),
+                !empty($resultado['success']) ? 'si' : 'no'
             ));
+
+            echo json_encode($resultado);
             exit;
         }
 

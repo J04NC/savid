@@ -118,7 +118,7 @@ $tipodocumentoMetaById = $tipodocumentoMetaById ?? [];
 $usuarioTableColumnFields = $usuarioTableColumnFields ?? [];
 
 $crudZonaFieldNames = array_column($columns, 'Field');
-$crudUrbanoRuralFields = ['comuna_id', 'barrio_id', 'corregimiento_id', 'vereda_id'];
+$crudUrbanoRuralFields = ['comuna_id', 'barrio_id'];
 $crudHasUrbanoRural = count(array_intersect($crudUrbanoRuralFields, $crudZonaFieldNames)) > 0;
 $crudZonaUbicacionToggle = in_array($crudContextTable, ['tercero', 'empresa'], true)
     && in_array('zona_id', $crudZonaFieldNames, true)
@@ -293,11 +293,20 @@ $uppercaseDataAttr = (!empty($config['uppercase']) && $config['type'] !== 'passw
 
 $formGroupExtra = '';
 $formGroupStyle = '';
+$formGroupLabels = null;
 if (!empty($crudZonaUbicacionToggle)) {
-    if (in_array($campo, ['comuna_id', 'barrio_id'], true)) {
-        $formGroupExtra = ' crud-zona-urban';
-    } elseif (in_array($campo, ['corregimiento_id', 'vereda_id'], true)) {
-        $formGroupExtra = ' crud-zona-rural';
+    /*
+     * Jerarquia unica: comuna/barrio guardan tanto direcciones urbanas como
+     * rurales (la zona vive en comuna.zona_id). Ya no se ocultan bloques; solo
+     * se reetiqueta el campo segun la zona elegida, para conservar el
+     * vocabulario habitual (corregimiento/vereda en zona rural).
+     */
+    if ($campo === 'comuna_id') {
+        $formGroupExtra = ' crud-zona-label';
+        $formGroupLabels = ['urbana' => 'Comuna', 'rural' => 'Corregimiento'];
+    } elseif ($campo === 'barrio_id') {
+        $formGroupExtra = ' crud-zona-label';
+        $formGroupLabels = ['urbana' => 'Barrio', 'rural' => 'Vereda'];
     }
 }
 if ($campo === 'documento_dv') {
@@ -320,7 +329,7 @@ if ($crudContextTable === 'empresa' && in_array($campo, ['rep_tipodocumento_id',
 if ($crudContextTable === 'empresa' && in_array($campo, ['email', 'sitio_web'], true)) {
     $formGroupExtra .= ' crud-empresa-contacto-field';
 }
-if ($crudContextTable === 'empresa' && in_array($campo, ['pais_id', 'departamento_id', 'municipio_id', 'zona_id', 'comuna_id', 'corregimiento_id', 'barrio_id', 'vereda_id'], true)) {
+if ($crudContextTable === 'empresa' && in_array($campo, ['pais_id', 'departamento_id', 'municipio_id', 'zona_id', 'comuna_id', 'barrio_id'], true)) {
     $formGroupExtra .= ' crud-empresa-ubicacion-field';
 }
 if (($config['span'] ?? '') === 'full') {
@@ -458,7 +467,11 @@ if ($crudUsuarioMediaAccordion || $crudEmpresaMediaAccordion) {
 
 ?>
 
-<div class="form-group<?= htmlspecialchars($formGroupExtra, ENT_QUOTES, 'UTF-8') ?>"<?= $formGroupStyle ?>>
+<div class="form-group<?= htmlspecialchars($formGroupExtra, ENT_QUOTES, 'UTF-8') ?>"<?php
+    if (is_array($formGroupLabels)):
+        ?> data-zona-label-urbana="<?= htmlspecialchars($formGroupLabels['urbana'], ENT_QUOTES, 'UTF-8') ?>" data-zona-label-rural="<?= htmlspecialchars($formGroupLabels['rural'], ENT_QUOTES, 'UTF-8') ?>"<?php
+    endif;
+?><?= $formGroupStyle ?>>
 
 <?php
 $labelTitleAttr = ($config['title'] ?? '') !== ''

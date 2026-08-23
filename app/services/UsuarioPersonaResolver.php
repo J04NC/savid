@@ -31,6 +31,17 @@ class UsuarioPersonaResolver
 
         $nombres = trim((string)($data['nombres'] ?? ''));
         $apellidos = trim((string)($data['apellidos'] ?? ''));
+
+        // nombres/apellidos van a `tercero`, que los exige en mayúscula. Este
+        // resolver corre fuera del bucle de normalización de CrudService::save(),
+        // así que sin esto la regla dependía solo del JS del navegador.
+        $upper = UppercaseColumnService::applyToMap($this->pdo, 'tercero', [
+            'nombres' => $nombres,
+            'apellidos' => $apellidos,
+        ]);
+        $nombres = (string)$upper['nombres'];
+        $apellidos = (string)$upper['apellidos'];
+
         $email = trim((string)($data['email'] ?? ''));
         $foto = trim((string)($data['foto_ruta'] ?? ''));
         $firma = trim((string)($data['firma_ruta'] ?? ''));
@@ -374,6 +385,16 @@ class UsuarioPersonaResolver
             $nombres = $nombreFallback;
         }
 
+        // Se normaliza en el punto de escritura (no solo en resolveAndPersist)
+        // para cubrir a cualquier llamador y también al fallback de arriba.
+        // Es idempotente.
+        $upper = UppercaseColumnService::applyToMap($this->pdo, 'tercero', [
+            'nombres' => $nombres,
+            'apellidos' => $apellidos,
+        ]);
+        $nombres = (string)$upper['nombres'];
+        $apellidos = (string)$upper['apellidos'];
+
         $tCols = $this->getTableColumnNames('tercero');
         $insertCols = ['tipopersona_id', 'estado_id'];
         $insertVals = [1, 1];
@@ -435,6 +456,15 @@ class UsuarioPersonaResolver
         string $firma,
         array $data
     ): void {
+        // Se normaliza en el punto de escritura (no solo en resolveAndPersist)
+        // para cubrir a cualquier llamador. Es idempotente.
+        $upper = UppercaseColumnService::applyToMap($this->pdo, 'tercero', [
+            'nombres' => $nombres,
+            'apellidos' => $apellidos,
+        ]);
+        $nombres = (string)$upper['nombres'];
+        $apellidos = (string)$upper['apellidos'];
+
         $tCols = $this->getTableColumnNames('tercero');
         $sets = [];
         $updParams = [];

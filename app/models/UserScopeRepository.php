@@ -40,12 +40,17 @@ class UserScopeRepository
         $stmt = $this->pdo->prepare("DELETE FROM usuario_empresa WHERE usuario_id = ?");
         $stmt->execute([$usuarioId]);
 
-        $stmt = $this->pdo->prepare("
-            INSERT INTO usuario_empresa (usuario_id, empresa_id, estado_id)
-            VALUES (?, ?, 1)
-        ");
-
+        // Se prepara dentro del bucle a propósito: usuario_empresa tiene columnas
+        // rastreables, así que TrackableColumnsService reescribe el INSERT en el
+        // primer execute() (más placeholders para created_by/updated_by) y muta
+        // el statement en sitio. Reusar ese mismo statement en la vuelta
+        // siguiente, pasando de nuevo solo 2 valores, viola el número de
+        // parámetros que el statement ya reescrito espera (SQLSTATE[HY093]).
         foreach ($empresaIds as $empresaId) {
+            $stmt = $this->pdo->prepare("
+                INSERT INTO usuario_empresa (usuario_id, empresa_id, estado_id)
+                VALUES (?, ?, 1)
+            ");
             $stmt->execute([$usuarioId, (int)$empresaId]);
         }
     }
@@ -55,12 +60,13 @@ class UserScopeRepository
         $stmt = $this->pdo->prepare("DELETE FROM usuario_sede WHERE usuario_id = ?");
         $stmt->execute([$usuarioId]);
 
-        $stmt = $this->pdo->prepare("
-            INSERT INTO usuario_sede (usuario_id, sede_id, estado_id)
-            VALUES (?, ?, 1)
-        ");
-
+        // Ver la nota en replaceEmpresasForUsuario: usuario_sede también tiene
+        // columnas rastreables.
         foreach ($sedeIds as $sedeId) {
+            $stmt = $this->pdo->prepare("
+                INSERT INTO usuario_sede (usuario_id, sede_id, estado_id)
+                VALUES (?, ?, 1)
+            ");
             $stmt->execute([$usuarioId, (int)$sedeId]);
         }
     }
@@ -86,13 +92,16 @@ class UserScopeRepository
             return;
         }
 
-        $stmt = $this->pdo->prepare("
-            INSERT INTO usuario_empresa (usuario_id, empresa_id, estado_id)
-            VALUES (?, ?, 1)
-            ON DUPLICATE KEY UPDATE estado_id = 1
-        ");
-
+        // Preparar dentro del bucle: ver la nota en replaceEmpresasForUsuario.
+        // Reproducido exactamente este caso al seleccionar 4 empresas: la 1ª
+        // se guardaba bien (reescribía el statement a 4 placeholders) y las
+        // siguientes 3 fallaban con SQLSTATE[HY093] al pasarle solo 2 valores.
         foreach ($empresaIds as $empresaId) {
+            $stmt = $this->pdo->prepare("
+                INSERT INTO usuario_empresa (usuario_id, empresa_id, estado_id)
+                VALUES (?, ?, 1)
+                ON DUPLICATE KEY UPDATE estado_id = 1
+            ");
             $stmt->execute([$usuarioId, (int)$empresaId]);
         }
     }
@@ -118,13 +127,13 @@ class UserScopeRepository
             return;
         }
 
-        $stmt = $this->pdo->prepare("
-            INSERT INTO usuario_sede (usuario_id, sede_id, estado_id)
-            VALUES (?, ?, 1)
-            ON DUPLICATE KEY UPDATE estado_id = 1
-        ");
-
+        // Preparar dentro del bucle: ver la nota en addEmpresasForUsuario.
         foreach ($sedeIds as $sedeId) {
+            $stmt = $this->pdo->prepare("
+                INSERT INTO usuario_sede (usuario_id, sede_id, estado_id)
+                VALUES (?, ?, 1)
+                ON DUPLICATE KEY UPDATE estado_id = 1
+            ");
             $stmt->execute([$usuarioId, (int)$sedeId]);
         }
     }

@@ -150,6 +150,8 @@ if (!form) return;
 /** @type {Map<number, 'none'|'allow'|'deny'>} */
 let baseline = new Map();
 let debounceTimer = null;
+let flushChain = Promise.resolve(true);
+let sesionExpirada = false;
 
 function cellStateFromCheckbox(chk) {
     const fromRole = chk.getAttribute("data-from-role") === "1";
@@ -234,8 +236,48 @@ async function refreshMatrizFromServer() {
     aplicarFiltroModulos();
 }
 
-async function flushPendingBatch(opts) {
+function detenerGuardado(titulo, mensaje) {
+    if (sesionExpirada) return;
+    sesionExpirada = true;
     clearDebounce();
+    setSaveStatus(titulo);
+
+    const cont = document.getElementById("permisosMatriz");
+    if (cont) {
+        const aviso = document.createElement("div");
+        aviso.className = "modal-form-alert";
+        aviso.style.cssText = "position:sticky;top:0;z-index:5;margin-bottom:.5rem;";
+        aviso.innerHTML = "<strong>" + escapeHtml(titulo) + ".</strong> Los cambios no se guardaron. "
+            + '<button type="button" class="btn btn-sm" id="btnRecargarSesion">Recargar página</button>';
+        cont.prepend(aviso);
+        document.getElementById("btnRecargarSesion")?.addEventListener("click", function () {
+            window.location.reload();
+        });
+    }
+
+    alert("❌ " + mensaje);
+}
+
+function flushPendingBatch(opts) {
+    // Sin sesión válida no se reintenta nada más (evita el bucle de avisos).
+    if (sesionExpirada) {
+        return Promise.resolve(true);
+    }
+
+    // Encadenado sobre flushChain: nunca deben viajar dos guardados en paralelo.
+    // Con debounce de 500ms y una petición que puede tardar más que eso (sesión
+    // en archivo con lock exclusivo + tabla auditoria grande), disparar cada
+    // cambio como fetch independiente apilaba peticiones detrás del lock de
+    // sesión hasta agotar los workers de PHP-FPM y colgar el servidor.
+    clearDebounce();
+    const run = flushChain.then(function () {
+        return flushBatchNow(opts);
+    });
+    flushChain = run.catch(function () { return false; });
+    return run;
+}
+
+async function flushBatchNow(opts) {
     const diff = computeDiff();
     if (diff.grant_ids.length === 0 && diff.deny_ids.length === 0 && diff.remove_ids.length === 0) {
         setSaveStatus("");
@@ -257,10 +299,52 @@ async function flushPendingBatch(opts) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body)
         });
-        const data = await r.json();
-        if (!data.success) {
-            alert("❌ " + (data.message || "No se pudo guardar"));
+
+        // Una sesión expirada responde 403 (CSRF) y un login caído responde el
+        // HTML del login: en ambos casos r.json() lanza excepción de parseo, que
+        // antes se reportaba como "Error de conexión" y dejaba el modal atrapado.
+        const texto = await r.text();
+        let data;
+        try {
+            data = JSON.parse(texto);
+        } catch (e) {
+            data = null;
+        }
+
+        if (data === null || !data.success) {
+            // Solo 401/403 son sesión caída. Cualquier otra respuesta no-JSON
+            // (504 de nginx, error de ngrok, fallo de PHP) es otra cosa: se
+            // muestra el código HTTP y un extracto para poder diagnosticarla,
+            // en vez de atribuirla siempre a la sesión.
+            const expiro = r.status === 403 || r.status === 401;
+            let mensaje;
+
+            if (data && data.message) {
+                mensaje = data.message;
+            } else if (expiro) {
+                mensaje = "Su sesión expiró. Recargue la página (F5) e inicie sesión de nuevo.";
+            } else {
+                const extracto = texto.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 160);
+                mensaje = "El servidor respondió HTTP " + r.status
+                    + (extracto ? ("\n\n" + extracto) : " (respuesta vacía)");
+            }
+
+            // Sesión caída o respuesta ininteligible: reintentar no puede
+            // funcionar, así que se detiene el guardado automático y se avisa
+            // una sola vez (antes el aviso se repetía en cada cambio y al
+            // cerrar el modal). Un JSON de error legítimo sí permite reintentar.
+            if (expiro || data === null) {
+                detenerGuardado(
+                    expiro ? "Sesión expirada" : "Guardado detenido",
+                    mensaje
+                );
+
+                return true;
+            }
+
+            alert("❌ " + mensaje);
             setSaveStatus("Error al guardar");
+
             return false;
         }
 
@@ -283,13 +367,22 @@ async function flushPendingBatch(opts) {
 
         return true;
     } catch (e) {
+        // Caída de red real (el parseo de respuestas no-JSON ya se trató arriba).
+        setSaveStatus("Error de conexión");
+
+        if (opts && opts.closing) {
+            return confirm("No se pudo guardar: sin conexión con el servidor.\n\n¿Cerrar de todos modos y descartar los cambios pendientes?");
+        }
+
         alert("❌ Error de conexión");
-        setSaveStatus("");
+
         return false;
     }
 }
 
 function scheduleFlush() {
+    if (sesionExpirada) return;
+
     const diff = computeDiff();
     if (diff.grant_ids.length || diff.deny_ids.length || diff.remove_ids.length) {
         setSaveStatus("Pendiente…");

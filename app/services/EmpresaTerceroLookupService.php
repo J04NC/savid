@@ -132,7 +132,7 @@ class EmpresaTerceroLookupService
         $stmt = $this->pdo->prepare(
             'SELECT id, razon_social, email, telefono, celular, direccion,
                     pais_id, departamento_id, municipio_id, zona_id,
-                    comuna_id, corregimiento_id, barrio_id, vereda_id,
+                    comuna_id, barrio_id,
                     estado_id, tipopersona_id
                FROM tercero
               WHERE id = ?
@@ -184,9 +184,7 @@ class EmpresaTerceroLookupService
             'municipio_id' => $tercero['municipio_id'] ?? '',
             'zona_id' => $tercero['zona_id'] ?? '',
             'comuna_id' => $tercero['comuna_id'] ?? '',
-            'corregimiento_id' => $tercero['corregimiento_id'] ?? '',
             'barrio_id' => $tercero['barrio_id'] ?? '',
-            'vereda_id' => $tercero['vereda_id'] ?? '',
         ];
 
         if ($ident !== null && isset($ident['dv']) && $ident['dv'] !== null && $ident['dv'] !== '') {

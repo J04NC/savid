@@ -117,17 +117,34 @@ class TrackableColumnsService
     private static function stampInsert(string $sql, array $params, array $meta): array
     {
         if (!preg_match(
-            '/^(INSERT\s+(?:IGNORE\s+)?INTO|REPLACE\s+INTO)\s+`?([a-zA-Z0-9_]+)`?\s*\(([^)]+)\)\s*VALUES\s*\((.+)\)/is',
+            '/^(INSERT\s+(?:IGNORE\s+)?INTO|REPLACE\s+INTO)\s+`?([a-zA-Z0-9_]+)`?\s*\(([^)]+)\)\s*VALUES\s*\(/is',
             $sql,
-            $m
+            $m,
+            PREG_OFFSET_CAPTURE
         )) {
             return [$sql, $params];
         }
 
-        $prefix = $m[1];
-        $table = $m[2];
-        $colList = $m[3];
-        $valList = $m[4];
+        $prefix = $m[1][0];
+        $table = $m[2][0];
+        $colList = $m[3][0];
+
+        // El tuple de VALUES puede traer paréntesis propios (NOW(3), CURDATE()),
+        // así que hace falta contar profundidad para hallar el cierre real en vez
+        // de un regex "hasta el último )": ese enfoque capturaba de más y, peor,
+        // descartaba en silencio cualquier cláusula posterior (p. ej. ON DUPLICATE
+        // KEY UPDATE), porque el SQL reescrito se reconstruía solo con lo
+        // capturado. INSERT ... ON DUPLICATE KEY UPDATE dejaba de reactivar filas
+        // existentes y el INSERT llano chocaba con la clave única.
+        $openPos = $m[0][1] + strlen($m[0][0]) - 1;
+        $closePos = self::findMatchingParen($sql, $openPos);
+
+        if ($closePos === null) {
+            return [$sql, $params];
+        }
+
+        $valList = substr($sql, $openPos + 1, $closePos - $openPos - 1);
+        $tail = substr($sql, $closePos + 1);
 
         $cols = array_map(
             static fn($c) => strtolower(str_replace('`', '', trim($c))),
@@ -163,16 +180,57 @@ class TrackableColumnsService
         }
 
         $newSql = sprintf(
-            '%s `%s` (%s,%s) VALUES (%s,%s)',
+            '%s `%s` (%s,%s) VALUES (%s,%s)%s',
             $prefix,
             $table,
             $colList,
             implode(',', $extraCols),
             $valList,
-            implode(',', $extraVals)
+            implode(',', $extraVals),
+            $tail
         );
 
         return [$newSql, array_merge($params, $extraParams)];
+    }
+
+    /**
+     * Busca, contando profundidad de paréntesis, la posición del ")" que cierra
+     * el "(" en $openPos. Ignora paréntesis dentro de comillas simples/dobles
+     * (placeholders o literales de texto no deberían traer paréntesis propios,
+     * pero por seguridad no se cuentan si aparecen entrecomillados).
+     */
+    private static function findMatchingParen(string $sql, int $openPos): ?int
+    {
+        $depth = 0;
+        $inString = null;
+        $len = strlen($sql);
+
+        for ($i = $openPos; $i < $len; $i++) {
+            $ch = $sql[$i];
+
+            if ($inString !== null) {
+                if ($ch === '\\') {
+                    $i++;
+                } elseif ($ch === $inString) {
+                    $inString = null;
+                }
+
+                continue;
+            }
+
+            if ($ch === "'" || $ch === '"') {
+                $inString = $ch;
+            } elseif ($ch === '(') {
+                $depth++;
+            } elseif ($ch === ')') {
+                $depth--;
+                if ($depth === 0) {
+                    return $i;
+                }
+            }
+        }
+
+        return null;
     }
 
     /**

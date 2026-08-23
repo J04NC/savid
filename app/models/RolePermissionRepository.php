@@ -9,13 +9,29 @@ class RolePermissionRepository
         $this->pdo = $pdo;
     }
 
-    public function getMatrixRows()
+    /**
+     * @param list<int>|null $allowedItemIds si viene no-null, restringe a esos item_id
+     *        (ítems habilitados para la empresa en foco vía empresa_item). Null = sin
+     *        restringir (solo cuando el superadmin ve "todas las empresas").
+     */
+    public function getMatrixRows(?array $allowedItemIds = null)
     {
         $itemNd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'item', 'i');
         $modNd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'modulo', 'm');
         $accNd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'accion', 'a');
 
-        return $this->pdo->query("
+        $params = [];
+        $allowedSql = '';
+        if ($allowedItemIds !== null) {
+            if ($allowedItemIds === []) {
+                return [];
+            }
+            $placeholders = implode(',', array_fill(0, count($allowedItemIds), '?'));
+            $allowedSql = "AND i.id IN ({$placeholders})";
+            $params = $allowedItemIds;
+        }
+
+        $stmt = $this->pdo->prepare("
             SELECT
                 m.nombre AS modulo,
                 i.id AS item_id,
@@ -33,8 +49,12 @@ class RolePermissionRepository
             {$itemNd}
             {$modNd}
             {$accNd}
+            {$allowedSql}
             ORDER BY m.id, i.orden, a.id
-        ")->fetchAll(PDO::FETCH_ASSOC);
+        ");
+        $stmt->execute($params);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
     public function getCheckedItemAccionIdsByScope($rolId, $empresaId, $sedeId)

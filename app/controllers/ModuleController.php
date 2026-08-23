@@ -74,6 +74,12 @@ class ModuleController
                 exit;
             }
 
+            if ($currentItem['ruta'] === 'rol' && !$this->isSuperAdmin()) {
+                $_SESSION['flash_notice'] = 'Solo un superadministrador puede eliminar roles. Use "Permisos" para ajustar qué puede hacer un rol, o "Roles" en Empresa para elegir cuáles usa su empresa.';
+                header("Location: ?url=".$ruta);
+                exit;
+            }
+
             $this->moduleService->deleteRecord($currentItem['ruta'], $id);
 
             header("Location: ?url=".$ruta);
@@ -123,6 +129,12 @@ class ModuleController
 
                 if(!$permitido){
                     throw new Exception("No tienes permiso para guardar");
+                }
+
+                if ($currentItem['ruta'] === 'rol' && !$this->isSuperAdmin()) {
+                    throw new Exception(json_encode([
+                        'general' => 'Solo un superadministrador puede crear, renombrar o modificar roles. Use "Permisos" para ajustar qué puede hacer un rol.',
+                    ], JSON_UNESCAPED_UNICODE));
                 }
 
                 if ($currentItem['ruta'] === 'empresa') {

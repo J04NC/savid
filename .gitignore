@@ -6,3 +6,12 @@
 /storage/backups/*
 !/storage/backups/.gitkeep
 /storage/locks/*.lock
+
+# Codigo del sistema externo SIHOS (otro proyecto, ~794 MB, puede contener
+# datos clinicos): vive junto al repo por conveniencia de despliegue pero
+# nunca debe versionarse aqui.
+/sihos/
+
+# Logs de diagnostico en runtime
+/storage/*.log
+/storage/*.txt

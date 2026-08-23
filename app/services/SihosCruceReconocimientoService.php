@@ -65,13 +65,86 @@ class SihosCruceReconocimientoService
 
             $cuentasInstitucion = $repository->fetchCuentasInstitucion();
             $cuentaReversion = trim((string)($cuentasInstitucion['CuenGlosAct'] ?? ''));
-            $cuentaGasto = trim((string)($cuentasInstitucion['CuenGlos'] ?? ''));
-            // Familia de cuentas, no el valor exacto: CuenGlosAct/CuenGlos son
-            // solo UN ejemplo de una familia con una subcuenta por tipo de
-            // pagador (ver docblock de fetchCuentasInesperadasNotasVigenciaActual).
+            // Vigencia anterior: CuenGlos = "Aceptación de Glosas Vigencia
+            // Anterior" (el nombre de columna no lo dice, confirmado contra
+            // el código fuente de SIHOS); CuenDeAn = "Devolución de Facturas
+            // Vigencias Anteriores"; CuenCaAn = "Conciliación Vigencias
+            // Anteriores". Las 3 son las que debe ofrecer el selector de
+            // reclasificación (sección 5b) — CuenGlosAct/CuenCast son de
+            // vigencia ACTUAL, no aplican ahí.
+            $cuentaAceptacionGlosaAnterior = trim((string)($cuentasInstitucion['CuenGlos'] ?? ''));
+            $cuentaDevolucionAnterior = trim((string)($cuentasInstitucion['CuenDeAn'] ?? ''));
+            $cuentaConciliacionAnterior = trim((string)($cuentasInstitucion['CuenCaAn'] ?? ''));
+            // Familia de cuentas, no el valor exacto: CuenGlosAct es solo UN
+            // ejemplo de una familia con una subcuenta por tipo de pagador
+            // (ver docblock de fetchCuentasInesperadasNotasVigenciaActual).
+            // Las 3 cuentas de vigencia anterior comparten clase 58, por eso
+            // un solo prefijo de 2 dígitos basta para excluirlas a las tres.
             $prefijoReversion = $cuentaReversion !== '' ? substr($cuentaReversion, 0, 4) : '';
-            $prefijoGasto = $cuentaGasto !== '' ? substr($cuentaGasto, 0, 2) : '';
+            $prefijoVigenciaAnterior = $cuentaAceptacionGlosaAnterior !== '' ? substr($cuentaAceptacionGlosaAnterior, 0, 2) : '';
             $cuentasCapitaPasivo = $repository->fetchCuentasCapitaPasivo();
+
+            // Facturas con cuenta fuera de lo esperado que YA tienen un
+            // ajuste (nota_ajuste u otra corrección hecha directamente en
+            // SIHOS) se excluyen del hallazgo, sin importar la fecha de esa
+            // corrección — la pregunta es si ya está resuelto, no si la
+            // corrección cae dentro del rango filtrado. La sección 6
+            // (Detalle de diferencias a revisar) no se toca: se
+            // autorresuelve sola cuando la nota cae en el rango filtrado,
+            // porque ya compensa la contabilidad real.
+            $cuentasInesperadasFacturas = $repository->fetchCuentasInesperadasFacturas(
+                $codigosFactura,
+                $fechaIni,
+                $fechaFin,
+                $cuentasCapitaPasivo
+            );
+            $clavesConAjuste = $repository->fetchClavesConAjustePrevio($cuentasInesperadasFacturas);
+            $cuentasInesperadasFacturas = array_values(array_filter(
+                $cuentasInesperadasFacturas,
+                static fn (array $f): bool => !isset($clavesConAjuste[$f['CodiDocu'] . '-' . $f['NumeDocu'] . '-' . $f['CodiCont']])
+            ));
+
+            // Sección 5b: se une la vigencia actual (como ya existía, sin
+            // acción propia) con la vigencia anterior (nueva — notas que
+            // tocan 4312 sobre una factura de otro año en vez de la cuenta
+            // de vigencia anterior configurada). Cada fila lleva
+            // 'EsVigenciaAnterior' para que la vista sepa cuáles llevan
+            // botón. Igual que en 5a: las que ya tienen un ajuste (nota
+            // nueva de la rama de mes cerrado) se excluyen sin importar la
+            // fecha de esa corrección — la rama de mes abierto (edición en
+            // sitio) se autorresuelve sola, porque la línea corregida ya no
+            // vuelve a calzar con "cuenta fuera de lo esperado".
+            $cuentasInesperadasNotasActual = array_map(
+                static function (array $f): array {
+                    $f['EsVigenciaAnterior'] = false;
+
+                    return $f;
+                },
+                $repository->fetchCuentasInesperadasNotasVigenciaActual($codigosNota, $fechaIni, $fechaFin, $prefijoReversion, $prefijoVigenciaAnterior)
+            );
+            // Sin $prefijoReversion aquí: es la familia de CuenGlosAct (vigencia
+            // ACTUAL), no tiene por qué excluir nada en la detección de vigencia
+            // ANTERIOR — se pasa '' y la consulta simplemente no aplica ese filtro.
+            $cuentasInesperadasNotasAnterior = $repository->fetchCuentasInesperadasNotasVigenciaAnterior(
+                $codigosNota,
+                $fechaIni,
+                $fechaFin,
+                '',
+                $prefijoVigenciaAnterior
+            );
+            $clavesConAjusteNotas = $repository->fetchClavesConAjustePrevio($cuentasInesperadasNotasAnterior);
+            $cuentasInesperadasNotasAnterior = array_values(array_map(
+                static function (array $f): array {
+                    $f['EsVigenciaAnterior'] = true;
+
+                    return $f;
+                },
+                array_filter(
+                    $cuentasInesperadasNotasAnterior,
+                    static fn (array $f): bool => !isset($clavesConAjusteNotas[$f['CodiDocu'] . '-' . $f['NumeDocu'] . '-' . $f['CodiCont']])
+                )
+            ));
+            $cuentasInesperadasNotas = [...$cuentasInesperadasNotasActual, ...$cuentasInesperadasNotasAnterior];
 
             return [
                 'ok' => true,
@@ -79,7 +152,9 @@ class SihosCruceReconocimientoService
                 'codigosGlosa' => $codigosGlosa,
                 'codigosNota' => $codigosNota,
                 'cuentaReversion' => $cuentaReversion,
-                'cuentaGasto' => $cuentaGasto,
+                'cuentaAceptacionGlosaAnterior' => $cuentaAceptacionGlosaAnterior,
+                'cuentaDevolucionAnterior' => $cuentaDevolucionAnterior,
+                'cuentaConciliacionAnterior' => $cuentaConciliacionAnterior,
                 'cuentasCapitaPasivo' => $cuentasCapitaPasivo,
                 'facturasSinPresupuesto' => $repository->fetchFacturasSinPresupuesto($codigosFactura, $fechaIni, $fechaFin),
                 'facturasSinCuentaIngreso' => $repository->fetchFacturasSinCuentaIngreso(
@@ -90,25 +165,14 @@ class SihosCruceReconocimientoService
                 ),
                 'notasIncompletas' => $repository->fetchNotasVigenciaActualIncompletas($codigosNota, $fechaIni, $fechaFin),
                 'glosasIncompletas' => $repository->fetchNotasVigenciaActualIncompletas($codigosGlosa, $fechaIni, $fechaFin),
-                'cuentasInesperadasFacturas' => $repository->fetchCuentasInesperadasFacturas(
-                    $codigosFactura,
-                    $fechaIni,
-                    $fechaFin,
-                    $cuentasCapitaPasivo
-                ),
-                'cuentasInesperadasNotas' => $repository->fetchCuentasInesperadasNotasVigenciaActual(
-                    $codigosNota,
-                    $fechaIni,
-                    $fechaFin,
-                    $prefijoReversion,
-                    $prefijoGasto
-                ),
+                'cuentasInesperadasFacturas' => $cuentasInesperadasFacturas,
+                'cuentasInesperadasNotas' => $cuentasInesperadasNotas,
                 'cuentasInesperadasGlosas' => $repository->fetchCuentasInesperadasNotasVigenciaActual(
                     $codigosGlosa,
                     $fechaIni,
                     $fechaFin,
                     $prefijoReversion,
-                    $prefijoGasto
+                    $prefijoVigenciaAnterior
                 ),
                 'diferenciasPresupuestoContabilidad' => $this->buildDiferenciasPresupuestoContabilidad(
                     $repository,

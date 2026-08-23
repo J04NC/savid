@@ -14,7 +14,18 @@ class SessionConfigurator
 
         $driver = strtolower(trim((string)(getenv('SESSION_DRIVER') ?: 'files')));
 
+        // La cookie de sesión vive SESSION_LIFETIME (24h por defecto, ver
+        // SessionManager::start), pero el php.ini del sistema recolecta los
+        // archivos de sesión a los 1440s (24 min). Con esa discordancia, tras
+        // 24 minutos de inactividad el navegador seguía enviando una cookie
+        // válida contra una sesión ya borrada: PHP abría una sesión vacía, sin
+        // csrf_token, y toda petición POST moría con 403 en el middleware CSRF.
+        // Se alinean ambos plazos para el driver de archivos.
+        $ttl = max(60, (int)(getenv('SESSION_LIFETIME') ?: 86400));
+
         if ($driver !== 'redis') {
+            ini_set('session.gc_maxlifetime', (string)$ttl);
+
             return;
         }
 
@@ -29,9 +40,8 @@ class SessionConfigurator
         $password = getenv('REDIS_PASSWORD');
         $database = (int)(getenv('REDIS_SESSION_DB') ?: 0);
         $prefix = getenv('REDIS_SESSION_PREFIX') ?: 'savid:sess:';
-        $ttl = max(60, (int)(getenv('SESSION_LIFETIME') ?: 86400));
 
-        $auth = is_string($password) && $password !== '' ? '&auth=' . rawurlencode($password) : '';
+        $auth =is_string($password) && $password !== '' ? '&auth=' . rawurlencode($password) : '';
         $savePath = sprintf(
             'tcp://%s:%d?database=%d&prefix=%s&timeout=2%s',
             $host,

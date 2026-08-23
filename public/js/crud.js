@@ -952,9 +952,7 @@ function initCrudEmpresaNitLookup() {
                         municipio_id: t.municipio_id || "",
                         zona_id: t.zona_id || "",
                         comuna_id: t.comuna_id || "",
-                        corregimiento_id: t.corregimiento_id || "",
                         barrio_id: t.barrio_id || "",
-                        vereda_id: t.vereda_id || "",
                         documento_dv: t.documento_dv || "",
                     };
                     Object.keys(map).forEach(key => {
@@ -1611,29 +1609,50 @@ function crudGetZonaTipoFromForm(form) {
     return "";
 }
 
+/*
+ * Jerarquia territorial unica: comuna/barrio guardan tanto direcciones urbanas
+ * como rurales (la zona vive en comuna.zona_id). Antes habia dos parejas de
+ * campos y este codigo ocultaba y limpiaba una de las dos; ahora solo cambia
+ * la etiqueta para conservar el vocabulario habitual: en zona rural, "Comuna"
+ * se muestra como "Corregimiento" y "Barrio" como "Vereda".
+ */
 function crudZonaUbicacionApplyFromForm(form) {
     if (!form) return;
-    if (!form.querySelector(".crud-zona-urban") && !form.querySelector(".crud-zona-rural")) return;
-    const tipo = crudGetZonaTipoFromForm(form);
-    const isRural = tipo === "rural";
-    form.querySelectorAll(".crud-zona-urban").forEach(function (g) {
-        const hide = isRural;
-        g.classList.toggle("crud-zona-hidden", hide);
-        crudToggleRequiredInGroup(g, !hide);
-        if (hide) crudClearInputsInGroup(g);
-    });
-    form.querySelectorAll(".crud-zona-rural").forEach(function (g) {
-        const hide = !isRural;
-        g.classList.toggle("crud-zona-hidden", hide);
-        crudToggleRequiredInGroup(g, !hide);
-        if (hide) crudClearInputsInGroup(g);
+    const grupos = form.querySelectorAll(".crud-zona-label");
+    if (!grupos.length) return;
+    const isRural = crudGetZonaTipoFromForm(form) === "rural";
+
+    grupos.forEach(function (g) {
+        const texto = isRural
+            ? g.getAttribute("data-zona-label-rural")
+            : g.getAttribute("data-zona-label-urbana");
+        if (!texto) return;
+
+        const label = g.querySelector("label");
+        if (label) {
+            // Conserva marcas dentro del label (asterisco de obligatorio, etc.):
+            // solo se reemplaza el primer nodo de texto no vacio.
+            const nodo = Array.prototype.find.call(
+                label.childNodes,
+                (n) => n.nodeType === 3 && n.textContent.trim() !== ""
+            );
+            if (nodo) {
+                nodo.textContent = texto;
+            } else {
+                label.prepend(document.createTextNode(texto));
+            }
+        }
+
+        g.querySelectorAll("input[placeholder], select[data-placeholder]").forEach(function (el) {
+            if (el.placeholder !== undefined) el.placeholder = texto;
+        });
     });
 }
 
 function initCrudZonaUbicacionToggle() {
     const form = document.querySelector("form[data-crud-zona-ubicacion-toggle]");
     if (!form) return;
-    if (!form.querySelector(".crud-zona-urban") && !form.querySelector(".crud-zona-rural")) return;
+    if (!form.querySelector(".crud-zona-label")) return;
     form.addEventListener("change", function (ev) {
         const t = ev.target;
         if (t && t.getAttribute && t.getAttribute("name") === "zona_id") {
@@ -2160,6 +2179,16 @@ function initCrudAcciones() {
                     "empresa/usuarios/" + selectedId,
                     "lg",
                     "Cargando usuarios..."
+                ],
+                empresa_items: [
+                    "empresa/items/" + selectedId,
+                    "lg",
+                    "Cargando ítems..."
+                ],
+                empresa_roles: [
+                    "empresa/roles/" + selectedId,
+                    "lg",
+                    "Cargando roles..."
                 ],
                 renovar_suscripcion: [
                     "suscripcion/renovar/" + selectedId,

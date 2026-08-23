@@ -5,12 +5,14 @@ class SihosController
     private SihosConnectionService $connectionService;
     private SihosCruceReconocimientoService $cruceService;
     private SihosPresupuestoEliminacionService $eliminacionService;
+    private SihosCancelacionCuentaService $cancelacionCuentaService;
 
     public function __construct()
     {
         $this->connectionService = new SihosConnectionService();
         $this->cruceService = new SihosCruceReconocimientoService();
         $this->eliminacionService = new SihosPresupuestoEliminacionService();
+        $this->cancelacionCuentaService = new SihosCancelacionCuentaService();
     }
 
     /**
@@ -88,6 +90,8 @@ class SihosController
         }
 
         $puedeEliminarDetaPlan = PermisoService::can('sihos/cruce', 'eliminar');
+        $puedeReversarCuenta = PermisoService::can('sihos/cruce', 'nota_ajuste');
+        $puedeConstruirDetaPlan = PermisoService::can('sihos/cruce', 'construir_detaplan');
 
         $moduleService = new ModuleService();
         $breadcrumb = $moduleService->buildBreadcrumbForRuta('sihos/cruce');
@@ -126,6 +130,126 @@ class SihosController
         }
 
         $resultado = $this->eliminacionService->eliminarDetaPlan($empresaId, $codiDocu, $numeDocu);
+
+        if (!$resultado['ok']) {
+            http_response_code(400);
+        }
+
+        echo json_encode($resultado, JSON_UNESCAPED_UNICODE);
+    }
+
+    /**
+     * POST ?url=sihos/cruceConstruirDetaPlan — construye en SIHOS la línea
+     * DetaPlan que le falta a una nota (NCF) sobre una factura de la misma
+     * vigencia (sección 3 del reporte). Requiere el permiso
+     * 'construir_detaplan' sobre sihos/cruce, además del 'ver' que ya aplica
+     * Router::middleware().
+     */
+    public function cruceConstruirDetaPlan(): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+
+        if (!PermisoService::can('sihos/cruce', 'construir_detaplan')) {
+            http_response_code(403);
+            echo json_encode(['ok' => false, 'message' => 'Sin permiso.'], JSON_UNESCAPED_UNICODE);
+
+            return;
+        }
+
+        $scope = $this->connectionService->buildScope($_POST);
+        $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : 0;
+        $codiDocu = trim((string)($_POST['codi_docu'] ?? ''));
+        $numeDocu = trim((string)($_POST['nume_docu'] ?? ''));
+
+        if ($empresaId <= 0 || $codiDocu === '' || $numeDocu === '') {
+            http_response_code(400);
+            echo json_encode(['ok' => false, 'message' => 'Faltan datos del documento.'], JSON_UNESCAPED_UNICODE);
+
+            return;
+        }
+
+        $resultado = $this->eliminacionService->construirDetaPlan($empresaId, $codiDocu, $numeDocu);
+
+        if (!$resultado['ok']) {
+            http_response_code(400);
+        }
+
+        echo json_encode($resultado, JSON_UNESCAPED_UNICODE);
+    }
+
+    /**
+     * POST ?url=sihos/cruceReversarCuentaInesperada — crea en SIHOS la Nota
+     * Contabilidad (NC) que cancela una cuenta contable fuera de lo
+     * esperado (sección 5a) contra la(s) cuenta(s) 4312 de la factura.
+     * Requiere el permiso 'nota_ajuste' sobre sihos/cruce, además del 'ver'
+     * que ya aplica Router::middleware().
+     */
+    public function cruceReversarCuentaInesperada(): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+
+        if (!PermisoService::can('sihos/cruce', 'nota_ajuste')) {
+            http_response_code(403);
+            echo json_encode(['ok' => false, 'message' => 'Sin permiso.'], JSON_UNESCAPED_UNICODE);
+
+            return;
+        }
+
+        $scope = $this->connectionService->buildScope($_POST);
+        $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : 0;
+        $codiDocu = trim((string)($_POST['codi_docu'] ?? ''));
+        $numeDocu = trim((string)($_POST['nume_docu'] ?? ''));
+        $consDeta = (int)($_POST['cons_deta'] ?? 0);
+
+        if ($empresaId <= 0 || $codiDocu === '' || $numeDocu === '' || $consDeta <= 0) {
+            http_response_code(400);
+            echo json_encode(['ok' => false, 'message' => 'Faltan datos del documento.'], JSON_UNESCAPED_UNICODE);
+
+            return;
+        }
+
+        $resultado = $this->cancelacionCuentaService->reversarCuentaInesperada($empresaId, $codiDocu, $numeDocu, $consDeta);
+
+        if (!$resultado['ok']) {
+            http_response_code(400);
+        }
+
+        echo json_encode($resultado, JSON_UNESCAPED_UNICODE);
+    }
+
+    /**
+     * POST ?url=sihos/cruceReclasificarCuentaVigenciaAnterior — reclasifica
+     * la(s) cuenta(s) 4312 de una nota de vigencia anterior (sección 5b)
+     * hacia la cuenta configurada que se elija. Decide sola entre editar en
+     * sitio (mes abierto) o crear una nota de ajuste (mes cerrado). Mismo
+     * permiso 'nota_ajuste' que la acción de la sección 5a — es la misma
+     * familia de acción (ajustes contables desde SAVID).
+     */
+    public function cruceReclasificarCuentaVigenciaAnterior(): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+
+        if (!PermisoService::can('sihos/cruce', 'nota_ajuste')) {
+            http_response_code(403);
+            echo json_encode(['ok' => false, 'message' => 'Sin permiso.'], JSON_UNESCAPED_UNICODE);
+
+            return;
+        }
+
+        $scope = $this->connectionService->buildScope($_POST);
+        $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : 0;
+        $codiDocu = trim((string)($_POST['codi_docu'] ?? ''));
+        $numeDocu = trim((string)($_POST['nume_docu'] ?? ''));
+        $cuentaDestino = trim((string)($_POST['cuenta_destino'] ?? ''));
+
+        if ($empresaId <= 0 || $codiDocu === '' || $numeDocu === '' || $cuentaDestino === '') {
+            http_response_code(400);
+            echo json_encode(['ok' => false, 'message' => 'Faltan datos del documento o de la cuenta destino.'], JSON_UNESCAPED_UNICODE);
+
+            return;
+        }
+
+        $resultado = $this->cancelacionCuentaService->reclasificarCuentaVigenciaAnterior($empresaId, $codiDocu, $numeDocu, $cuentaDestino);
 
         if (!$resultado['ok']) {
             http_response_code(400);

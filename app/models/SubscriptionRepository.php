@@ -16,7 +16,6 @@ class SubscriptionRepository
             FROM suscripcion s
             JOIN plan p ON p.id = s.plan_id
             WHERE s.empresa_id = ?
-            AND s.activa = 1
             AND s.estado_id = 1
             ORDER BY s.id DESC
             LIMIT 1
@@ -57,8 +56,8 @@ class SubscriptionRepository
     public function createRenewal(int $empresaId, int $planId, string $fechaInicio, string $fechaFin): int
     {
         $stmt = $this->pdo->prepare("
-            INSERT INTO suscripcion (empresa_id, plan_id, fecha_inicio, fecha_fin, activa, estado_id)
-            VALUES (?, ?, ?, ?, 1, 1)
+            INSERT INTO suscripcion (empresa_id, plan_id, fecha_inicio, fecha_fin, estado_id)
+            VALUES (?, ?, ?, ?, 1)
         ");
         $stmt->execute([$empresaId, $planId, $fechaInicio, $fechaFin]);
 
@@ -78,8 +77,7 @@ class SubscriptionRepository
             FROM suscripcion s
             INNER JOIN empresa e ON e.id = s.empresa_id
             INNER JOIN tercero t ON t.id = e.tercero_id
-            WHERE s.activa = 1
-            AND s.estado_id = 1
+            WHERE s.estado_id = 1
             AND s.alerta_vencimiento_enviada_at IS NULL
             AND s.fecha_fin BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL ? DAY)
         ");

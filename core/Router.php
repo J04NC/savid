@@ -19,6 +19,22 @@ class Router
 
         if (SessionManager::userLogged()
             && ContextGateService::mustRedirectToContextSelection($controllerName, $method)) {
+            // Un fetch() sigue la redirección y recibe HTML donde esperaba JSON:
+            // queda constancia para poder distinguirlo de otros fallos.
+            if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+                @file_put_contents(
+                    BASE_PATH . '/storage/debug_permisos_http.log',
+                    sprintf(
+                        "[%s] REDIRIGIDO a contexto | url=%s | %s::%s\n",
+                        date('Y-m-d H:i:s'),
+                        (string)($_GET['url'] ?? ''),
+                        $controllerName,
+                        $method
+                    ),
+                    FILE_APPEND
+                );
+            }
+
             header('Location: ?url=context/cambiarSede');
             exit;
         }
@@ -41,6 +57,54 @@ class Router
         call_user_func_array([$controller, $method], $params);
     }
 
+    /**
+     * Deja rastro de por qué falló el CSRF: distingue "no había sesión" de
+     * "el token del navegador no coincide con el de la sesión" (página servida
+     * desde caché con un token viejo). Solo huellas cortas, nunca el token.
+     */
+    private static function logFalloCsrf(): void
+    {
+        $enviado = $_POST['csrf_token'] ?? ($_SERVER['HTTP_X_CSRF_TOKEN'] ?? null);
+        $enSesion = $_SESSION['csrf_token'] ?? null;
+
+        $huella = static function ($v): string {
+            return is_string($v) && $v !== '' ? substr(hash('sha256', $v), 0, 8) : 'ninguno';
+        };
+
+        $linea = sprintf(
+            "[%s] url=%s sesion_id=%s hay_sesion=%s token_sesion=%s token_enviado=%s via=%s login=%s\n",
+            date('Y-m-d H:i:s'),
+            (string)($_GET['url'] ?? ''),
+            $huella(session_id()),
+            $_SESSION === [] ? 'no(vacia)' : 'si',
+            $huella($enSesion),
+            $huella($enviado),
+            isset($_POST['csrf_token']) ? 'form' : (isset($_SERVER['HTTP_X_CSRF_TOKEN']) ? 'header' : 'nada'),
+            isset($_SESSION['user_id']) ? 'si' : 'no'
+        );
+
+        @file_put_contents(BASE_PATH . '/storage/debug_csrf.log', $linea, FILE_APPEND);
+    }
+
+    /**
+     * ¿El cliente espera JSON? (fetch/XHR de la app: cuerpo JSON, Accept JSON
+     * o X-Requested-With). Se usa para no responderle HTML/texto plano.
+     */
+    private static function requestWantsJson(): bool
+    {
+        $contentType = strtolower((string)($_SERVER['CONTENT_TYPE'] ?? ''));
+        if (strpos($contentType, 'application/json') !== false) {
+            return true;
+        }
+
+        $accept = strtolower((string)($_SERVER['HTTP_ACCEPT'] ?? ''));
+        if (strpos($accept, 'application/json') !== false) {
+            return true;
+        }
+
+        return strtolower((string)($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '')) === 'xmlhttprequest';
+    }
+
     private function middleware($controllerName, $method)
     {
         /*
@@ -50,7 +114,22 @@ class Router
          * está activo desde public/index.php para cualquier visitante, incluso sin login.
          */
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && class_exists('CsrfService') && !CsrfService::verifyRequest()) {
+            self::logFalloCsrf();
             http_response_code(403);
+
+            // A un cliente que espera JSON hay que responderle JSON: si recibe
+            // este texto plano, su r.json() lanza una excepción de parseo que
+            // el front confunde con una caída de red ("Error de conexión") en
+            // lugar de avisar de que la sesión expiró.
+            if (self::requestWantsJson()) {
+                header('Content-Type: application/json; charset=utf-8');
+                exit(json_encode([
+                    'success' => false,
+                    'error' => 'csrf_invalido',
+                    'message' => 'Su sesión expiró. Recargue la página e intente de nuevo.',
+                ], JSON_UNESCAPED_UNICODE));
+            }
+
             exit('Token de seguridad inválido o expirado. Recargue la página e intente de nuevo.');
         }
 
@@ -84,6 +163,19 @@ class Router
         /* Latido de actividad: para todo usuario logueado, no solo quien puede ver el reporte de sesiones. */
         $sesionesJsonMethods = ['ping'];
 
+        /*
+         * Acciones POST de sihos/cruce: su URL (sihos/cruceX) no tiene ítem de menú propio, así
+         * que el fallback genérico de PermisoService::resolveItemAccionId() caería al segmento
+         * raíz "sihos" — el ítem "Conexión SIHOS" (config de conexión), que no tiene relación con
+         * estas acciones del reporte. Se validan explícitamente contra sihos/cruce en su lugar.
+         */
+        $sihosCruceAccionMethods = [
+            'cruceEliminarDetaPlan',
+            'cruceReversarCuentaInesperada',
+            'cruceReclasificarCuentaVigenciaAnterior',
+            'cruceConstruirDetaPlan',
+        ];
+
         if (SessionManager::userLogged()
             && $controllerName === 'UsuarioController'
             && in_array($method, $usuarioJsonLookupMethods, true)
@@ -116,6 +208,9 @@ class Router
                         && (PermisoService::can('sgd/elaboracion', 'ver') || PermisoService::can('sgd/documentos', 'ver')))
                     || ($method !== 'elaboracionPreviewPdf' && PermisoService::can('sgd/elaboracion', 'ver'))
                 ))
+            && !($controllerName === 'SihosController'
+                && in_array($method, $sihosCruceAccionMethods, true)
+                && PermisoService::can('sihos/cruce', 'ver'))
             && !PermisoService::can($rutaCompleta, 'ver')) {
             http_response_code(403);
             exit('Acceso denegado.');

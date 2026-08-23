@@ -116,6 +116,47 @@ class MenuService
         return $result;
     }
 
+    /**
+     * Hijos directos de $itemId, filtrados por permiso (misma lógica de "mantener
+     * ancestros" que ya usa el menú lateral) — usado por el drill-down del dashboard
+     * (?url=dashboard/item/{id}), que antes traía los hijos con una consulta cruda
+     * sin ningún filtro de permiso/empresa_item.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function getFilteredChildrenOfItem(int $itemId, int $moduloId): array
+    {
+        if (!empty($_SESSION['es_super_admin'])) {
+            $itemNotDeleted = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'item');
+            $stmt = $this->pdo->prepare("
+                SELECT * FROM item
+                WHERE item_padre_id = ?
+                AND estado_id = 1
+                {$itemNotDeleted}
+                ORDER BY orden
+            ");
+            $stmt->execute([$itemId]);
+
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        }
+
+        $itemNotDeleted = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'item');
+        $stmt = $this->pdo->prepare("
+            SELECT * FROM item
+            WHERE modulo_id = ?
+            AND estado_id = 1
+            {$itemNotDeleted}
+            ORDER BY orden
+        ");
+        $stmt->execute([$moduloId]);
+        $filtered = $this->filterItemsWithAncestors($stmt->fetchAll(PDO::FETCH_ASSOC));
+
+        return array_values(array_filter(
+            $filtered,
+            fn (array $item): bool => $this->normalizeItemPadreId($item['item_padre_id'] ?? null) === $itemId
+        ));
+    }
+
     public function getItemsByModulo($moduloId)
     {
         $itemNotDeleted = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'item');

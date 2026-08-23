@@ -2,6 +2,15 @@
 
 /**
  * Bootstrap mínimo compartido por scripts CLI (cron, pruebas, mantenimiento).
+ *
+ * Carga la capa de auditoría igual que public/index.php, de modo que un script
+ * CLI recorra el mismo camino que una petición web: las escrituras quedan
+ * registradas en `auditoria` (como describe CLAUDE.md) y las pruebas por consola
+ * ejercitan de verdad AuditingPDO. Antes no era así y eso escondía fallos que
+ * solo se manifestaban en la web.
+ *
+ * Un proceso masivo que no deba generar auditoría (importaciones, recargas de
+ * catálogos) puede envolver la operación en AuditService::withoutAuditing().
  */
 class AppBootstrap
 {
@@ -29,6 +38,11 @@ class AppBootstrap
         } else {
             require_once BASE_PATH . '/config.example/Database.php';
         }
+
+        // Antes de cualquier connect(): Database elige AuditingPDO solo si la
+        // clase ya está disponible.
+        require_once BASE_PATH . '/core/AuditingPDO.php';
+        require_once BASE_PATH . '/core/AuditingPDOStatement.php';
 
         Database::bootstrapEnv();
 

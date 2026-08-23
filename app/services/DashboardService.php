@@ -51,8 +51,11 @@ class DashboardService
 
     public function getItemData($itemId)
     {
-        $items = $this->menuService->applyNombreEsLocale($this->moduleRepository->findChildrenByParentId($itemId));
         $currentItem = $this->moduleRepository->findItemDetailById($itemId);
+        $moduloId = $currentItem ? (int)($currentItem['modulo_id'] ?? 0) : 0;
+        $items = $moduloId > 0
+            ? $this->menuService->applyNombreEsLocale($this->menuService->getFilteredChildrenOfItem((int)$itemId, $moduloId))
+            : [];
 
         $breadcrumb = '<a href="?url=dashboard">INICIO</a>';
 

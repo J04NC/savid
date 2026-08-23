@@ -42,6 +42,17 @@ require_once BASE_PATH . '/core/AuditingPDO.php';
 require_once BASE_PATH . '/core/AuditingPDOStatement.php';
 SessionManager::start();
 
+/*
+ * Nada de lo que genera PHP aquí es cacheable: el layout incrusta el token CSRF
+ * de la sesión (window.CSRF_TOKEN) y los modales traen su propio JS. Si el
+ * navegador reutiliza una copia guardada, envía el token de una sesión anterior
+ * y todo POST muere con 403. Los estáticos los sirve nginx y no pasan por aquí.
+ */
+if (!headers_sent()) {
+    header('Cache-Control: no-store, no-cache, must-revalidate');
+    header('Pragma: no-cache');
+}
+
 // Autocarga inteligente
 spl_autoload_register(function ($class) {
     $paths = [

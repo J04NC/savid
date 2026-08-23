@@ -868,6 +868,146 @@ class EmpresaController
     }
 
     /**
+     * Modal: qué ítems del menú puede usar la empresa (solo superadmin).
+     * Ruta: ?url=empresa/items/{empresaId}
+     * GET  → matriz de ítems por módulo con checkbox habilitado/no.
+     * POST → reemplaza el conjunto completo (`item_ids[]`).
+     */
+    public function items($empresaId = null): void
+    {
+        SessionManager::requireLogin();
+
+        $eid = $empresaId !== null && $empresaId !== '' ? (int)$empresaId : 0;
+        if ($eid <= 0) {
+            $this->renderModalError('Seleccione una empresa en la tabla y vuelva a abrir la acción.', 'Ítems de la empresa', 'empresa-items-modal');
+            return;
+        }
+
+        if (!$this->isSuperAdmin()) {
+            if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+                $this->jsonResponse(['success' => false, 'message' => 'Solo el superadministrador puede gestionar los ítems habilitados de una empresa.']);
+                return;
+            }
+            $this->renderModalError(
+                'Solo el superadministrador puede gestionar los ítems habilitados de una empresa.',
+                'Ítems de la empresa',
+                'empresa-items-modal'
+            );
+            return;
+        }
+
+        $database = new Database();
+        $pdo = $database->connect();
+
+        $stmt = $pdo->prepare(
+            'SELECT e.id, t.razon_social
+             FROM empresa e
+             INNER JOIN tercero t ON t.id = e.tercero_id
+             WHERE e.id = ? LIMIT 1'
+        );
+        $stmt->execute([$eid]);
+        $empresa = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$empresa) {
+            $this->renderModalError('Empresa no encontrada.', 'Ítems de la empresa', 'empresa-items-modal');
+            return;
+        }
+
+        $service = new EmpresaItemService();
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $itemIds = array_map('intval', (array)($_POST['item_ids'] ?? []));
+            $result = $service->guardar($eid, $itemIds);
+
+            if (!$result['success']) {
+                $this->jsonResponse($result);
+                return;
+            }
+
+            $this->jsonResponse([
+                'success' => true,
+                'message' => 'Ítems habilitados actualizados.',
+                'grupos' => $service->listItemsGroupedForEmpresa($eid),
+            ]);
+            return;
+        }
+
+        $grupos = $service->listItemsGroupedForEmpresa($eid);
+
+        require BASE_PATH . '/app/views/empresa/items_modal.php';
+    }
+
+    /**
+     * Modal: qué roles puede usar la empresa (solo superadmin).
+     * Ruta: ?url=empresa/roles/{empresaId}
+     * GET  → lista de roles con checkbox habilitado/no.
+     * POST → reemplaza el conjunto completo (`rol_ids[]`).
+     */
+    public function roles($empresaId = null): void
+    {
+        SessionManager::requireLogin();
+
+        $eid = $empresaId !== null && $empresaId !== '' ? (int)$empresaId : 0;
+        if ($eid <= 0) {
+            $this->renderModalError('Seleccione una empresa en la tabla y vuelva a abrir la acción.', 'Roles de la empresa', 'empresa-roles-modal');
+            return;
+        }
+
+        if (!$this->isSuperAdmin()) {
+            if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+                $this->jsonResponse(['success' => false, 'message' => 'Solo el superadministrador puede gestionar los roles habilitados de una empresa.']);
+                return;
+            }
+            $this->renderModalError(
+                'Solo el superadministrador puede gestionar los roles habilitados de una empresa.',
+                'Roles de la empresa',
+                'empresa-roles-modal'
+            );
+            return;
+        }
+
+        $database = new Database();
+        $pdo = $database->connect();
+
+        $stmt = $pdo->prepare(
+            'SELECT e.id, t.razon_social
+             FROM empresa e
+             INNER JOIN tercero t ON t.id = e.tercero_id
+             WHERE e.id = ? LIMIT 1'
+        );
+        $stmt->execute([$eid]);
+        $empresa = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$empresa) {
+            $this->renderModalError('Empresa no encontrada.', 'Roles de la empresa', 'empresa-roles-modal');
+            return;
+        }
+
+        $service = new EmpresaRolService();
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $rolIds = array_map('intval', (array)($_POST['rol_ids'] ?? []));
+            $result = $service->guardar($eid, $rolIds);
+
+            if (!$result['success']) {
+                $this->jsonResponse($result);
+                return;
+            }
+
+            $this->jsonResponse([
+                'success' => true,
+                'message' => 'Roles habilitados actualizados.',
+                'roles' => $service->listRolesForEmpresa($eid),
+            ]);
+            return;
+        }
+
+        $roles = $service->listRolesForEmpresa($eid);
+
+        require BASE_PATH . '/app/views/empresa/roles_modal.php';
+    }
+
+    /**
      * @param array<string, mixed> $payload
      */
     private function jsonResponse(array $payload): void

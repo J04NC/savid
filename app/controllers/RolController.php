@@ -17,15 +17,35 @@ class RolController
         $module->index();
     }
 
+    /**
+     * Un admin de empresa solo puede ver/editar permisos de roles que su empresa
+     * tiene habilitados vía empresa_rol — evita que "adopte" un rol global ajeno
+     * simplemente escribiendo su id en la URL. Superadmin nunca se restringe.
+     */
+    private function rolAllowedForEmpresa(int $rolId, ?int $empresaId, bool $esSuperAdmin): bool
+    {
+        if ($esSuperAdmin) {
+            return true;
+        }
+        if ($empresaId === null || $empresaId <= 0) {
+            return false;
+        }
+
+        $database = new Database();
+        $pdo = $database->connect();
+
+        return (new EmpresaRolRepository($pdo))->isRolAllowed($empresaId, $rolId);
+    }
+
     public function permisos()
     {
         if (!isset($_SESSION['user_id'])) {
             exit;
         }
 
-        $rolId = $_GET['id'] ?? 0;
+        $rolId = (int)($_GET['id'] ?? 0);
 
-        $esSuperAdmin = (int)($_SESSION['rol_id'] ?? 0) === 1;
+        $esSuperAdmin = !empty($_SESSION['es_super_admin']) || (int)($_SESSION['rol_id'] ?? 0) === 1;
 
         /*
         ==========================================
@@ -61,6 +81,12 @@ class RolController
                 $_SESSION['empresa_id'] ?? null
             );
 
+            if (!$this->rolAllowedForEmpresa($rolId, $empresaId, $esSuperAdmin)) {
+                http_response_code(403);
+                echo json_encode(['error' => 'Este rol no está habilitado para su empresa.']);
+                exit;
+            }
+
             echo json_encode($this->rolePermissionService->buildMatrixResponse($rolId, $empresaId, $sedeId));
             exit;
         }
@@ -84,6 +110,17 @@ class RolController
             $esSuperAdmin,
             $_SESSION['empresa_id'] ?? null
         );
+
+        if (!$this->rolAllowedForEmpresa($rolId, $empresaId, $esSuperAdmin)) {
+            if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+                http_response_code(403);
+                echo json_encode(['success' => false, 'message' => 'Este rol no está habilitado para su empresa.']);
+                exit;
+            }
+            $_SESSION['flash_notice'] = 'Este rol no está habilitado para su empresa.';
+            header('Location: ?url=rol');
+            exit;
+        }
 
         /*
         ==========================================

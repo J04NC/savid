@@ -6,6 +6,8 @@ class UserAccessService
     private UserScopeRepository $scopeRepository;
     private CompanyRepository $companyRepository;
     private BranchRepository $branchRepository;
+    private EmpresaItemRepository $empresaItemRepository;
+    private EmpresaRolRepository $empresaRolRepository;
 
     public function __construct()
     {
@@ -15,6 +17,8 @@ class UserAccessService
         $this->scopeRepository = new UserScopeRepository($pdo);
         $this->companyRepository = new CompanyRepository($pdo);
         $this->branchRepository = new BranchRepository($pdo);
+        $this->empresaItemRepository = new EmpresaItemRepository($pdo);
+        $this->empresaRolRepository = new EmpresaRolRepository($pdo);
     }
 
     /**
@@ -120,9 +124,12 @@ class UserAccessService
             $sedesPorEmpresa[$eid] = $this->branchRepository->findActiveByEmpresaId($eid);
         }
 
+        $empresaIdsDisponibles = array_map(static fn (array $e): int => (int)$e['id'], $empresasDisponibles);
+
         $roles = $this->filterRolesForRolesModal(
             $this->repository->findAllActiveRoles(),
-            $esSuperAdmin
+            $esSuperAdmin,
+            $empresaIdsDisponibles
         );
 
         return [
@@ -136,21 +143,30 @@ class UserAccessService
 
     /**
      * Solo superadministradores pueden asignar el rol Super Admin en el modal.
+     * Además, un admin de empresa solo puede asignar roles que alguna de las
+     * empresas del usuario destino tenga habilitados vía empresa_rol (rol es
+     * una tabla global sin empresa_id).
      *
      * @param array<int, array<string, mixed>> $roles
+     * @param list<int> $empresaIdsDisponibles
      * @return array<int, array<string, mixed>>
      */
-    private function filterRolesForRolesModal(array $roles, bool $esSuperAdmin): array
+    private function filterRolesForRolesModal(array $roles, bool $esSuperAdmin, array $empresaIdsDisponibles = []): array
     {
         if ($esSuperAdmin) {
             return $roles;
         }
 
         $superAdminRolId = UsuarioFormValidationService::SUPER_ADMIN_ROL_ID;
+        $allowedRolIds = array_flip($this->empresaRolRepository->getAllowedRolIdsForEmpresas($empresaIdsDisponibles));
 
         return array_values(array_filter(
             $roles,
-            static fn (array $rol): bool => (int)($rol['id'] ?? 0) !== $superAdminRolId
+            static function (array $rol) use ($superAdminRolId, $allowedRolIds): bool {
+                $rolId = (int)($rol['id'] ?? 0);
+
+                return $rolId !== $superAdminRolId && isset($allowedRolIds[$rolId]);
+            }
         ));
     }
 
@@ -338,7 +354,10 @@ class UserAccessService
 
     public function buildPermissionMatrix(int $usuarioId, ?int $empresaId, ?int $sedeId): array
     {
-        $rows = $this->repository->getPermissionMatrixRows();
+        $allowedItemIds = $empresaId !== null
+            ? $this->empresaItemRepository->getAllowedItemIds($empresaId)
+            : null;
+        $rows = $this->repository->getPermissionMatrixRows($allowedItemIds);
         $directIds = $this->repository->getAllowedPermissionItemAccionIdsForScope((int)$usuarioId, $empresaId, $sedeId);
         $directSet = array_flip($directIds);
 
@@ -455,6 +474,25 @@ class UserAccessService
 
             return ['success' => true];
         } catch (\Throwable $e) {
+            // El catch devuelve un mensaje genérico a la UI, así que sin esto el
+            // error real de MySQL (deadlock, lock wait, constraint) se pierde.
+            // Registrar el lote completo permite reproducir el caso.
+            $line = sprintf(
+                "[%s] usuarioId=%d empresaId=%s sedeId=%s grantIds=%s denyIds=%s removeIds=%s | %s: %s in %s:%d\n",
+                date('Y-m-d H:i:s'),
+                $usuarioId,
+                $empresaId === null ? 'null' : (string)$empresaId,
+                $sedeId === null ? 'null' : (string)$sedeId,
+                implode(',', $grantIds),
+                implode(',', $denyIds),
+                implode(',', $removeIds),
+                get_class($e),
+                $e->getMessage(),
+                $e->getFile(),
+                $e->getLine()
+            );
+            @file_put_contents(BASE_PATH . '/storage/debug_permisos.txt', $line, FILE_APPEND);
+
             return ['success' => false, 'message' => 'No se pudieron guardar los permisos'];
         }
     }

@@ -2,6 +2,12 @@
 
 class UserAccessRepository
 {
+    /** Reintentos ante deadlock/lock wait al guardar permisos por lote. */
+    private const MAX_INTENTOS_LOCK = 3;
+
+    /** Espera incremental entre reintentos (se multiplica por el nº de intento). */
+    private const ESPERA_BASE_REINTENTO_US = 50000;
+
     private PDO $pdo;
 
     public function __construct(PDO $pdo)
@@ -89,13 +95,29 @@ class UserAccessRepository
         $stmt->execute([$usuarioId, $rolId, $empresaId, $sedeId]);
     }
 
-    public function getPermissionMatrixRows()
+    /**
+     * @param list<int>|null $allowedItemIds si viene no-null, restringe a esos item_id
+     *        (ítems habilitados para la empresa en foco vía empresa_item). Null = sin
+     *        restringir (solo cuando el superadmin ve "todas las empresas").
+     */
+    public function getPermissionMatrixRows(?array $allowedItemIds = null)
     {
         $itemNd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'item', 'i');
         $modNd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'modulo', 'm');
         $accNd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'accion', 'a');
 
-        return $this->pdo->query("
+        $params = [];
+        $allowedSql = '';
+        if ($allowedItemIds !== null) {
+            if ($allowedItemIds === []) {
+                return [];
+            }
+            $placeholders = implode(',', array_fill(0, count($allowedItemIds), '?'));
+            $allowedSql = "AND i.id IN ({$placeholders})";
+            $params = $allowedItemIds;
+        }
+
+        $stmt = $this->pdo->prepare("
             SELECT
                 m.nombre AS modulo,
                 i.id AS item_id,
@@ -113,8 +135,12 @@ class UserAccessRepository
             {$itemNd}
             {$modNd}
             {$accNd}
+            {$allowedSql}
             ORDER BY m.id, i.orden, a.id
-        ")->fetchAll(PDO::FETCH_ASSOC);
+        ");
+        $stmt->execute($params);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
     /**
@@ -222,6 +248,35 @@ class UserAccessRepository
     }
 
     /**
+     * Igual que deletePermissionForUserItem pero para varios item_accion en una
+     * sola sentencia.
+     *
+     * Con REPEATABLE READ, un DELETE que no encuentra fila deja gap locks. Al
+     * hacerlo fila por fila sobre un lote grande (p. ej. un módulo completo) se
+     * acumulaban decenas de gaps sostenidos durante toda la transacción, lo que
+     * bloqueaba los INSERT de cualquier petición concurrente hasta agotar el
+     * innodb_lock_wait_timeout (50s). Una sola sentencia acota ese bloqueo.
+     *
+     * @param int[] $itemAccionIds
+     */
+    public function deletePermissionsForUserItems(int $usuarioId, array $itemAccionIds): void
+    {
+        $itemAccionIds = array_values(array_unique(array_map('intval', $itemAccionIds)));
+
+        if ($itemAccionIds === []) {
+            return;
+        }
+
+        $placeholders = implode(',', array_fill(0, count($itemAccionIds), '?'));
+        $stmt = $this->pdo->prepare("
+            DELETE FROM permiso
+            WHERE usuario_id = ?
+            AND item_accion_id IN ({$placeholders})
+        ");
+        $stmt->execute(array_merge([$usuarioId], $itemAccionIds));
+    }
+
+    /**
      * Quita cualquier fila permiso (permitir o denegar) para ese alcance.
      */
     public function deletePermissionForScope(int $usuarioId, int $itemAccionId, ?int $empresaId, ?int $sedeId): void
@@ -266,28 +321,87 @@ class UserAccessRepository
         $grantIds = array_values(array_unique(array_map('intval', $grantIds)));
         $denyIds = array_values(array_unique(array_map('intval', $denyIds)));
 
+        // Un solo DELETE para todo el lote (los tres grupos son disjuntos): deja
+        // la tabla en el mismo estado que el bucle anterior pero mantiene la
+        // transacción corta y acota los gap locks. Ver deletePermissionsForUserItems.
+        $affectedIds = array_values(array_unique(array_merge($removeIds, $grantIds, $denyIds)));
+
+        if ($affectedIds === []) {
+            return;
+        }
+
+        // Dos guardados simultáneos sobre el mismo usuario pueden cruzarse en un
+        // deadlock (1213) o agotar el lock wait (1205). En ambos casos InnoDB
+        // deshace la transacción completa, así que reintentar es seguro.
+        $intentos = 0;
+
+        while (true) {
+            $intentos++;
+
+            try {
+                $this->runUsuarioPermisosMutations(
+                    $usuarioId,
+                    $affectedIds,
+                    $grantIds,
+                    $denyIds,
+                    $empresaId,
+                    $sedeId
+                );
+
+                return;
+            } catch (\PDOException $e) {
+                if ($intentos >= self::MAX_INTENTOS_LOCK || !self::esErrorDeLockReintentable($e)) {
+                    throw $e;
+                }
+
+                usleep(self::ESPERA_BASE_REINTENTO_US * $intentos);
+            }
+        }
+    }
+
+    /**
+     * @param int[] $affectedIds
+     * @param int[] $grantIds
+     * @param int[] $denyIds
+     */
+    private function runUsuarioPermisosMutations(
+        int $usuarioId,
+        array $affectedIds,
+        array $grantIds,
+        array $denyIds,
+        ?int $empresaId,
+        ?int $sedeId
+    ): void {
         $this->pdo->beginTransaction();
 
         try {
-            foreach ($removeIds as $itemAccionId) {
-                $this->deletePermissionForUserItem($usuarioId, $itemAccionId);
-            }
+            $this->deletePermissionsForUserItems($usuarioId, $affectedIds);
 
             foreach ($grantIds as $itemAccionId) {
-                $this->deletePermissionForUserItem($usuarioId, $itemAccionId);
                 $this->insertAllowedPermission($usuarioId, $itemAccionId, $empresaId, $sedeId);
             }
 
             foreach ($denyIds as $itemAccionId) {
-                $this->deletePermissionForUserItem($usuarioId, $itemAccionId);
                 $this->insertDeniedPermission($usuarioId, $itemAccionId, $empresaId, $sedeId);
             }
 
             $this->pdo->commit();
         } catch (\Throwable $e) {
-            $this->pdo->rollBack();
+            // Ante un deadlock InnoDB ya deshizo la transacción por su cuenta;
+            // rollBack() lanzaría "no active transaction" y taparía el error real.
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
 
             throw $e;
         }
+    }
+
+    private static function esErrorDeLockReintentable(\PDOException $e): bool
+    {
+        $codigo = (int)($e->errorInfo[1] ?? 0);
+
+        // 1213 = deadlock, 1205 = lock wait timeout.
+        return $codigo === 1213 || $codigo === 1205;
     }
 }

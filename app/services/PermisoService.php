@@ -207,6 +207,12 @@ class PermisoService
         return self::can('usuario', 'ver') || self::can('usuario', 'guardar');
     }
 
+    /**
+     * Además de resolver item_accion por ruta, exige (cuando hay empresa en sesión) que el
+     * ítem esté habilitado para esa empresa en `empresa_item` — bloqueo duro: aunque exista
+     * un permiso/rol_permiso residual para un ítem que la empresa ya no tiene habilitado,
+     * aquí no se resuelve ningún item_accion y `can()` deniega.
+     */
     private static function resolveItemAccionId(PDO $pdo, $ruta, $accion): ?int
     {
         $rutasBuscar = [$ruta];
@@ -216,6 +222,20 @@ class PermisoService
             if ($raiz !== $ruta) {
                 $rutasBuscar[] = $raiz;
             }
+        }
+
+        [$empresaId, ] = self::sessionEmpresaSede();
+        $empresaItemSql = '';
+        $empresaItemParams = [];
+        if ($empresaId !== null && $empresaId > 0) {
+            $empresaItemSql = ' AND EXISTS (
+                SELECT 1 FROM empresa_item ei
+                WHERE ei.item_id = i.id
+                AND ei.empresa_id = ?
+                AND ei.estado_id = 1
+                AND ei.deleted_at IS NULL
+            ) ';
+            $empresaItemParams = [$empresaId];
         }
 
         foreach ($rutasBuscar as $rutaBuscar) {
@@ -230,10 +250,11 @@ class PermisoService
                 WHERE i.ruta = ?
                 AND a.codigo = ?
                 {$itemNotDeleted}
+                {$empresaItemSql}
                 LIMIT 1
             ");
 
-            $stmt->execute([$rutaBuscar, $accion]);
+            $stmt->execute(array_merge([$rutaBuscar, $accion], $empresaItemParams));
 
             $itemAccionId = $stmt->fetchColumn();
 

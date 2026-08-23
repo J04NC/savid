@@ -73,6 +73,12 @@ class AuditingPDO extends PDO
             AuditService::recordBeforeExec($this, $sql);
         }
 
+        // Faltaba ejecutar la sentencia: $result quedaba indefinido (null), asi
+        // que exec() no hacia nada y ademas violaba su propio tipo de retorno
+        // int|false (TypeError). Solo no se notaba porque en la web nadie la
+        // llamaba y en CLI la conexion no era AuditingPDO.
+        $result = parent::exec($statement);
+
         $capturedInsertId = null;
         if ($result !== false && preg_match('/^INSERT\b/i', $sql)) {
             $capturedInsertId = parent::lastInsertId();

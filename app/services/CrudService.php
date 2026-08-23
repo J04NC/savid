@@ -21,6 +21,10 @@ class CrudService
             return $this->getTableDataEmpresa();
         }
 
+        if ($tabla === 'rol') {
+            return $this->getTableDataRol();
+        }
+
         $columns = $this->getColumns($tabla);
 
         $fields = array_column($columns, 'Field');
@@ -64,7 +68,7 @@ class CrudService
         $select = 'e.*, ti.numero AS nit, ti.dv AS documento_dv,
             t.razon_social, t.email, t.telefono, t.celular, t.direccion,
             t.pais_id, t.departamento_id, t.municipio_id, t.zona_id,
-            t.comuna_id, t.corregimiento_id, t.barrio_id, t.vereda_id,
+            t.comuna_id, t.barrio_id,
             ri.tipodocumento_id AS rep_tipodocumento_id,
             ri.numero AS rep_numero_documento,
             tr.nombres AS rep_nombres,
@@ -109,6 +113,42 @@ class CrudService
     }
 
     /**
+     * Listado de roles: superadmin ve el catálogo completo; un admin de empresa
+     * solo ve los roles habilitados para su empresa vía `empresa_rol` (rol es una
+     * tabla global sin empresa_id, así que sin este filtro se ven roles de
+     * cualquier otra empresa).
+     */
+    private function getTableDataRol(): array
+    {
+        $esSuperAdmin = !empty($_SESSION['es_super_admin'])
+            || (int)($_SESSION['rol_id'] ?? 0) === 1;
+
+        if ($esSuperAdmin) {
+            $notDeleted = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'rol');
+            $sql = "SELECT * FROM rol WHERE 1=1 {$notDeleted} ORDER BY id DESC";
+
+            return $this->pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+        }
+
+        $empresaId = (int)($_SESSION['empresa_id'] ?? 0);
+        if ($empresaId <= 0) {
+            return [];
+        }
+
+        $notDeleted = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'rol', 'r');
+        $sql = "SELECT r.* FROM rol r
+                INNER JOIN empresa_rol er
+                    ON er.rol_id = r.id AND er.empresa_id = ? AND er.estado_id = 1 AND er.deleted_at IS NULL
+                WHERE 1=1
+                {$notDeleted}
+                ORDER BY r.id DESC";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([$empresaId]);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
      * Columnas sintéticas (no en la tabla `empresa`) que se inyectan en el form CRUD.
      *
      * @return list<array{Field: string, Type: string, IS_NULLABLE: string, COLUMN_COMMENT: string}>
@@ -121,7 +161,7 @@ class CrudService
             ['Field' => 'documento_dv', 'Type' => 'varchar', 'IS_NULLABLE' => 'YES',
                 'COLUMN_COMMENT' => 'type:text|order:8|label:DV|show:form,table|title:Dígito de verificación NIT'],
             ['Field' => 'razon_social', 'Type' => 'varchar', 'IS_NULLABLE' => 'NO',
-                'COLUMN_COMMENT' => 'type:text|order:10|label:Razón social|show:form,table'],
+                'COLUMN_COMMENT' => 'type:text|order:10|label:Razón social|show:form,table|uppercase'],
             ['Field' => 'pais_id', 'Type' => 'smallint', 'IS_NULLABLE' => 'YES',
                 'COLUMN_COMMENT' => 'type:text|order:20|relmode:autocomplete|label:País|show:form,table'],
             ['Field' => 'departamento_id', 'Type' => 'smallint', 'IS_NULLABLE' => 'YES',
@@ -132,12 +172,8 @@ class CrudService
                 'COLUMN_COMMENT' => 'type:text|order:35|relmode:autocomplete|label:Zona|show:form'],
             ['Field' => 'comuna_id', 'Type' => 'int', 'IS_NULLABLE' => 'YES',
                 'COLUMN_COMMENT' => 'type:text|order:40|relmode:autocomplete|label:Comuna|show:form'],
-            ['Field' => 'corregimiento_id', 'Type' => 'int', 'IS_NULLABLE' => 'YES',
-                'COLUMN_COMMENT' => 'type:text|order:45|relmode:autocomplete|label:Corregimiento|show:form'],
             ['Field' => 'barrio_id', 'Type' => 'int', 'IS_NULLABLE' => 'YES',
                 'COLUMN_COMMENT' => 'type:text|order:50|relmode:autocomplete|label:Barrio|show:form'],
-            ['Field' => 'vereda_id', 'Type' => 'int', 'IS_NULLABLE' => 'YES',
-                'COLUMN_COMMENT' => 'type:text|order:55|relmode:autocomplete|label:Vereda|show:form'],
             ['Field' => 'telefono', 'Type' => 'varchar', 'IS_NULLABLE' => 'YES',
                 'COLUMN_COMMENT' => 'type:text|order:60|label:Teléfono|show:form'],
             ['Field' => 'celular', 'Type' => 'varchar', 'IS_NULLABLE' => 'YES',
@@ -185,9 +221,7 @@ class CrudService
             'municipio_id' => 'municipio',
             'zona_id' => 'zona',
             'comuna_id' => 'comuna',
-            'corregimiento_id' => 'corregimiento',
             'barrio_id' => 'barrio',
-            'vereda_id' => 'vereda',
         ];
     }
 
@@ -215,9 +249,7 @@ class CrudService
             'municipio_id' => 'relmode:autocomplete',
             'zona_id' => 'relmode:autocomplete',
             'comuna_id' => 'relmode:autocomplete',
-            'corregimiento_id' => 'relmode:autocomplete',
             'barrio_id' => 'relmode:autocomplete',
-            'vereda_id' => 'relmode:autocomplete',
         ];
 
         $inject = [
@@ -514,13 +546,13 @@ class CrudService
                 'Field' => 'nombres',
                 'Type' => 'varchar',
                 'IS_NULLABLE' => 'YES',
-                'COLUMN_COMMENT' => 'type:text|order:40|placeholder:Nombres|title:Datos en tercero',
+                'COLUMN_COMMENT' => 'type:text|order:40|placeholder:Nombres|title:Datos en tercero|uppercase',
             ],
             [
                 'Field' => 'apellidos',
                 'Type' => 'varchar',
                 'IS_NULLABLE' => 'YES',
-                'COLUMN_COMMENT' => 'type:text|order:50|placeholder:Apellidos|title:Datos en tercero',
+                'COLUMN_COMMENT' => 'type:text|order:50|placeholder:Apellidos|title:Datos en tercero|uppercase',
             ],
             [
                 'Field' => 'password_confirm',
@@ -1297,10 +1329,10 @@ class CrudService
             'municipio_id' => $this->nullableInt($data['municipio_id'] ?? null),
             'zona_id' => $this->nullableInt($data['zona_id'] ?? null),
             'comuna_id' => $this->nullableInt($data['comuna_id'] ?? null),
-            'corregimiento_id' => $this->nullableInt($data['corregimiento_id'] ?? null),
             'barrio_id' => $this->nullableInt($data['barrio_id'] ?? null),
-            'vereda_id' => $this->nullableInt($data['vereda_id'] ?? null),
         ];
+
+        $map = $this->applyUppercaseForTable('tercero', $map);
 
         $sets = [];
         $params = [];
@@ -1338,6 +1370,16 @@ class CrudService
         $numero = trim((string)($data['rep_numero_documento'] ?? ''));
         $nombres = trim((string)($data['rep_nombres'] ?? ''));
         $apellidos = trim((string)($data['rep_apellidos'] ?? ''));
+
+        // Van a tercero.nombres/apellidos, que exigen mayúscula. Se normaliza
+        // aquí porque este resolver corre antes del bucle de save() y sus dos
+        // escrituras (INSERT y UPDATE de tercero) usan estas variables.
+        $repUpper = $this->applyUppercaseForTable('tercero', [
+            'nombres' => $nombres,
+            'apellidos' => $apellidos,
+        ]);
+        $nombres = (string)$repUpper['nombres'];
+        $apellidos = (string)$repUpper['apellidos'];
 
         if ($numero === '' && $nombres === '' && $apellidos === '') {
             $data['representante_terceroidentificacion_id'] = null;
@@ -2452,6 +2494,19 @@ class CrudService
         }
 
         return false;
+    }
+
+    /**
+     * Aplica mayúscula a los valores cuyas columnas la exigen en la BD.
+     * Delega en UppercaseColumnService, punto único compartido con los demás
+     * resolvers que escriben en `tercero` (ver esa clase).
+     *
+     * @param array<string, mixed> $map columna => valor
+     * @return array<string, mixed>
+     */
+    private function applyUppercaseForTable(string $table, array $map): array
+    {
+        return UppercaseColumnService::applyToMap($this->pdo, $table, $map);
     }
 
     /**

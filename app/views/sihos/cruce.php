@@ -5,6 +5,8 @@
 /** @var string $fechaInicio */
 /** @var string $fechaFin */
 /** @var bool $puedeEliminarDetaPlan */
+/** @var bool $puedeReversarCuenta */
+/** @var bool $puedeConstruirDetaPlan */
 
 function sihosFormatoMoneda($valor): string
 {
@@ -15,6 +17,12 @@ $assetSihosCruce = BASE_PATH . '/public/js/sihos-cruce.js';
 $sihosCruceJsV = is_readable($assetSihosCruce) ? (int)filemtime($assetSihosCruce) : time();
 $assetSihosRubros = BASE_PATH . '/public/js/sihos-rubros.js';
 $sihosRubrosJsV = is_readable($assetSihosRubros) ? (int)filemtime($assetSihosRubros) : time();
+$assetSihosReversarCuenta = BASE_PATH . '/public/js/sihos-reversar-cuenta.js';
+$sihosReversarCuentaJsV = is_readable($assetSihosReversarCuenta) ? (int)filemtime($assetSihosReversarCuenta) : time();
+$assetSihosReclasificarCuenta = BASE_PATH . '/public/js/sihos-reclasificar-cuenta.js';
+$sihosReclasificarCuentaJsV = is_readable($assetSihosReclasificarCuenta) ? (int)filemtime($assetSihosReclasificarCuenta) : time();
+$assetSihosConstruirDetaPlan = BASE_PATH . '/public/js/sihos-construir-detaplan.js';
+$sihosConstruirDetaPlanJsV = is_readable($assetSihosConstruirDetaPlan) ? (int)filemtime($assetSihosConstruirDetaPlan) : time();
 ?>
 
 <div class="module-container auditoria-page">
@@ -87,10 +95,11 @@ $sihosRubrosJsV = is_readable($assetSihosRubros) ? (int)filemtime($assetSihosRub
                     'subtitulo' => 'Notas (NCC) sobre facturas de la misma vigencia, sin DetaPlan o sin cuenta esperada (empieza por 4, o espejo de la cuenta que usó la factura — p. ej. anulación de capita sin distribuir).',
                     'filas' => $reporte['notasIncompletas'],
                     'tipo' => 'nota',
+                    'accionConstruirDetaPlan' => true,
                 ],
                 [
                     'titulo' => '4. Glosas de vigencia actual incompletas',
-                    'subtitulo' => 'Glosas aceptadas (GLA) sobre facturas de la misma vigencia, sin DetaPlan o sin cuenta esperada (empieza por 4, o espejo de la cuenta que usó la factura).',
+                    'subtitulo' => 'Glosas aceptadas (GLA) sobre facturas de la misma vigencia, sin DetaPlan o sin cuenta esperada (empieza por 4, o espejo de la cuenta que usó la factura). Excluye glosas cuyo trámite en SIHOS aún no es definitivo (aceptada por la EPS pero pendiente de trámite del prestador) — esas legítimamente no generan el efecto todavía.',
                     'filas' => $reporte['glosasIncompletas'],
                     'tipo' => 'nota',
                 ],
@@ -102,9 +111,10 @@ $sihosRubrosJsV = is_readable($assetSihosRubros) ? (int)filemtime($assetSihosRub
                 ],
                 [
                     'titulo' => '5b. Notas con cuenta fuera de lo esperado',
-                    'subtitulo' => 'Notas (NCC) de vigencia actual con cuenta que no es cartera, reversión ni gasto configurados.',
+                    'subtitulo' => 'Notas (NCC) con cuenta que no es cartera, reversión ni gasto configurados — de vigencia actual (informativo) o de vigencia anterior tocando 4312 en vez de la cuenta de vigencia anterior configurada (con acción para reclasificar).',
                     'filas' => $reporte['cuentasInesperadasNotas'],
                     'tipo' => 'cuenta-nota',
+                    'accionReclasificar' => true,
                 ],
                 [
                     'titulo' => '5c. Glosas con cuenta fuera de lo esperado',
@@ -142,7 +152,13 @@ $sihosRubrosJsV = is_readable($assetSihosRubros) ? (int)filemtime($assetSihosRub
                                 <?php endforeach; ?>
                                 </tbody>
                             <?php elseif ($seccion['tipo'] === 'nota'): ?>
-                                <thead><tr><th>Documento</th><th>Fecha</th><th>Valor</th><th>Factura</th><th>Fecha factura</th><th>Tiene DetaPlan</th><th>Tiene cuenta esperada</th></tr></thead>
+                                <?php $muestraAccionConstruirDetaPlan = $seccion['accionConstruirDetaPlan'] ?? false; ?>
+                                <thead>
+                                    <tr>
+                                        <th>Documento</th><th>Fecha</th><th>Valor</th><th>Factura</th><th>Fecha factura</th><th>Tiene DetaPlan</th><th>Tiene cuenta esperada</th>
+                                        <?php if ($muestraAccionConstruirDetaPlan): ?><th>Opciones</th><?php endif; ?>
+                                    </tr>
+                                </thead>
                                 <tbody>
                                 <?php foreach ($seccion['filas'] as $f): ?>
                                     <tr>
@@ -153,32 +169,78 @@ $sihosRubrosJsV = is_readable($assetSihosRubros) ? (int)filemtime($assetSihosRub
                                         <td><?= htmlspecialchars($f['FacturaFecha']) ?></td>
                                         <td><?= ((int)$f['TieneDetaPlan'] > 0) ? 'Sí' : '❌ No' ?></td>
                                         <td><?= ((int)$f['TieneCuenta4'] > 0) ? 'Sí' : '❌ No' ?></td>
+                                        <?php if ($muestraAccionConstruirDetaPlan): ?>
+                                            <td>
+                                                <?php if ($puedeConstruirDetaPlan && (int)$f['TieneDetaPlan'] === 0): ?>
+                                                    <button type="button" class="auditoria-btn-primary btnSihosConstruirDetaPlan"
+                                                            data-empresa-id="<?= (int)$empresaId ?>"
+                                                            data-codi-docu="<?= htmlspecialchars($f['CodiDocu']) ?>"
+                                                            data-nume-docu="<?= htmlspecialchars($f['NumeDocu']) ?>">➕ Construir DetaPlan</button>
+                                                <?php else: ?>
+                                                    —
+                                                <?php endif; ?>
+                                            </td>
+                                        <?php endif; ?>
                                     </tr>
                                 <?php endforeach; ?>
                                 </tbody>
                             <?php elseif ($seccion['tipo'] === 'cuenta'): ?>
-                                <thead><tr><th>Documento</th><th>Fecha</th><th>Cuenta</th><th>Valor</th><th>Centro de costo</th></tr></thead>
+                                <thead><tr><th>Documento</th><th>Fecha</th><th>Cuenta</th><th>Valor</th><th>Centro de costo</th><th>Opciones</th></tr></thead>
                                 <tbody>
                                 <?php foreach ($seccion['filas'] as $f): ?>
+                                    <?php $puedeReversarEstaFila = $puedeReversarCuenta && (int)($f['Tiene4312'] ?? 0) > 0; ?>
                                     <tr>
                                         <td><?= htmlspecialchars($f['CodiDocu'] . '-' . $f['NumeDocu']) ?></td>
                                         <td><?= htmlspecialchars($f['FechDocu']) ?></td>
                                         <td><?= htmlspecialchars($f['CodiCont']) ?></td>
                                         <td><?= sihosFormatoMoneda($f['Valor']) ?></td>
                                         <td><?= htmlspecialchars((string)($f['CentCost'] ?? '')) ?></td>
+                                        <td>
+                                            <?php if ($puedeReversarEstaFila): ?>
+                                                <button type="button" class="auditoria-btn-primary btnSihosReversarCuenta"
+                                                        data-empresa-id="<?= (int)$empresaId ?>"
+                                                        data-codi-docu="<?= htmlspecialchars($f['CodiDocu']) ?>"
+                                                        data-nume-docu="<?= htmlspecialchars($f['NumeDocu']) ?>"
+                                                        data-cons-deta="<?= (int)$f['ConsDeta'] ?>"
+                                                        data-cuenta="<?= htmlspecialchars($f['CodiCont']) ?>">↩️ Nota de ajuste</button>
+                                            <?php else: ?>
+                                                —
+                                            <?php endif; ?>
+                                        </td>
                                     </tr>
                                 <?php endforeach; ?>
                                 </tbody>
                             <?php else: ?>
-                                <thead><tr><th>Documento</th><th>Fecha</th><th>Cuenta</th><th>Valor</th><th>Factura</th></tr></thead>
+                                <?php $muestraAccionReclasificar = $seccion['accionReclasificar'] ?? false; ?>
+                                <thead>
+                                    <tr>
+                                        <th>Documento</th><th>Fecha</th><th>Cuenta</th><th>Valor</th><th>Factura</th>
+                                        <?php if ($muestraAccionReclasificar): ?><th>Vigencia</th><th>Opciones</th><?php endif; ?>
+                                    </tr>
+                                </thead>
                                 <tbody>
                                 <?php foreach ($seccion['filas'] as $f): ?>
+                                    <?php $esVigenciaAnterior = $f['EsVigenciaAnterior'] ?? false; ?>
                                     <tr>
                                         <td><?= htmlspecialchars($f['CodiDocu'] . '-' . $f['NumeDocu']) ?></td>
                                         <td><?= htmlspecialchars($f['FechDocu']) ?></td>
                                         <td><?= htmlspecialchars($f['CodiCont']) ?></td>
                                         <td><?= sihosFormatoMoneda($f['Valor']) ?></td>
                                         <td><?= htmlspecialchars($f['FacturaCodiDocu'] . '-' . $f['FacturaNumeDocu']) ?></td>
+                                        <?php if ($muestraAccionReclasificar): ?>
+                                            <td><?= $esVigenciaAnterior ? 'Anterior' : 'Actual' ?></td>
+                                            <td>
+                                                <?php if ($esVigenciaAnterior && $puedeReversarCuenta): ?>
+                                                    <button type="button" class="auditoria-btn-primary btnSihosReclasificarCuenta"
+                                                            data-empresa-id="<?= (int)$empresaId ?>"
+                                                            data-codi-docu="<?= htmlspecialchars($f['CodiDocu']) ?>"
+                                                            data-nume-docu="<?= htmlspecialchars($f['NumeDocu']) ?>"
+                                                            data-cuenta="<?= htmlspecialchars($f['CodiCont']) ?>">↩️ Reclasificar cuenta</button>
+                                                <?php else: ?>
+                                                    —
+                                                <?php endif; ?>
+                                            </td>
+                                        <?php endif; ?>
                                     </tr>
                                 <?php endforeach; ?>
                                 </tbody>
@@ -361,6 +423,117 @@ $sihosRubrosJsV = is_readable($assetSihosRubros) ? (int)filemtime($assetSihosRub
             </div>
         </div>
         <script src="/js/sihos-cruce.js?v=<?= (int)$sihosCruceJsV ?>"></script>
+    <?php endif; ?>
+
+    <?php if ($puedeConstruirDetaPlan): ?>
+        <div id="sihosConstruirDetaPlanModal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header-bar">
+                    <span>➕ Construir DetaPlan en SIHOS</span>
+                    <span class="close-modal" id="sihosConstruirDetaPlanCerrar" role="button" tabindex="0" aria-label="Cerrar">&times;</span>
+                </div>
+                <div style="padding:16px;">
+                    <p class="modal-form-alert">
+                        Esta acción crea en SIHOS la línea <code>DetaPlan</code> faltante de
+                        <strong id="sihosConstruirDetaPlanDocumento"></strong>, con el rubro configurado en
+                        <code>TipoUsua</code> para el tipo de usuario de la factura y el valor propio de la nota.
+                        No actualiza los saldos acumulados del rubro (<code>SaldPlan</code>/<code>ValoUsad</code>/<code>SaldDisp</code>) —
+                        recuerde correr la reconstrucción presupuestal en SIHOS después de confirmar. Es <strong>irreversible</strong> desde SAVID.
+                    </p>
+                    <div class="form-group">
+                        <label for="sihosConstruirDetaPlanConfirmacion">Escriba <strong id="sihosConstruirDetaPlanDocumentoLabel"></strong> para confirmar</label>
+                        <input type="text" id="sihosConstruirDetaPlanConfirmacion" class="form-input" autocomplete="off">
+                    </div>
+                    <div class="auditoria-filters-footer">
+                        <button type="button" id="sihosConstruirDetaPlanConfirmar" class="auditoria-btn-primary" disabled>➕ Construir DetaPlan</button>
+                    </div>
+                    <p id="sihosConstruirDetaPlanStatus" class="usuario-perm-save-status" aria-live="polite"></p>
+                </div>
+            </div>
+        </div>
+        <script src="/js/sihos-construir-detaplan.js?v=<?= (int)$sihosConstruirDetaPlanJsV ?>"></script>
+    <?php endif; ?>
+
+    <?php if ($puedeReversarCuenta): ?>
+        <div id="sihosReversarCuentaModal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header-bar">
+                    <span>⚠️ Nota de ajuste en SIHOS</span>
+                    <span class="close-modal" id="sihosReversarCuentaCerrar" role="button" tabindex="0" aria-label="Cerrar">&times;</span>
+                </div>
+                <div style="padding:16px;">
+                    <p class="modal-form-alert">
+                        Esta acción crea en SIHOS una <strong>Nota Contabilidad (NC) permanente</strong> que cancela la cuenta
+                        <strong id="sihosReversarCuentaCuenta"></strong> contra la(s) cuenta(s) 4312 de la factura
+                        <strong id="sihosReversarCuentaDocumento"></strong>. Solo contabilidad — no afecta presupuesto.
+                        Es <strong>irreversible</strong> desde SAVID.
+                    </p>
+                    <div class="form-group">
+                        <label for="sihosReversarCuentaConfirmacion">Escriba <strong id="sihosReversarCuentaDocumentoLabel"></strong> para confirmar</label>
+                        <input type="text" id="sihosReversarCuentaConfirmacion" class="form-input" autocomplete="off">
+                    </div>
+                    <div class="auditoria-filters-footer">
+                        <button type="button" id="sihosReversarCuentaConfirmar" class="auditoria-btn-primary" style="background:#c0392b;" disabled>↩️ Crear nota de ajuste</button>
+                    </div>
+                    <p id="sihosReversarCuentaStatus" class="usuario-perm-save-status" aria-live="polite"></p>
+                </div>
+            </div>
+        </div>
+        <script src="/js/sihos-reversar-cuenta.js?v=<?= (int)$sihosReversarCuentaJsV ?>"></script>
+    <?php endif; ?>
+
+    <?php if ($puedeReversarCuenta): ?>
+        <?php
+        $cuentasVigenciaAnteriorOpciones = [];
+        if ($reporte['ok'] ?? false) {
+            foreach ([
+                'Aceptación de glosa (vigencia anterior)' => $reporte['cuentaAceptacionGlosaAnterior'] ?? '',
+                'Devolución (vigencia anterior)' => $reporte['cuentaDevolucionAnterior'] ?? '',
+                'Conciliación (vigencia anterior)' => $reporte['cuentaConciliacionAnterior'] ?? '',
+            ] as $etiqueta => $cuenta) {
+                if ($cuenta !== '') {
+                    $cuentasVigenciaAnteriorOpciones[] = ['etiqueta' => $etiqueta, 'cuenta' => $cuenta];
+                }
+            }
+        }
+        ?>
+        <div id="sihosReclasificarCuentaModal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header-bar">
+                    <span>⚠️ Reclasificar cuenta de vigencia anterior</span>
+                    <span class="close-modal" id="sihosReclasificarCuentaCerrar" role="button" tabindex="0" aria-label="Cerrar">&times;</span>
+                </div>
+                <div style="padding:16px;">
+                    <p class="modal-form-alert">
+                        Esta acción reclasifica en SIHOS la cuenta <strong id="sihosReclasificarCuentaOrigen"></strong>
+                        de la nota <strong id="sihosReclasificarCuentaDocumento"></strong> (referencia una factura de vigencia
+                        anterior) hacia la cuenta que elijas. Si el mes de la nota está abierto, se edita la línea en sitio;
+                        si ya está cerrado, se crea una Nota Contabilidad (NC) nueva que la corrige. Solo contabilidad — no
+                        afecta presupuesto. Es <strong>irreversible</strong> desde SAVID.
+                    </p>
+                    <div class="form-group">
+                        <label for="sihosReclasificarCuentaDestino">Cuenta destino</label>
+                        <select id="sihosReclasificarCuentaDestino" class="form-input">
+                            <option value="">— Seleccione —</option>
+                            <?php foreach ($cuentasVigenciaAnteriorOpciones as $opcion): ?>
+                                <option value="<?= htmlspecialchars($opcion['cuenta']) ?>">
+                                    <?= htmlspecialchars($opcion['etiqueta']) ?> (<?= htmlspecialchars($opcion['cuenta']) ?>)
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="sihosReclasificarCuentaConfirmacion">Escriba <strong id="sihosReclasificarCuentaDocumentoLabel"></strong> para confirmar</label>
+                        <input type="text" id="sihosReclasificarCuentaConfirmacion" class="form-input" autocomplete="off">
+                    </div>
+                    <div class="auditoria-filters-footer">
+                        <button type="button" id="sihosReclasificarCuentaConfirmar" class="auditoria-btn-primary" style="background:#c0392b;" disabled>↩️ Reclasificar cuenta</button>
+                    </div>
+                    <p id="sihosReclasificarCuentaStatus" class="usuario-perm-save-status" aria-live="polite"></p>
+                </div>
+            </div>
+        </div>
+        <script src="/js/sihos-reclasificar-cuenta.js?v=<?= (int)$sihosReclasificarCuentaJsV ?>"></script>
     <?php endif; ?>
 
 </div>

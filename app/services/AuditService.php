@@ -295,8 +295,18 @@ class AuditService
 
     private static function sqlToSelectBefore(string $sql, string $action, string $table): ?string
     {
+        // Los repositorios escriben el SQL en heredocs/cadenas multilínea, así que
+        // casi siempre empieza con salto de línea y sangría. Sin este ltrim los
+        // patrones anclados en ^ no casaban y el DELETE se devolvía intacto: la
+        // captura previa entonces preparaba y EJECUTABA ese DELETE, cuyo execute
+        // volvía a pedir la captura previa, en recursión infinita hasta agotar la
+        // memoria del proceso.
+        $sql = ltrim($sql);
+
         if ($action === 'DELETE') {
-            return preg_replace('/^DELETE\s+FROM/i', 'SELECT * FROM', $sql, 1);
+            $replaced = preg_replace('/^DELETE\s+FROM/i', 'SELECT * FROM', $sql, 1);
+
+            return self::asSelectOrNull($replaced);
         }
 
         if ($action === 'UPDATE') {
@@ -307,10 +317,25 @@ class AuditService
                 1
             );
 
-            return is_string($replaced) && stripos($replaced, 'SELECT') === 0 ? $replaced : null;
+            return self::asSelectOrNull($replaced);
         }
 
         return null;
+    }
+
+    /**
+     * Red de seguridad: la captura previa solo puede ejecutar sentencias de
+     * lectura. Si la reescritura no produjo un SELECT se descarta el snapshot
+     * (se pierde detalle de auditoría) antes que ejecutar una sentencia que
+     * mutaría datos y se auditaría a sí misma en bucle.
+     */
+    private static function asSelectOrNull(?string $sql): ?string
+    {
+        if (!is_string($sql)) {
+            return null;
+        }
+
+        return stripos(ltrim($sql), 'SELECT') === 0 ? $sql : null;
     }
 
     /**

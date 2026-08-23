@@ -92,13 +92,54 @@ class Database
             ];
 
             try {
-                $pdoClass = class_exists('AuditingPDO', false) ? 'AuditingPDO' : 'PDO';
+                /*
+                 * Con el segundo argumento en false (sin autoload) esta comprobacion
+                 * solo veia AuditingPDO si alguien la habia requerido antes a mano:
+                 * la web lo hacia (public/index.php) y la CLI no, asi que los scripts
+                 * escribian sin auditoria y no reproducian los fallos de la capa
+                 * auditada. Se permite el autoload para que ambos entornos coincidan.
+                 */
+                $pdoClass = class_exists('AuditingPDO') ? 'AuditingPDO' : 'PDO';
                 $this->pdo = new $pdoClass($dsn, $this->username, $this->password, $options);
             } catch (PDOException $e) {
                 die('Error de conexion a la base de datos: ' . $e->getMessage());
             }
+
+            $this->aplicarWaitTimeout();
         }
 
         return $this->pdo;
+    }
+
+    /**
+     * Acota cuanto sobrevive una conexion web inactiva.
+     *
+     * El wait_timeout del servidor son 8 horas. Si un worker de PHP-FPM queda
+     * colgado con una transaccion abierta, esa conexion se queda en Sleep
+     * reteniendo los locks de sus filas todo ese tiempo y bloqueando al resto
+     * (se observo justo ese caso: Sleep, 67 filas bloqueadas). Con un plazo
+     * corto MySQL la cierra y deshace la transaccion, liberando los locks.
+     *
+     * Solo aplica a peticiones web: un script CLI (import, cron) puede pasar
+     * legitimamente mucho rato sin tocar la BD y no debe perder la conexion.
+     * Ajustable con DB_WAIT_TIMEOUT; 0 o vacio lo deja como este en el servidor.
+     */
+    private function aplicarWaitTimeout(): void
+    {
+        if (PHP_SAPI === 'cli') {
+            return;
+        }
+
+        $segundos = (int)(getenv('DB_WAIT_TIMEOUT') ?: 300);
+
+        if ($segundos <= 0) {
+            return;
+        }
+
+        try {
+            $this->pdo->exec('SET SESSION wait_timeout = ' . $segundos);
+        } catch (PDOException $e) {
+            // Un servidor que no permita ajustarlo no debe impedir la conexion.
+        }
     }
 }

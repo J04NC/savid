@@ -300,13 +300,18 @@ class SihosExternalRepository
     }
 
     /**
-     * Cuentas configuradas para la institución conectada: reversión de
-     * glosa vigencia actual (CuenGlosAct), gasto/castigo vigencia anterior
-     * (CuenGlos, CuenCast) y capita por defecto (AntCapita).
+     * Cuentas configuradas para la institución conectada. Confirmado contra
+     * el código fuente de SIHOS (sihos/modulos/administracion/codiinst.php):
+     * CuenGlosAct = "Aceptación de Glosas Vigencia Actual"; CuenGlos =
+     * "Aceptación de Glosas Vigencia Anterior" (el nombre de columna es
+     * engañoso — pese a no decir "Act"/"Ant" en el nombre, es la de
+     * vigencia ANTERIOR); CuenCast = "Conciliación" (vigencia actual);
+     * CuenDeAn = "Devolución de Facturas Vigencias Anteriores"; CuenCaAn =
+     * "Conciliación Vigencias Anteriores"; AntCapita = capita por defecto.
      */
     public function fetchCuentasInstitucion(): ?array
     {
-        $stmt = $this->connect()->prepare('SELECT CuenGlosAct, CuenGlos, CuenCast, AntCapita FROM CodiInst WHERE CodiInst = ?');
+        $stmt = $this->connect()->prepare('SELECT CuenGlosAct, CuenGlos, CuenCast, CuenDeAn, CuenCaAn, AntCapita FROM CodiInst WHERE CodiInst = ?');
         $stmt->execute([$this->codiInst()]);
         $row = $stmt->fetch();
 
@@ -422,6 +427,21 @@ class SihosExternalRepository
      * La factura referenciada se resuelve por DetaCont.TiDoRefe/NuDoRefe
      * (a nivel de línea, no de cabecera), dentro de la misma institución.
      *
+     * Exclusión propia de glosas (no aplica a notas, que nunca tienen fila en
+     * AnotGlos): en SIHOS (modulos/glosas/anotglos.php), una glosa aceptada
+     * solo genera la reversión real (cuenta 4xx + DetaPlan) cuando la
+     * anotación que la originó (AnotGlos.CoDoCont/NuDoCont = este documento)
+     * tiene TipoCond=1 (Conciliado a favor) o TipoCond=2 (Aceptado) CON
+     * TipoDeta=1 ("Enviada"). Si es TipoCond=2 con TipoDeta=2 ("Recibida" —
+     * la EPS notificó que acepta, pero el prestador aún no lo tramitó
+     * formalmente), SIHOS únicamente crea el par de cuentas de orden (memo) y
+     * actualiza GlosAcEA, nunca Saldo/DetaPlan/cuenta 4xx — a propósito, no
+     * por un proceso incompleto. Verificado con datos reales (empresa 18):
+     * las 37 filas que antes salían aquí para glosas tenían TODAS
+     * exactamente TipoCond=2/TipoDeta=2 — ninguna era un caso genuino de
+     * proceso pendiente. Confirmado con el usuario: cuando la anotación sí
+     * contabiliza, ya es definitiva, no queda "intermedio".
+     *
      * @param string[] $codigosNota
      */
     public function fetchNotasVigenciaActualIncompletas(array $codigosNota, string $fechaIni, string $fechaFin): array
@@ -447,19 +467,25 @@ class SihosExternalRepository
                               AND dcf.CodiCont = dc2.CodiCont
                         )
                     )
-                ) AS TieneCuenta4
+                ) AS TieneCuenta4,
+                ag.TipoCond AS AnotGlosTipoCond,
+                ag.TipoDeta AS AnotGlosTipoDeta
             FROM EncaCont nc
             INNER JOIN DetaCont dcref
                 ON dcref.CodiInst = nc.CodiInst AND dcref.CodiDocu = nc.CodiDocu AND dcref.NumeDocu = nc.NumeDocu
                AND dcref.TiDoRefe IS NOT NULL AND dcref.TiDoRefe <> ''
             INNER JOIN EncaCont fact
                 ON fact.CodiInst = nc.CodiInst AND fact.CodiDocu = dcref.TiDoRefe AND fact.NumeDocu = dcref.NuDoRefe
+            LEFT JOIN AnotGlos ag
+                ON ag.CodiInst = nc.CodiInst AND ag.CodiDocu = nc.TiDoRefe AND ag.NumeGlos = nc.NuDoRefe
+               AND ag.CoDoCont = nc.CodiDocu AND ag.NuDoCont = nc.NumeDocu
             WHERE nc.CodiInst = ?
               AND nc.CodiDocu IN ({$ph})
               AND nc.FechDocu BETWEEN ? AND ?
               AND nc.Anulado = 0
               AND YEAR(nc.FechDocu) = YEAR(fact.FechDocu)
-            HAVING TieneDetaPlan = 0 OR TieneCuenta4 = 0
+            HAVING (TieneDetaPlan = 0 OR TieneCuenta4 = 0)
+               AND (AnotGlosTipoCond IS NULL OR AnotGlosTipoCond = 1 OR (AnotGlosTipoCond = 2 AND AnotGlosTipoDeta = 1))
             ORDER BY nc.FechDocu, nc.NumeDocu
         ";
         $stmt = $this->connect()->prepare($sql);
@@ -497,7 +523,11 @@ class SihosExternalRepository
         }
 
         $sql = "
-            SELECT ec.CodiDocu, ec.NumeDocu, ec.FechDocu, dc.CodiCont, dc.Valor, dc.CentCost, dc.ConsDeta
+            SELECT ec.CodiDocu, ec.NumeDocu, ec.FechDocu, dc.CodiCont, dc.Valor, dc.CentCost, dc.ConsDeta,
+                   (SELECT COUNT(*) FROM DetaCont dc4
+                     WHERE dc4.CodiInst = ec.CodiInst AND dc4.CodiDocu = ec.CodiDocu AND dc4.NumeDocu = ec.NumeDocu
+                       AND dc4.CodiCont LIKE '4312%'
+                   ) AS Tiene4312
             FROM EncaCont ec
             INNER JOIN DetaCont dc ON dc.CodiInst = ec.CodiInst AND dc.CodiDocu = ec.CodiDocu AND dc.NumeDocu = ec.NumeDocu
             WHERE ec.CodiInst = ?
@@ -599,6 +629,84 @@ class SihosExternalRepository
     }
 
     /**
+     * Notas (NCF) que referencian una factura de VIGENCIA ANTERIOR (año
+     * distinto, más viejo) y tocan una cuenta fuera de lo esperado — cuenta
+     * hermana de fetchCuentasInesperadasNotasVigenciaActual() pero con dos
+     * diferencias deliberadas, verificadas contra datos reales:
+     *
+     * 1) `YEAR(fact.FechDocu) < YEAR(nc.FechDocu)` en vez de `=` — la
+     *    factura es de un año anterior al de la nota.
+     * 2) SIN la excepción "espejo" (cuenta que la factura también usó en su
+     *    propia causación): esa excepción se diseñó para notas de la MISMA
+     *    vigencia (p. ej. anulación de capita sin distribuir) y aquí tapa
+     *    justo el bug que se busca — la factura vieja casi siempre usó esa
+     *    misma cuenta 4312 al facturar, por eso la nota la vuelve a tocar en
+     *    vez de ir contra la cuenta de vigencia anterior configurada
+     *    (CodiInst.CuenGlosAct/CuenGlos/CuenCast). Verificado: sin quitar
+     *    la excepción, 0 de 8 casos reales se detectaban; quitándola,
+     *    8 de 8, sin falsos positivos sobre notas ya bien clasificadas.
+     *
+     * A diferencia del chequeo de vigencia actual, esto SÍ tiene una acción
+     * asociada (reclasificar la cuenta) — ver SihosCancelacionCuentaService.
+     *
+     * @param string[] $codigosNota
+     * @return list<array{CodiDocu:string,NumeDocu:string,FechDocu:string,CodiCont:string,Valor:float,ConsDeta:int,FacturaCodiDocu:string,FacturaNumeDocu:string,FacturaFecha:string}>
+     */
+    public function fetchCuentasInesperadasNotasVigenciaAnterior(
+        array $codigosNota,
+        string $fechaIni,
+        string $fechaFin,
+        string $prefijoReversion,
+        string $prefijoGasto
+    ): array {
+        if ($codigosNota === []) {
+            return [];
+        }
+
+        $ph = implode(',', array_fill(0, count($codigosNota), '?'));
+
+        $sql = "
+            SELECT DISTINCT nc.CodiDocu, nc.NumeDocu, nc.FechDocu, dc.CodiCont, dc.Valor, dc.ConsDeta,
+                   fact.CodiDocu AS FacturaCodiDocu, fact.NumeDocu AS FacturaNumeDocu, fact.FechDocu AS FacturaFecha
+            FROM EncaCont nc
+            INNER JOIN DetaCont dcref
+                ON dcref.CodiInst = nc.CodiInst AND dcref.CodiDocu = nc.CodiDocu AND dcref.NumeDocu = nc.NumeDocu
+               AND dcref.TiDoRefe IS NOT NULL AND dcref.TiDoRefe <> ''
+            INNER JOIN EncaCont fact
+                ON fact.CodiInst = nc.CodiInst AND fact.CodiDocu = dcref.TiDoRefe AND fact.NumeDocu = dcref.NuDoRefe
+            INNER JOIN DetaCont dc
+                ON dc.CodiInst = nc.CodiInst AND dc.CodiDocu = nc.CodiDocu AND dc.NumeDocu = nc.NumeDocu
+            WHERE nc.CodiInst = ?
+              AND nc.CodiDocu IN ({$ph})
+              AND nc.FechDocu BETWEEN ? AND ?
+              AND nc.Anulado = 0
+              AND YEAR(fact.FechDocu) < YEAR(nc.FechDocu)
+              AND dc.CodiCont NOT LIKE '13%'
+              AND dc.CodiCont NOT LIKE '14%'
+              AND dc.CodiCont NOT LIKE '8%'
+        ";
+
+        $params = [$this->codiInst(), ...$codigosNota, $fechaIni, $fechaFin];
+
+        if ($prefijoReversion !== '') {
+            $sql .= ' AND dc.CodiCont NOT LIKE ?';
+            $params[] = $prefijoReversion . '%';
+        }
+
+        if ($prefijoGasto !== '') {
+            $sql .= ' AND dc.CodiCont NOT LIKE ?';
+            $params[] = $prefijoGasto . '%';
+        }
+
+        $sql .= ' ORDER BY nc.FechDocu, nc.NumeDocu';
+
+        $stmt = $this->connect()->prepare($sql);
+        $stmt->execute($params);
+
+        return $stmt->fetchAll();
+    }
+
+    /**
      * ¿Está cerrado el módulo Presupuesto (Modulo=30 — catálogo fijo del
      * software SIHOS, no configurable por institución) para ese año/mes?
      * Mismo criterio que usa el propio SIHOS antes de permitir tocar datos
@@ -646,6 +754,80 @@ class SihosExternalRepository
         ";
         $stmt = $this->connect()->prepare($sql);
         $stmt->execute([$this->codiInst(), $codiDocu, $numeDocu]);
+        $row = $stmt->fetch();
+
+        return $row === false ? null : $row;
+    }
+
+    /**
+     * Resuelve el rubro presupuestal (`TipoUsua.CodiPlan`) configurado para
+     * un tipo de usuario, por el año configurado más cercano ≤ el año
+     * objetivo — `TipoUsua` no siempre tiene fila para el año exacto
+     * (verificado: para varios CodiTipo reales solo existe configurado
+     * 2024, reutilizado también para notas de 2026). Nunca coincidencia
+     * exacta de año.
+     */
+    public function resolveCodiPlanTipoUsua(string $codiTipo, string $codiAno): ?string
+    {
+        $stmt = $this->connect()->prepare(
+            'SELECT CodiPlan FROM TipoUsua
+             WHERE CodiInst = ? AND CodiTipo = ? AND CodiAno <= ?
+             ORDER BY CodiAno DESC LIMIT 1'
+        );
+        $stmt->execute([$this->codiInst(), $codiTipo, $codiAno]);
+        $codiPlan = $stmt->fetchColumn();
+
+        return $codiPlan === false || $codiPlan === null || $codiPlan === '' ? null : (string)$codiPlan;
+    }
+
+    /**
+     * Login de un usuario activo de SIHOS (`Usuarios.Login`, varchar(8) —
+     * cabe sin truncar en el `UsuaDigi`/`UsuaModi` varchar(12) de las tablas
+     * que SAVID escribe) que tenga el mismo tipo+número de documento que un
+     * usuario de SAVID. `Usuarios.CC` guarda el número pese al nombre de la
+     * columna; se filtra `Activo = 1` — un usuario desactivado en SIHOS no
+     * debe recibir la atribución aunque el documento coincida. `null` si no
+     * hay match (uso normal: la mayoría de usuarios de SAVID no tienen
+     * cuenta en SIHOS, cae a un literal fijo en el llamador).
+     */
+    public function resolveLoginUsuarioPorDocumento(string $tipoDocu, string $numero): ?string
+    {
+        $stmt = $this->connect()->prepare(
+            'SELECT Login FROM Usuarios WHERE TipoDocu = ? AND CC = ? AND Activo = 1 LIMIT 1'
+        );
+        $stmt->execute([$tipoDocu, $numero]);
+        $login = $stmt->fetchColumn();
+
+        return $login === false || $login === null || $login === '' ? null : (string)$login;
+    }
+
+    /**
+     * Estado actual (en el momento en que se llama, no un snapshot previo)
+     * de una nota de vigencia actual para la acción "construir DetaPlan
+     * faltante" (sección 3): su fecha, si está anulada, su ValoTota, y la
+     * factura que referencia (con su TipoUsua) — se usa para re-verificar
+     * en fresco que la nota sigue sin DetaPlan justo antes de escribir.
+     * `null` si el documento no existe o no referencia ninguna factura.
+     */
+    public function fetchEstadoParaConstruirDetaPlan(string $codiDocuNota, string $numeDocuNota): ?array
+    {
+        $sql = "
+            SELECT nc.FechDocu, nc.Anulado, nc.ValoTota,
+                   (SELECT COUNT(*) FROM DetaPlan dp
+                     WHERE dp.CodiInst = nc.CodiInst AND dp.CodiDocu = nc.CodiDocu AND dp.NumeDocu = nc.NumeDocu) AS TieneDetaPlan,
+                   fact.CodiDocu AS FacturaCodiDocu, fact.NumeDocu AS FacturaNumeDocu,
+                   fact.FechDocu AS FacturaFecha, fact.TipoUsua AS FacturaTipoUsua
+            FROM EncaCont nc
+            INNER JOIN DetaCont dcref
+                ON dcref.CodiInst = nc.CodiInst AND dcref.CodiDocu = nc.CodiDocu AND dcref.NumeDocu = nc.NumeDocu
+               AND dcref.TiDoRefe IS NOT NULL AND dcref.TiDoRefe <> ''
+            INNER JOIN EncaCont fact
+                ON fact.CodiInst = nc.CodiInst AND fact.CodiDocu = dcref.TiDoRefe AND fact.NumeDocu = dcref.NuDoRefe
+            WHERE nc.CodiInst = ? AND nc.CodiDocu = ? AND nc.NumeDocu = ?
+            LIMIT 1
+        ";
+        $stmt = $this->connect()->prepare($sql);
+        $stmt->execute([$this->codiInst(), $codiDocuNota, $numeDocuNota]);
         $row = $stmt->fetch();
 
         return $row === false ? null : $row;
@@ -876,5 +1058,337 @@ class SihosExternalRepository
         unset($lista);
 
         return $porDocumento;
+    }
+
+    /**
+     * Código de documento (MaesDocu.CodiDocu) para la "Nota Contabilidad"
+     * genérica de esta institución: DocuApli=3 (ajustes contables/notas
+     * genéricas), ManeCont=1, resuelto por NOMBRE ("NOTA CONTAB%") — nunca
+     * por código literal 'NC', porque CodiDocu es configurable por
+     * instalación (mismo principio que el resto del repositorio). Verificado
+     * con datos reales: existe literalmente CodiDocu='NC',
+     * NombDocu='NOTA CONTABILIDAD' para empresa 18.
+     */
+    public function resolveCodigoNotaContableGenerica(): ?string
+    {
+        $stmt = $this->connect()->prepare(
+            "SELECT CodiDocu FROM MaesDocu
+             WHERE CodiInst = ? AND DocuApli = 3 AND ManeCont = 1 AND NombDocu LIKE 'NOTA CONTAB%'
+             LIMIT 1"
+        );
+        $stmt->execute([$this->codiInst()]);
+        $codiDocu = $stmt->fetchColumn();
+
+        return $codiDocu === false ? null : (string)$codiDocu;
+    }
+
+    /**
+     * ¿La institución maneja NIIF (libros paralelos)? Si es así, cada línea
+     * contable que se inserte debe reflejarse también en DetaNIIF (ver
+     * SihosExternalWriteRepository::crearNotaCancelacionCuentaInesperada).
+     */
+    public function fetchManeNIIF(): bool
+    {
+        $stmt = $this->connect()->prepare('SELECT ManeNIIF FROM CodiInst WHERE CodiInst = ?');
+        $stmt->execute([$this->codiInst()]);
+
+        return (int)$stmt->fetchColumn() === 1;
+    }
+
+    /**
+     * ¿Está cerrado el módulo de Contabilidad (Modulo=22 — catálogo fijo del
+     * software, confirmado con los Cierres reales de 2026 de empresa 18)
+     * para ese año/mes? Mismo criterio que isPresupuestoCerrado() pero para
+     * comprobantes contables genéricos (Nota Contabilidad), no presupuesto.
+     */
+    public function isContabilidadCerrada(string $codiAno, string $codiMes): bool
+    {
+        $stmt = $this->connect()->prepare(
+            "SELECT COUNT(*) FROM Cierres
+             WHERE CodiInst = ? AND Modulo = 22 AND CodiDia = 0 AND TipoMovi = 2
+               AND CodiAno = ? AND CodiMes = ?"
+        );
+        $stmt->execute([$this->codiInst(), $codiAno, $codiMes]);
+
+        return (int)$stmt->fetchColumn() > 0;
+    }
+
+    /**
+     * Homologación NIIF (tabla global HomoNIIF, sin CodiInst) para un
+     * conjunto de cuentas contables. Si una cuenta no aparece en el
+     * resultado, no tiene homologación — SIHOS bloquearía la contabilización
+     * NIIF de esa cuenta, y esta acción debe bloquear igual.
+     *
+     * @param string[] $codigosCuenta
+     * @return array<string, string> CodiCont => idPartNIIF
+     */
+    public function fetchHomologacionesNIIF(array $codigosCuenta): array
+    {
+        if ($codigosCuenta === []) {
+            return [];
+        }
+
+        $ph = implode(',', array_fill(0, count($codigosCuenta), '?'));
+        $stmt = $this->connect()->prepare("SELECT CodiCont, idPartNIIF FROM HomoNIIF WHERE CodiCont IN ({$ph})");
+        $stmt->execute($codigosCuenta);
+
+        $porCuenta = [];
+        foreach ($stmt->fetchAll() as $fila) {
+            $porCuenta[$fila['CodiCont']] = $fila['idPartNIIF'];
+        }
+
+        return $porCuenta;
+    }
+
+    /**
+     * ¿Ya existe un ajuste contable previo para esta cuenta puntual de esta
+     * factura? Busca cualquier OTRO documento (no la factura misma) cuya
+     * línea DetaCont referencie esta factura (TiDoRefe/NuDoRefe) sobre esta
+     * misma cuenta — la huella que deja `nota_ajuste` (o cualquier
+     * corrección equivalente hecha directamente en SIHOS). Evita duplicar
+     * la corrección si la acción se reintenta (p. ej. tras un timeout de
+     * red donde la primera escritura sí se completó en SIHOS pero la
+     * respuesta nunca llegó al navegador).
+     *
+     * @return array{CodiDocu:string,NumeDocu:string}|null
+     */
+    public function fetchAjustePrevio(string $codiDocuFactura, string $numeDocuFactura, string $cuentaInesperada): ?array
+    {
+        $stmt = $this->connect()->prepare(
+            'SELECT dc.CodiDocu, dc.NumeDocu
+             FROM DetaCont dc
+             INNER JOIN EncaCont ec ON ec.CodiInst = dc.CodiInst AND ec.CodiDocu = dc.CodiDocu AND ec.NumeDocu = dc.NumeDocu
+             WHERE dc.CodiInst = ? AND dc.TiDoRefe = ? AND dc.NuDoRefe = ? AND dc.CodiCont = ?
+               AND dc.CodiDocu <> ? AND ec.Anulado = 0
+             ORDER BY ec.FechDigi DESC, ec.HoraDigi DESC
+             LIMIT 1'
+        );
+        $stmt->execute([$this->codiInst(), $codiDocuFactura, $numeDocuFactura, $cuentaInesperada, $codiDocuFactura]);
+        $fila = $stmt->fetch();
+
+        return $fila === false ? null : $fila;
+    }
+
+    /**
+     * Versión en lote de fetchAjustePrevio(): para un conjunto puntual de
+     * facturas (las ya encontradas con cuenta fuera de lo esperado, no todo
+     * el universo de facturas) evita N consultas al pintar la sección 5a.
+     * Mismo criterio — sin filtro de fecha, porque la pregunta es si la
+     * corrección YA EXISTE en SIHOS, no si cae dentro del rango filtrado.
+     *
+     * Filtra por tripletas (CodiDocu,NumeDocu,CodiCont) exactas — no basta
+     * con el par factura, porque TiDoRefe/NuDoRefe son usados por
+     * prácticamente toda la contabilidad de esa factura (cartera, glosas,
+     * pagos...) para referenciarla; sin acotar también por cuenta, la
+     * consulta escanea muchas más filas de las necesarias y devuelve
+     * coincidencias en cuentas que no son la "fuera de lo esperado" que nos
+     * interesa (verificado con datos reales: sin este filtro tardaba >12s y
+     * traía cuentas de cartera/reversión ajenas al caso).
+     *
+     * @param list<array{CodiDocu:string,NumeDocu:string,CodiCont:string}> $filas
+     * @return array<string, true> claves "CodiDocuFactura-NumeDocuFactura-CodiCont" ya ajustadas
+     */
+    public function fetchClavesConAjustePrevio(array $filas): array
+    {
+        if ($filas === []) {
+            return [];
+        }
+
+        $triplasUnicas = [];
+        foreach ($filas as $f) {
+            $triplasUnicas[$f['CodiDocu'] . '|' . $f['NumeDocu'] . '|' . $f['CodiCont']] = [$f['CodiDocu'], $f['NumeDocu'], $f['CodiCont']];
+        }
+        $triplasUnicas = array_values($triplasUnicas);
+
+        // OR-es explícitos, no "(a,b,c) IN ((..),(..))": en MySQL 5.6 (la
+        // versión real de SIHOS, verificado con EXPLAIN) el IN de tuplas no
+        // usa ninguno de los índices por TiDoRefe/NuDoRefe/CodiCont y termina
+        // escaneando ~1.4M filas (>12s, agotó memoria en un caso). Con OR
+        // explícitos, MySQL sí usa el índice (rows≈10, <30ms).
+        $condiciones = implode(' OR ', array_fill(0, count($triplasUnicas), '(dc.TiDoRefe = ? AND dc.NuDoRefe = ? AND dc.CodiCont = ?)'));
+        $params = [$this->codiInst()];
+        foreach ($triplasUnicas as [$cd, $nd, $cc]) {
+            $params[] = $cd;
+            $params[] = $nd;
+            $params[] = $cc;
+        }
+
+        $stmt = $this->connect()->prepare(
+            "SELECT DISTINCT dc.TiDoRefe AS FacturaCodiDocu, dc.NuDoRefe AS FacturaNumeDocu, dc.CodiCont
+             FROM DetaCont dc
+             INNER JOIN EncaCont ec ON ec.CodiInst = dc.CodiInst AND ec.CodiDocu = dc.CodiDocu AND ec.NumeDocu = dc.NumeDocu
+             WHERE dc.CodiInst = ?
+               AND ({$condiciones})
+               AND NOT (dc.CodiDocu = dc.TiDoRefe AND dc.NumeDocu = dc.NuDoRefe)
+               AND ec.Anulado = 0"
+        );
+        $stmt->execute($params);
+
+        $claves = [];
+        foreach ($stmt->fetchAll() as $fila) {
+            $claves[$fila['FacturaCodiDocu'] . '-' . $fila['FacturaNumeDocu'] . '-' . $fila['CodiCont']] = true;
+        }
+
+        return $claves;
+    }
+
+    /**
+     * Re-verificación en fresco (justo antes de escribir, no confiar en el
+     * snapshot del reporte) del estado de una factura y de la línea contable
+     * "fuera de lo esperado" puntual (por ConsDeta) que se quiere cancelar
+     * contra las líneas 4312 que la factura tenga en este momento. Devuelve
+     * null si la factura ya no existe o esa línea puntual ya no está (pudo
+     * haberse corregido o borrado entre que se generó el reporte y que se
+     * hizo clic).
+     *
+     * @return array{Anulado:int,FechDocu:string,TiDoTerc:?string,NuDoTerc:?string,CodiCent:?string,LineaInesperadaCodiCont:string,LineaInesperadaValor:float,Lineas4312:list<array{CodiCont:string,CentCost:?string,Valor:float}>}|null
+     */
+    public function fetchEstadoParaReversionCuentaInesperada(
+        string $codiDocuFactura,
+        string $numeDocuFactura,
+        int $consDeta
+    ): ?array {
+        $codiInst = $this->codiInst();
+
+        $stmt = $this->connect()->prepare(
+            'SELECT Anulado, FechDocu, TiDoTerc, NuDoTerc, CodiCent FROM EncaCont
+             WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?'
+        );
+        $stmt->execute([$codiInst, $codiDocuFactura, $numeDocuFactura]);
+        $factura = $stmt->fetch();
+        if ($factura === false) {
+            return null;
+        }
+
+        $stmt = $this->connect()->prepare(
+            'SELECT CodiCont, Valor FROM DetaCont
+             WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ? AND ConsDeta = ?'
+        );
+        $stmt->execute([$codiInst, $codiDocuFactura, $numeDocuFactura, $consDeta]);
+        $lineaInesperada = $stmt->fetch();
+        if ($lineaInesperada === false) {
+            return null;
+        }
+
+        $stmt = $this->connect()->prepare(
+            "SELECT CodiCont, CentCost, Valor FROM DetaCont
+             WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ? AND CodiCont LIKE '4312%'
+             ORDER BY ConsDeta"
+        );
+        $stmt->execute([$codiInst, $codiDocuFactura, $numeDocuFactura]);
+        $lineas4312 = array_map(
+            static fn (array $fila): array => [
+                'CodiCont' => $fila['CodiCont'],
+                'CentCost' => $fila['CentCost'],
+                'Valor' => (float)$fila['Valor'],
+            ],
+            $stmt->fetchAll()
+        );
+
+        return [
+            'Anulado' => (int)$factura['Anulado'],
+            'FechDocu' => (string)$factura['FechDocu'],
+            'TiDoTerc' => $factura['TiDoTerc'],
+            'NuDoTerc' => $factura['NuDoTerc'],
+            'CodiCent' => $factura['CodiCent'],
+            'LineaInesperadaCodiCont' => $lineaInesperada['CodiCont'],
+            'LineaInesperadaValor' => (float)$lineaInesperada['Valor'],
+            'Lineas4312' => $lineas4312,
+        ];
+    }
+
+    /**
+     * Análogo a fetchAjustePrevio() pero para la reclasificación de cuenta
+     * de notas de vigencia anterior (sección 5b): la clave de búsqueda es
+     * la propia NOTA que se corrige (no la factura), porque la nota de
+     * ajuste en la rama de mes cerrado referencia la nota origen, no la
+     * factura. Solo aplica a la rama de mes cerrado — la rama de mes
+     * abierto edita en sitio, no deja rastro de "documento referenciando",
+     * por eso esa rama re-verifica directamente el CodiCont de la línea en
+     * vez de buscar un ajuste previo.
+     *
+     * @return array{CodiDocu:string,NumeDocu:string}|null
+     */
+    public function fetchAjustePrevioNota(string $codiDocuNota, string $numeDocuNota, string $cuentaCorregida): ?array
+    {
+        $stmt = $this->connect()->prepare(
+            'SELECT dc.CodiDocu, dc.NumeDocu
+             FROM DetaCont dc
+             INNER JOIN EncaCont ec ON ec.CodiInst = dc.CodiInst AND ec.CodiDocu = dc.CodiDocu AND ec.NumeDocu = dc.NumeDocu
+             WHERE dc.CodiInst = ? AND dc.TiDoRefe = ? AND dc.NuDoRefe = ? AND dc.CodiCont = ?
+               AND dc.CodiDocu <> ? AND ec.Anulado = 0
+             ORDER BY ec.FechDigi DESC, ec.HoraDigi DESC
+             LIMIT 1'
+        );
+        $stmt->execute([$this->codiInst(), $codiDocuNota, $numeDocuNota, $cuentaCorregida, $codiDocuNota]);
+        $fila = $stmt->fetch();
+
+        return $fila === false ? null : $fila;
+    }
+
+    /**
+     * Re-verificación en fresco (justo antes de escribir) de una nota de
+     * vigencia anterior: su propio estado (Anulado, FechDocu, tercero,
+     * sede) y todas sus líneas 4312 ACTUALES sobre facturas de vigencia
+     * anterior — mismo criterio que fetchCuentasInesperadasNotasVigenciaAnterior()
+     * pero para un documento puntual, sin depender del snapshot del
+     * reporte. Devuelve null si la nota ya no existe.
+     *
+     * @return array{Anulado:int,FechDocu:string,TiDoTerc:?string,NuDoTerc:?string,CodiCent:?string,Lineas4312:list<array{ConsDeta:int,CodiCont:string,CentCost:?string,TiDoTerc:?string,NuDoTerc:?string,Valor:float}>}|null
+     */
+    public function fetchEstadoParaReclasificacionVigenciaAnterior(string $codiDocuNota, string $numeDocuNota): ?array
+    {
+        $codiInst = $this->codiInst();
+
+        $stmt = $this->connect()->prepare(
+            'SELECT Anulado, FechDocu, TiDoTerc, NuDoTerc, CodiCent FROM EncaCont
+             WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?'
+        );
+        $stmt->execute([$codiInst, $codiDocuNota, $numeDocuNota]);
+        $nota = $stmt->fetch();
+
+        if ($nota === false) {
+            return null;
+        }
+
+        // dc YA trae su propio TiDoRefe/NuDoRefe (referencia a nivel de
+        // línea) — no hace falta un join independiente contra otra fila de
+        // DetaCont del mismo documento para resolverlo. Verificado: hacerlo
+        // así (como sí hace, sin problema, fetchCuentasInesperadasNotasVigenciaAnterior()
+        // porque ahí un SELECT DISTINCT lo absorbe) multiplicaba cada línea
+        // 4312 por la cantidad de líneas con referencia del documento — acá
+        // habría duplicado la reclasificación.
+        $stmt = $this->connect()->prepare(
+            "SELECT dc.ConsDeta, dc.CodiCont, dc.CentCost, dc.TiDoTerc, dc.NuDoTerc, dc.Valor
+             FROM DetaCont dc
+             INNER JOIN EncaCont fact
+                 ON fact.CodiInst = dc.CodiInst AND fact.CodiDocu = dc.TiDoRefe AND fact.NumeDocu = dc.NuDoRefe
+             WHERE dc.CodiInst = ? AND dc.CodiDocu = ? AND dc.NumeDocu = ?
+               AND dc.CodiCont LIKE '4312%'
+               AND dc.TiDoRefe IS NOT NULL AND dc.TiDoRefe <> ''
+               AND YEAR(fact.FechDocu) < YEAR(?)
+             ORDER BY dc.ConsDeta"
+        );
+        $stmt->execute([$codiInst, $codiDocuNota, $numeDocuNota, $nota['FechDocu']]);
+        $lineas4312 = array_map(
+            static fn (array $fila): array => [
+                'ConsDeta' => (int)$fila['ConsDeta'],
+                'CodiCont' => $fila['CodiCont'],
+                'CentCost' => $fila['CentCost'],
+                'TiDoTerc' => $fila['TiDoTerc'],
+                'NuDoTerc' => $fila['NuDoTerc'],
+                'Valor' => (float)$fila['Valor'],
+            ],
+            $stmt->fetchAll()
+        );
+
+        return [
+            'Anulado' => (int)$nota['Anulado'],
+            'FechDocu' => (string)$nota['FechDocu'],
+            'TiDoTerc' => $nota['TiDoTerc'],
+            'NuDoTerc' => $nota['NuDoTerc'],
+            'CodiCent' => $nota['CodiCent'],
+            'Lineas4312' => $lineas4312,
+        ];
     }
 }

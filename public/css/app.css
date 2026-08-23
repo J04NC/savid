@@ -3503,6 +3503,80 @@ AGREGAR AL FINAL DE public/css/app.css
     margin-bottom:14px;
 }
 
+.empresa-items-grid{
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px 18px;
+    padding:14px 18px;
+}
+
+.empresa-items-check{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    font-size:13px;
+    cursor:pointer;
+}
+
+.empresa-items-check input[type="checkbox"]{
+    width:16px;
+    height:16px;
+    cursor:pointer;
+    accent-color:#1dd1a1;
+}
+
+.empresa-roles-list{
+    display:flex;
+    flex-direction:column;
+    gap:2px;
+    max-height:50vh;
+    overflow:auto;
+    border-radius:10px;
+    border:1px solid rgba(255,255,255,.08);
+}
+
+.empresa-roles-item{
+    display:flex;
+    align-items:flex-start;
+    gap:10px;
+    padding:10px 14px;
+    cursor:pointer;
+    border-bottom:1px solid rgba(255,255,255,.06);
+}
+
+.empresa-roles-item:last-child{
+    border-bottom:0;
+}
+
+.empresa-roles-item:hover{
+    background:rgba(29,209,161,.08);
+}
+
+.empresa-roles-check{
+    margin-top:2px;
+    width:16px;
+    height:16px;
+    cursor:pointer;
+    accent-color:#1dd1a1;
+    flex:0 0 auto;
+}
+
+.empresa-roles-item-body{
+    display:flex;
+    flex-direction:column;
+    gap:2px;
+}
+
+.empresa-roles-item-nombre{
+    font-size:13px;
+    font-weight:600;
+}
+
+.empresa-roles-item-desc{
+    font-size:12px;
+    opacity:.65;
+}
+
 .role-filter-bar .form-input{
     width:100%;
 }
@@ -4139,10 +4213,6 @@ AGREGAR AL FINAL DE public/css/app.css
 
 .crud-catalog-dropdown li.crud-catalog-option-active:hover{
     background:var(--crud-row-selected);
-}
-
-.form-group.crud-zona-hidden{
-    display:none !important;
 }
 
 .crud-catalog-dropdown li.crud-catalog-hint{

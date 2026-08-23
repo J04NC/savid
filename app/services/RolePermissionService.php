@@ -5,6 +5,7 @@ class RolePermissionService
     private CompanyRepository $companyRepository;
     private BranchRepository $branchRepository;
     private RolePermissionRepository $rolePermissionRepository;
+    private EmpresaItemRepository $empresaItemRepository;
 
     public function __construct()
     {
@@ -14,6 +15,7 @@ class RolePermissionService
         $this->companyRepository = new CompanyRepository($pdo);
         $this->branchRepository = new BranchRepository($pdo);
         $this->rolePermissionRepository = new RolePermissionRepository($pdo);
+        $this->empresaItemRepository = new EmpresaItemRepository($pdo);
     }
 
     public function normalizeScope($empresaId, $sedeId, $esSuperAdmin, $sessionEmpresaId)
@@ -52,7 +54,11 @@ class RolePermissionService
 
     public function buildMatrixResponse($rolId, $empresaId, $sedeId)
     {
-        $rows = $this->rolePermissionRepository->getMatrixRows();
+        $allowedItemIds = $empresaId !== null
+            ? $this->empresaItemRepository->getAllowedItemIds((int)$empresaId)
+            : null;
+
+        $rows = $this->rolePermissionRepository->getMatrixRows($allowedItemIds);
         $actuales = $this->rolePermissionRepository->getCheckedItemAccionIdsByScope($rolId, $empresaId, $sedeId);
 
         return $this->buildMatrix($rows, $actuales);
