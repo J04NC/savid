@@ -106,6 +106,8 @@ class SihosPresupuestoEliminacionService
 
         try {
             $filasBorradas = $repositorioEscritura->eliminarDetaPlan($codiDocu, $numeDocu);
+        } catch (SihosOperacionEnCursoException $e) {
+            return ['ok' => false, 'message' => $e->getMessage()];
         } catch (PDOException $e) {
             return ['ok' => false, 'message' => 'No se pudo borrar en SIHOS: ' . $e->getMessage()];
         }
@@ -239,6 +241,8 @@ class SihosPresupuestoEliminacionService
                 $valor,
                 $this->usuaDigiResolver->resolver((int)($_SESSION['user_id'] ?? 0), $repositorioLectura)
             );
+        } catch (SihosOperacionEnCursoException $e) {
+            return ['ok' => false, 'message' => $e->getMessage()];
         } catch (PDOException $e) {
             return ['ok' => false, 'message' => 'No se pudo construir el DetaPlan en SIHOS: ' . $e->getMessage()];
         }

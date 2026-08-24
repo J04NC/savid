@@ -269,6 +269,43 @@ class ModuleController
         echo json_encode(['ok' => true, 'items' => $items], JSON_UNESCAPED_UNICODE);
     }
 
+    /**
+     * Jerarquía hacia arriba de un valor de catálogo: elegir el barrio devuelve
+     * su comuna, zona, municipio, departamento y país para que el formulario
+     * los rellene solo. Mismas validaciones que catalogSearch.
+     */
+    public function catalogAncestors(): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+
+        $context = preg_replace('/[^A-Za-z0-9_]/', '', (string)($_GET['context'] ?? ''));
+        $field = preg_replace('/[^A-Za-z0-9_]/', '', (string)($_GET['field'] ?? ''));
+        $value = (int)($_GET['value'] ?? 0);
+
+        if ($context === '' || $field === '' || $value <= 0) {
+            http_response_code(400);
+            echo json_encode(['ok' => false, 'error' => 'context, field y value son obligatorios'], JSON_UNESCAPED_UNICODE);
+
+            return;
+        }
+
+        $currentItem = $this->moduleService->findCurrentItem($context);
+
+        if (!$currentItem || (class_exists('PermisoService') && !PermisoService::can($context, 'ver'))) {
+            http_response_code(403);
+            echo json_encode(['ok' => false, 'error' => 'forbidden'], JSON_UNESCAPED_UNICODE);
+
+            return;
+        }
+
+        $crudService = new CrudService();
+
+        echo json_encode([
+            'ok' => true,
+            'values' => $crudService->resolveCatalogAncestors($context, $field, $value),
+        ], JSON_UNESCAPED_UNICODE);
+    }
+
     public function __call($method,$params)
     {
         $this->index();

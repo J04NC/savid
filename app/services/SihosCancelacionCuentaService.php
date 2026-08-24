@@ -170,6 +170,8 @@ class SihosCancelacionCuentaService
                 $maneNIIF,
                 $this->usuaDigiResolver->resolver((int)($_SESSION['user_id'] ?? 0), $repositorioLectura)
             );
+        } catch (SihosOperacionEnCursoException $e) {
+            return ['ok' => false, 'message' => $e->getMessage()];
         } catch (PDOException $e) {
             return ['ok' => false, 'message' => 'No se pudo escribir en SIHOS: ' . $e->getMessage()];
         }
@@ -340,6 +342,8 @@ class SihosCancelacionCuentaService
                     $maneNIIF,
                     $this->usuaDigiResolver->resolver((int)($_SESSION['user_id'] ?? 0), $repositorioLectura)
                 );
+            } catch (SihosOperacionEnCursoException $e) {
+                return ['ok' => false, 'message' => $e->getMessage()];
             } catch (PDOException $e) {
                 return ['ok' => false, 'message' => 'No se pudo escribir en SIHOS: ' . $e->getMessage()];
             }
@@ -403,6 +407,8 @@ class SihosCancelacionCuentaService
                 $maneNIIF,
                 $this->usuaDigiResolver->resolver((int)($_SESSION['user_id'] ?? 0), $repositorioLectura)
             );
+        } catch (SihosOperacionEnCursoException $e) {
+            return ['ok' => false, 'message' => $e->getMessage()];
         } catch (PDOException $e) {
             return ['ok' => false, 'message' => 'No se pudo escribir en SIHOS: ' . $e->getMessage()];
         }

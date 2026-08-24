@@ -48,7 +48,7 @@ $sihosConstruirDetaPlanJsV = is_readable($assetSihosConstruirDetaPlan) ? (int)fi
         <p class="modal-form-alert">⚠️ Esta empresa no tiene conexión a SIHOS configurada. Ve a <a href="?url=sihos&empresa_id=<?= (int)$empresaId ?>">Conexión SIHOS</a>.</p>
     <?php else: ?>
 
-        <form method="get" class="crud-form auditoria-filters-grid" style="margin-bottom:20px;">
+        <form method="get" id="sihosCruceForm" class="crud-form auditoria-filters-grid" style="margin-bottom:20px;">
             <input type="hidden" name="url" value="sihos/cruce">
             <input type="hidden" name="empresa_id" value="<?= (int)$empresaId ?>">
             <div class="form-group">
@@ -537,3 +537,24 @@ $sihosConstruirDetaPlanJsV = is_readable($assetSihosConstruirDetaPlan) ? (int)fi
     <?php endif; ?>
 
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    // La vista se inserta en main.php (línea 124) ANTES de cargar app.js
+    // (línea 194): sin esperar a DOMContentLoaded, savidMostrarCargando aún
+    // no existía cuando este script corría y el "if" fallaba en silencio —
+    // el overlay nunca llegaba a mostrarse. app.js no lleva defer/async, así
+    // que ya terminó de ejecutarse para cuando se dispara este evento.
+    //
+    // Formulario de navegación completa (submit normal, no fetch): puede
+    // tardar hasta 12-20s con un rango de meses reales — se muestra el
+    // overlay antes de dejar navegar; desaparece solo cuando la página
+    // nueva reemplaza esta (ver savidMostrarCargando en app.js).
+    var form = document.getElementById('sihosCruceForm');
+    if (form && typeof savidMostrarCargando === 'function') {
+        form.addEventListener('submit', function () {
+            savidMostrarCargando('Generando reporte de cruce…', true);
+        });
+    }
+});
+</script>

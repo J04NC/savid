@@ -136,8 +136,11 @@ class Router
         /*
          * Sesión obligatoria en todo el sistema salvo pantallas de Login.
          * (Antes se excluían index/modulo/item y cualquier usuario podía pegar ?url=usuario sin sesión.)
+         * PrivacidadController: debe verse ANTES de loguearse (enlazada desde
+         * login.php) y también por terceros que ni siquiera son usuarios del
+         * sistema (Habeas Data no exige tener cuenta para consultarla).
          */
-        if (!in_array($controllerName, ['LoginController', 'HealthController'], true)) {
+        if (!in_array($controllerName, ['LoginController', 'HealthController', 'PrivacidadController'], true)) {
             SessionManager::requireLogin();
         }
 
@@ -196,7 +199,7 @@ class Router
         }
 
         if (SessionManager::userLogged()
-            && !in_array($controllerName, ['LoginController', 'HealthController', 'DashboardController', 'ModuleController', 'ContextController'], true)
+            && !in_array($controllerName, ['LoginController', 'HealthController', 'PrivacidadController', 'DashboardController', 'ModuleController', 'ContextController'], true)
             && class_exists('PermisoService')
             && !($controllerName === 'UsuarioController' && in_array($method, $usuarioJsonLookupMethods, true))
             && !($controllerName === 'EmpresaController' && in_array($method, $empresaJsonApiMethods, true))

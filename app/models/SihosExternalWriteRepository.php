@@ -56,6 +56,59 @@ class SihosExternalWriteRepository
         return (string)($this->config['codiInst'] ?? '');
     }
 
+    /** Segundos que se espera por el bloqueo antes de rendirse. */
+    private const ESPERA_BLOQUEO = 10;
+
+    /**
+     * Serializa una operación de escritura con un bloqueo nombrado de MySQL.
+     *
+     * Por qué un lock nombrado y no `FOR UPDATE` en estas tablas: la
+     * comprobación de "ya existe un ajuste" cruza DetaCont/EncaCont por un
+     * índice que empieza en TiDoRefe, de baja cardinalidad. Un bloqueo de hueco
+     * ahí frenaría inserciones ajenas y podría entorpecer a los propios
+     * usuarios de SIHOS. GET_LOCK serializa solo esta operación lógica sin
+     * tocar ninguna fila. (En DetaPlan sí se usa FOR UPDATE: allí el filtro es
+     * el prefijo de la PRIMARY KEY y el bloqueo queda en un documento.)
+     *
+     * El nombre se acota al objetivo lógico (institución + documento + cuenta),
+     * de modo que dos correcciones distintas no se estorban. El bloqueo es de
+     * sesión, no transaccional: se toma antes de abrir la transacción y se
+     * libera al terminar, pase lo que pase.
+     *
+     * MySQL 5.6 (el de SIHOS) mantiene un único lock nombrado por sesión; aquí
+     * se toma exactamente uno por operación, así que encaja.
+     *
+     * @template T
+     * @param callable():T $fn
+     * @return T
+     * @throws SihosOperacionEnCursoException si no se obtiene el bloqueo
+     */
+    private function conBloqueo(string $clave, callable $fn)
+    {
+        $pdo = $this->connect();
+        $nombre = 'savid:' . substr(sha1($this->codiInst() . '|' . $clave), 0, 40);
+
+        $stmt = $pdo->prepare('SELECT GET_LOCK(?, ?)');
+        $stmt->execute([$nombre, self::ESPERA_BLOQUEO]);
+
+        if ((int)$stmt->fetchColumn() !== 1) {
+            throw new SihosOperacionEnCursoException(
+                'La misma operación ya se está ejecutando sobre SIHOS. Espere a que termine y verifique el resultado antes de repetirla.'
+            );
+        }
+
+        try {
+            return $fn();
+        } finally {
+            try {
+                $release = $pdo->prepare('SELECT RELEASE_LOCK(?)');
+                $release->execute([$nombre]);
+            } catch (PDOException $e) {
+                // La conexión se cierra al final de la petición y el lock cae con ella.
+            }
+        }
+    }
+
     /**
      * Borra todas las líneas de DetaPlan de un documento puntual, dentro de
      * una transacción, y devuelve el snapshot de lo borrado (para el
@@ -66,14 +119,31 @@ class SihosExternalWriteRepository
      */
     public function eliminarDetaPlan(string $codiDocu, string $numeDocu): array
     {
+        return $this->conBloqueo('detaplan:' . $codiDocu . ':' . $numeDocu, function () use ($codiDocu, $numeDocu): array {
+            return $this->eliminarDetaPlanBloqueado($codiDocu, $numeDocu);
+        });
+    }
+
+    /** @see eliminarDetaPlan (se ejecuta ya con el bloqueo tomado) */
+    private function eliminarDetaPlanBloqueado(string $codiDocu, string $numeDocu): array
+    {
         $pdo = $this->connect();
         $codiInst = (string)($this->config['codiInst'] ?? '');
 
         $pdo->beginTransaction();
 
         try {
+            /*
+             * FOR UPDATE: sin él, la lectura dentro de la transacción es
+             * consistente pero NO bloquea, así que dos peticiones simultáneas
+             * ven las mismas filas, ambas pasan la validación y ambas borran.
+             * El WHERE usa el prefijo de la PRIMARY KEY
+             * (CodiInst, CodiDocu, NumeDocu, …), verificado con EXPLAIN:
+             * key=PRIMARY, rows=1 — el bloqueo queda acotado al documento y no
+             * compromete una tabla de 1,4 millones de filas.
+             */
             $stmtSelect = $pdo->prepare(
-                'SELECT * FROM DetaPlan WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?'
+                'SELECT * FROM DetaPlan WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ? FOR UPDATE'
             );
             $stmtSelect->execute([$codiInst, $codiDocu, $numeDocu]);
             $filas = $stmtSelect->fetchAll();
@@ -127,18 +197,44 @@ class SihosExternalWriteRepository
         float $valor,
         string $usuaDigi
     ): array {
+        return $this->conBloqueo('detaplan:' . $codiDocuNota . ':' . $numeDocuNota, function () use (
+            $codiDocuNota, $numeDocuNota, $codiAno, $codiPlan, $valor, $usuaDigi
+        ): array {
+            return $this->construirDetaPlanNotaVigenciaActualBloqueado(
+                $codiDocuNota, $numeDocuNota, $codiAno, $codiPlan, $valor, $usuaDigi
+            );
+        });
+    }
+
+    /** @see construirDetaPlanNotaVigenciaActual (ya con el bloqueo tomado) */
+    private function construirDetaPlanNotaVigenciaActualBloqueado(
+        string $codiDocuNota,
+        string $numeDocuNota,
+        string $codiAno,
+        string $codiPlan,
+        float $valor,
+        string $usuaDigi
+    ): array {
         $pdo = $this->connect();
         $codiInst = $this->codiInst();
 
         $pdo->beginTransaction();
 
         try {
+            /*
+             * FOR UPDATE sobre el rango del documento. Aquí importa incluso
+             * cuando no hay filas: el bloqueo de hueco impide que otra
+             * transacción inserte la misma línea entre este chequeo y el
+             * INSERT de abajo (doble clic = línea duplicada). Se usa SELECT
+             * de la clave en vez de COUNT(*) porque un agregado no bloquea
+             * el rango de la misma forma.
+             */
             $stmtCheck = $pdo->prepare(
-                'SELECT COUNT(*) FROM DetaPlan WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?'
+                'SELECT ConsDeta FROM DetaPlan WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ? FOR UPDATE'
             );
             $stmtCheck->execute([$codiInst, $codiDocuNota, $numeDocuNota]);
 
-            if ((int)$stmtCheck->fetchColumn() > 0) {
+            if ($stmtCheck->fetch() !== false) {
                 $pdo->rollBack();
 
                 return [];
@@ -195,6 +291,30 @@ class SihosExternalWriteRepository
      * @throws PDOException en errores reales de BD (no en rechazos de negocio, esos se devuelven como ok=false)
      */
     public function crearNotaCancelacionCuentaInesperada(
+        string $codiDocuFactura,
+        string $numeDocuFactura,
+        int $consDetaInesperada,
+        string $codiDocuNota,
+        string $fecha,
+        string $codiAno,
+        string $codiMes,
+        bool $maneNIIF,
+        string $usuaDigi
+    ): array {
+        return $this->conBloqueo(
+            'cancelacion:' . $codiDocuFactura . ':' . $numeDocuFactura . ':' . $consDetaInesperada,
+            function () use ($codiDocuFactura, $numeDocuFactura, $consDetaInesperada, $codiDocuNota,
+                            $fecha, $codiAno, $codiMes, $maneNIIF, $usuaDigi): array {
+                return $this->crearNotaCancelacionCuentaInesperadaBloqueado(
+                    $codiDocuFactura, $numeDocuFactura, $consDetaInesperada, $codiDocuNota,
+                    $fecha, $codiAno, $codiMes, $maneNIIF, $usuaDigi
+                );
+            }
+        );
+    }
+
+    /** @see crearNotaCancelacionCuentaInesperada (ya con el bloqueo tomado) */
+    private function crearNotaCancelacionCuentaInesperadaBloqueado(
         string $codiDocuFactura,
         string $numeDocuFactura,
         int $consDetaInesperada,
@@ -488,6 +608,26 @@ class SihosExternalWriteRepository
         bool $maneNIIF,
         string $usuaDigi
     ): array {
+        return $this->conBloqueo(
+            'reclasifica:' . $codiDocuNota . ':' . $numeDocuNota,
+            function () use ($codiDocuNota, $numeDocuNota, $cuentaDestino, $codiAno, $codiMes, $maneNIIF, $usuaDigi): array {
+                return $this->reclasificarCuentaEnSitioBloqueado(
+                    $codiDocuNota, $numeDocuNota, $cuentaDestino, $codiAno, $codiMes, $maneNIIF, $usuaDigi
+                );
+            }
+        );
+    }
+
+    /** @see reclasificarCuentaEnSitio (ya con el bloqueo tomado) */
+    private function reclasificarCuentaEnSitioBloqueado(
+        string $codiDocuNota,
+        string $numeDocuNota,
+        string $cuentaDestino,
+        string $codiAno,
+        string $codiMes,
+        bool $maneNIIF,
+        string $usuaDigi
+    ): array {
         set_time_limit(180);
 
         $pdo = $this->connect();
@@ -605,6 +745,30 @@ class SihosExternalWriteRepository
      * @return array{ok:bool,motivo?:string,codiDocuNota?:string,numeDocuNota?:string,fecha?:string,valorTotal?:float,lineas?:list<array{CodiCont:string,Valor:float}>}
      */
     public function crearNotaAjusteVigenciaAnterior(
+        string $codiDocuNotaOrigen,
+        string $numeDocuNotaOrigen,
+        string $cuentaDestino,
+        string $codiDocuNota,
+        string $fecha,
+        string $codiAno,
+        string $codiMes,
+        bool $maneNIIF,
+        string $usuaDigi
+    ): array {
+        return $this->conBloqueo(
+            'ajusteanterior:' . $codiDocuNotaOrigen . ':' . $numeDocuNotaOrigen,
+            function () use ($codiDocuNotaOrigen, $numeDocuNotaOrigen, $cuentaDestino, $codiDocuNota,
+                            $fecha, $codiAno, $codiMes, $maneNIIF, $usuaDigi): array {
+                return $this->crearNotaAjusteVigenciaAnteriorBloqueado(
+                    $codiDocuNotaOrigen, $numeDocuNotaOrigen, $cuentaDestino, $codiDocuNota,
+                    $fecha, $codiAno, $codiMes, $maneNIIF, $usuaDigi
+                );
+            }
+        );
+    }
+
+    /** @see crearNotaAjusteVigenciaAnterior (ya con el bloqueo tomado) */
+    private function crearNotaAjusteVigenciaAnteriorBloqueado(
         string $codiDocuNotaOrigen,
         string $numeDocuNotaOrigen,
         string $cuentaDestino,

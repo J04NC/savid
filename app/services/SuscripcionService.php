@@ -64,6 +64,17 @@ class SuscripcionService
             $preview['fecha_fin']
         );
 
+        // 0 = el índice único rechazó un duplicado: ya había una renovación
+        // para esta empresa con la misma fecha de inicio (doble clic o dos
+        // administradores a la vez). No es un error: la suscripción existe.
+        if ($id === 0) {
+            return [
+                'success' => false,
+                'error' => 'Esta empresa ya tiene una suscripción que inicia el '
+                    . $preview['fecha_inicio'] . '. No se creó otra.',
+            ];
+        }
+
         return ['success' => true, 'id' => $id];
     }
 

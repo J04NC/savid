@@ -43,6 +43,20 @@ class LoginController
             exit;
         }
 
+        // Antes de tocar AuthService (hash de contraseña, consulta a BD,
+        // conteo de intentos en LoginThrottleService): si Turnstile está
+        // configurado y el visitante no lo pasó, se corta aquí. Así un bot
+        // sin token válido nunca llega a "gastar" un intento fallido real
+        // contra el throttle del usuario legítimo.
+        if (TurnstileService::habilitado()) {
+            $turnstileToken = (string)($_POST['cf-turnstile-response'] ?? '');
+            if (!TurnstileService::verify($turnstileToken, (string)(RequestIpService::current() ?? ''))) {
+                $_SESSION['login_error'] = 'Verificación antibot fallida. Vuelva a intentar.';
+                header("Location: ?url=login");
+                exit;
+            }
+        }
+
         $auth = $this->authService->authenticate($username, $password);
 
         if (!$auth['success']) {

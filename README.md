@@ -308,6 +308,49 @@ ocultan ni se limpian campos.
 (respaldo previo en `storage/backups/territorio_pre_rediseno_*.sql`). El antiguo
 `add_tercero_zona_ubicacion_comuna_corregimiento.sql` sigue obsoleto: no ejecutarlo.
 
+### Ubicacion: cascada y autocompletado de la jerarquia
+
+Los campos `pais_id`, `departamento_id`, `municipio_id`, `zona_id`, `comuna_id` y
+`barrio_id` funcionan como una jerarquia en dos sentidos. **La jerarquia se
+deduce sola de las claves foraneas**: no hay rutas fijas en el codigo, de modo
+que cualquier tabla nueva con FK encadenadas hereda el comportamiento.
+
+**Hacia abajo (filtrar).** `getCatalogParentFieldsForFk` calcula los padres de
+cada campo:
+
+| Campo | Padres que lo acotan |
+|-------|----------------------|
+| `departamento_id` | `pais_id` |
+| `municipio_id` | `departamento_id` |
+| `comuna_id` | `municipio_id`, `zona_id` |
+| `barrio_id` | `comuna_id` |
+
+Sin texto de busqueda se exigen los padres (evita volcar cientos de barrios);
+**con texto se busca igual aunque falten**, asi que escribir "Cadiz" lo
+encuentra sin haber elegido comuna. Al cambiar un padre se limpian los
+dependientes, para no poder guardar un barrio de Ibague con municipio
+Roldanillo.
+
+**Hacia arriba (rellenar).** El caso real es que la persona conozca el barrio
+pero no la comuna. Al elegir un valor, `resolveCatalogAncestors` recorre las FK
+hacia arriba y el endpoint **`module/catalogAncestors`** devuelve el resto de la
+cadena; `crudRellenarAncestros` en `public/js/crud.js` completa **solo los
+campos vacios** (no pisa lo que el usuario ya eligio). Elegir un barrio rellena
+comuna, zona, municipio, departamento y pais.
+
+Durante ese relleno el formulario se marca con `__crudAutofill` para que el
+listener de cascada no confunda esos cambios con una edicion manual y borre lo
+que se acaba de escribir.
+
+**Nombres repetidos.** En Ibague hay 16 barrios cuyo nombre existe en mas de una
+comuna (La Esperanza esta en tres). `searchCatalogOptions` detecta las
+coincidencias dentro de un mismo resultado y anade el padre entre parentesis
+solo en esos casos: "La Esperanza (San Simon)" frente a "La Esperanza (Vergel)".
+El resto de la lista no se altera.
+
+Aplica igual en **`tercero`** (columnas propias) y en **`empresa`** (campos
+sinteticos que escriben en tercero, via `resolveCatalogContextTable`).
+
 ### Autocomplete del catalogo (teclado)
 
 En el desplegable de busqueda del catalogo CRUD, **Tab** (sin Shift) confirma la opcion resaltada igual que **Enter**; **Shift+Tab** sigue moviendo el foco hacia atras sin seleccionar.
@@ -538,6 +581,86 @@ El usuario de sesión (`$_SESSION['user_id']`) se usa para `*_by`. Scripts CLI s
 El CRUD no permite editar estos campos desde el formulario (se excluyen en `CrudService::save`). En la base de datos, cada columna de auditoría y soft delete debe llevar **`COMMENT 'show:none'`** (u `show:none|…` si ya hay otras directivas) para ocultarla también en formulario y grilla. Plantilla para tablas nuevas: `database/snippets/trackable_columns.sql`. Para actualizar tablas existentes: `php scripts/apply_trackable_column_comments.php`.
 
 ---
+
+## Concurrencia: como se evita el doble envio
+
+Operaciones que cambian estado y podrian ejecutarse dos veces (doble clic, dos
+usuarios a la vez). El patron peligroso es **leer, validar y luego escribir**:
+entre la lectura y la escritura cabe otra peticion.
+
+| Operacion | Como se protege |
+|-----------|-----------------|
+| Login | `LoginThrottleService`: 5 intentos fallidos por ventana deslizante, registro en `login_intento` y alerta de fuerza bruta |
+| Renovar suscripcion | Indice unico `uk_suscripcion_empresa_inicio (empresa_id, fecha_inicio)`. La garantia esta en el motor, no en un chequeo previo; `createRenewal` traduce el error 1062 en un resultado controlado |
+| Escrituras SIHOS (5 acciones) | Bloqueo nombrado `GET_LOCK` por operacion logica, mas revalidacion dentro de la transaccion de escritura |
+| DetaPlan (borrar / construir) | Ademas, `SELECT ... FOR UPDATE` sobre el prefijo de la PRIMARY KEY |
+| Permisos por lote | Un solo DELETE por lote, transaccion corta y reintento ante deadlock/lock timeout |
+
+### Por que un bloqueo nombrado y no `FOR UPDATE` en SIHOS
+
+En `DetaPlan` si se usa `FOR UPDATE`: el filtro es el prefijo de la clave
+primaria (`CodiInst, CodiDocu, NumeDocu`), verificado con EXPLAIN
+(`key=PRIMARY, rows=1`), asi que el bloqueo queda en un documento pese a que la
+tabla tiene ~1,4 millones de filas.
+
+En cambio la comprobacion de "ya existe un ajuste" cruza `DetaCont`/`EncaCont`
+por un indice que empieza en `TiDoRefe`, de **baja cardinalidad**. Un bloqueo de
+hueco ahi frenaria inserciones ajenas y podria entorpecer a los propios usuarios
+de SIHOS. Por eso `SihosExternalWriteRepository::conBloqueo()` usa `GET_LOCK`,
+que serializa solo esa operacion logica sin tocar ninguna fila.
+
+Detalles del bloqueo:
+
+- El nombre se acota al objetivo (institucion + documento + cuenta), de modo que
+  dos correcciones distintas no se estorban.
+- Es de **sesion**, no transaccional: se toma antes de abrir la transaccion y se
+  libera en un `finally`, tambien si la operacion lanza excepcion.
+- Espera `ESPERA_BLOQUEO` (10 s); si no lo consigue lanza
+  **`SihosOperacionEnCursoException`**, que los servicios convierten en un
+  mensaje al usuario en vez de un error 500.
+- SIHOS corre **MySQL 5.6**, que mantiene un unico lock nombrado por sesion;
+  aqui se toma exactamente uno por operacion, asi que encaja.
+
+**Al anadir una escritura nueva contra SIHOS**, envolverla en `conBloqueo()` y
+revalidar dentro de la transaccion: no basta con lo que haya comprobado el
+servicio, porque esa verificacion viaja por la conexion de **lectura** y el
+estado puede cambiar entre una cosa y la otra.
+
+## Overlay de carga global
+
+`savidMostrarCargando(texto, inmediato)` / `savidOcultarCargando()` en
+`public/js/app.js`: bloquea toda la pantalla (por encima del `.modal`
+principal, `z-index:1000000`) mientras dura una operacion lenta, con spinner
+y texto contextual. Se limpia solo al volver por el boton "atras" del
+navegador (`cleanupStaleOverlays`, via bfcache), asi que nunca queda pegado.
+
+**Al agregar cualquier accion nueva que tarde lo suficiente para que el
+usuario pueda irse a otra parte mientras corre (escrituras SIHOS, reportes
+pesados, guardados), envolverla con este helper — es la convencion, no una
+excepcion.**
+
+- **Peticion fetch**: mostrar antes, ocultar SIEMPRE en success y en error
+  (los errores tambien deben liberar el overlay). El retraso por defecto es
+  200ms, para no parpadear en operaciones que resultan instantaneas.
+  ```js
+  savidMostrarCargando("Guardando…");
+  try { await fetch(...); } finally { savidOcultarCargando(); }
+  ```
+- **`<form>` de navegacion completa** (submit nativo, sin fetch): se pasa
+  `inmediato=true` (sin el retraso) y NO se oculta a mano — la navegacion
+  reemplaza el documento entero al terminar.
+  ```js
+  savidMostrarCargando("Generando reporte…", true);
+  // se deja continuar el submit nativo, sin preventDefault
+  ```
+
+Ya aplicado en: guardado del CRUD generico (`crud.js`), las 3 escrituras de
+SIHOS (`sihos-reversar-cuenta.js`, `sihos-reclasificar-cuenta.js`,
+`sihos-construir-detaplan.js` — ahi tambien bloquea el boton "Cerrar" del
+propio modal, para que no se pierda de vista una escritura contable en
+curso), el formulario de fechas de `sihos/cruce`, y el `modal-loader` de
+`openModalGod` (mismo spinner visual, sin la caja con fondo/sombra que
+estorbaria dentro de un modal ya abierto).
 
 ## Riesgos y mantenimiento
 

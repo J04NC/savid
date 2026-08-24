@@ -25,6 +25,44 @@ class SihosCruceReconocimientoService
     private const DOCU_APLI_RECONOCIMIENTO_TESORERIA = [40];
     private const DOCU_APLI_DAC = [125];
 
+    /*
+     * El reporte carga cada documento de presupuesto/contabilidad en un
+     * array PHP para cruzarlos (no hay forma de agregar todo en SQL: la
+     * atribución de vinculados a su factura, sección "Diferencias
+     * presupuesto/contabilidad", es lógica que vive aquí). El volumen es
+     * real del negocio, no un error — un año fiscal completo de una sola
+     * empresa mediana (Roldanillo) ya son más de 100.000 documentos.
+     *
+     * Medido contra datos reales de producción, en procesos aislados
+     * (memory_get_peak_usage es acumulativo por proceso, no por llamada):
+     *   ~8 meses (2026 corrido)     -> 130 MB  (ya por encima del límite
+     *                                            por defecto de PHP, 128 MB)
+     *   año calendario completo     -> 258 MB
+     *   12 meses móviles            -> 200 MB
+     *   18 meses                    -> 365 MB
+     *
+     * El caso de uso real es el año fiscal (~12 meses: la cuenta de
+     * ingresos y el presupuesto se reinician cada año), que cabe con
+     * bastante margen bajo MEMORY_LIMIT_MB. Los repositorios ya iteran con
+     * `while ($stmt->fetch())` en vez de `foreach ($stmt->fetchAll() as …)`
+     * en las consultas pesadas (evita mantener a la vez el array bruto de
+     * fetchAll() y el reindexado — PHP reutiliza cada fila por
+     * copy-on-write, así que el ahorro es solo de la estructura del array
+     * temporal, no de los datos: ~8% medido, no el 50% que parecía a
+     * primera vista). No hay más margen de optimización sin cambiar el
+     * enfoque: las consultas ya seleccionan solo las columnas usadas y ya
+     * agregan con GROUP BY en SQL.
+     *
+     * MEMORY_LIMIT_MB da colchón para el rango permitido; RANGO_MAXIMO_DIAS
+     * corta ANTES de ejecutar un rango que igual reventaría, con un mensaje
+     * claro en vez de un Fatal error. Si el negocio crece y esto empieza a
+     * molestar en rangos normales (~12 meses), la solución de fondo es
+     * mover la atribución vinculado→factura a SQL en vez de cruzarla en
+     * PHP, no seguir subiendo estos números.
+     */
+    private const MEMORY_LIMIT_MB = 512;
+    private const RANGO_MAXIMO_DIAS = 400;
+
     private SihosEmpresaConfigRepository $configRepository;
 
     public function __construct()
@@ -38,6 +76,73 @@ class SihosCruceReconocimientoService
             return ['ok' => false, 'error' => 'Rango de fechas inválido.'];
         }
 
+        $dias = (new DateTime($fechaIni))->diff(new DateTime($fechaFin))->days;
+        if ($dias > self::RANGO_MAXIMO_DIAS) {
+            return [
+                'ok' => false,
+                'error' => sprintf(
+                    'El rango seleccionado es de %d días. Por el volumen de documentos de SIHOS, '
+                        . 'este reporte admite hasta %d días (~%d meses) por consulta — más allá de eso '
+                        . 'el servidor se queda sin memoria. Divida el rango en partes más pequeñas.',
+                    $dias,
+                    self::RANGO_MAXIMO_DIAS,
+                    (int)round(self::RANGO_MAXIMO_DIAS / 30)
+                ),
+            ];
+        }
+
+        // Colchón local, no global: solo esta petición pesada lo necesita, y
+        // solo SUBE el límite — nunca lo baja. Verificado que ini_set()
+        // acepta reducir memory_limit en runtime (a diferencia de otras
+        // directivas PHP_INI_SYSTEM): forzar 512M a ciegas bajaría el límite
+        // en un servidor ya configurado con más.
+        $limitePrevio = ini_get('memory_limit');
+        $bytesPrevios = $this->aBytes($limitePrevio);
+        $bytesDeseados = self::MEMORY_LIMIT_MB * 1024 * 1024;
+
+        if ($bytesPrevios !== -1 && $bytesPrevios < $bytesDeseados) {
+            ini_set('memory_limit', self::MEMORY_LIMIT_MB . 'M');
+        }
+
+        try {
+            return $this->buildReporteInterno($empresaId, $fechaIni, $fechaFin);
+        } finally {
+            // Solo se restaura si es seguro: bajar el límite por debajo de
+            // la memoria ya usada por ESTE reporte no libera nada (los datos
+            // siguen vivos hasta que termine la petición) y solo consigue
+            // que PHP emita un warning ruidoso — visto en pruebas reales,
+            // el reporte deja 130-260 MB en uso, muy por encima de los 128M
+            // por defecto. En PHP-FPM cada petición arranca con el
+            // memory_limit del pool de todos modos: esta restauración es
+            // cortesía para quien reutilice el mismo proceso PHP (CLI,
+            // pruebas), no una necesidad de producción.
+            if ($bytesPrevios === -1 || memory_get_usage(true) < $bytesPrevios) {
+                ini_set('memory_limit', $limitePrevio);
+            }
+        }
+    }
+
+    /** "128M" / "1G" / "-1" → bytes. -1 = sin límite. */
+    private function aBytes(string $valor): int
+    {
+        $valor = trim($valor);
+        if ($valor === '-1') {
+            return -1;
+        }
+
+        $unidad = strtolower(substr($valor, -1));
+        $numero = (int)$valor;
+
+        return match ($unidad) {
+            'g' => $numero * 1024 * 1024 * 1024,
+            'm' => $numero * 1024 * 1024,
+            'k' => $numero * 1024,
+            default => (int)$valor,
+        };
+    }
+
+    private function buildReporteInterno(int $empresaId, string $fechaIni, string $fechaFin): array
+    {
         $configFila = $this->configRepository->findByEmpresaId($empresaId);
         if ($configFila === null || $configFila['host'] === '' || $configFila['base_datos'] === '' || $configFila['usuario'] === '') {
             return ['ok' => false, 'error' => 'Esta empresa no tiene conexión a SIHOS configurada.'];

@@ -143,7 +143,7 @@ class SihosExternalRepository
         $stmt->execute([$this->codiInst()]);
 
         $nombres = [];
-        foreach ($stmt->fetchAll() as $fila) {
+        while ($fila = $stmt->fetch()) {
             $nombres[$fila['CodiTipo']] = $fila['NombTipo'];
         }
 
@@ -201,7 +201,7 @@ class SihosExternalRepository
         $stmt->execute([...$paramsSigno, $this->codiInst(), ...$codigosPresupuesto, $fechaIni, $fechaFin]);
 
         $porDocumento = [];
-        foreach ($stmt->fetchAll() as $fila) {
+        while ($fila = $stmt->fetch()) {
             $porDocumento[$fila['CodiDocu'] . '-' . $fila['NumeDocu']] = $fila;
         }
 
@@ -249,7 +249,7 @@ class SihosExternalRepository
         // atribuir el total a esa única factura — solo sirve para mostrar.
         $porDocumento = [];
         $conteos = [];
-        foreach ($stmt->fetchAll() as $fila) {
+        while ($fila = $stmt->fetch()) {
             $clave = $fila['CodiDocu'] . '-' . $fila['NumeDocu'];
             $conteos[$clave] = ($conteos[$clave] ?? 0) + 1;
             if (!isset($porDocumento[$clave])) {
@@ -292,7 +292,7 @@ class SihosExternalRepository
         $stmt->execute([$this->codiInst(), $fechaIni, $fechaFin]);
 
         $porDocumento = [];
-        foreach ($stmt->fetchAll() as $fila) {
+        while ($fila = $stmt->fetch()) {
             $porDocumento[$fila['CodiDocu'] . '-' . $fila['NumeDocu']] = $fila;
         }
 
@@ -884,7 +884,7 @@ class SihosExternalRepository
         $stmt->execute([...$codigosVinculados, $this->codiInst(), ...$codigosFactura, $fechaIni, $fechaFin]);
 
         $porFactura = [];
-        foreach ($stmt->fetchAll() as $fila) {
+        while ($fila = $stmt->fetch()) {
             $porFactura[$fila['CodiDocu'] . '-' . $fila['NumeDocu']] = $fila;
         }
 
@@ -997,7 +997,7 @@ class SihosExternalRepository
         $stmt->execute([$this->codiInst(), ...$codigosFactura, $fechaIni, $fechaFin, ...$paramsCapita]);
 
         $porFactura = [];
-        foreach ($stmt->fetchAll() as $fila) {
+        while ($fila = $stmt->fetch()) {
             $clave = $fila['CodiDocu'] . '-' . $fila['NumeDocu'];
             $porFactura[$clave][] = ['CodiCont' => $fila['CodiCont'], 'Valor' => (float)$fila['Valor']];
         }
@@ -1043,7 +1043,7 @@ class SihosExternalRepository
         $stmt->execute([$this->codiInst(), ...$codigosDocumento, $fechaIni, $fechaFin]);
 
         $porDocumento = [];
-        foreach ($stmt->fetchAll() as $fila) {
+        while ($fila = $stmt->fetch()) {
             $clave = $fila['CodiDocu'] . '-' . $fila['NumeDocu'];
             $porDocumento[$clave][] = [
                 'CodiPlan' => $fila['CodiPlan'],
@@ -1133,7 +1133,7 @@ class SihosExternalRepository
         $stmt->execute($codigosCuenta);
 
         $porCuenta = [];
-        foreach ($stmt->fetchAll() as $fila) {
+        while ($fila = $stmt->fetch()) {
             $porCuenta[$fila['CodiCont']] = $fila['idPartNIIF'];
         }
 
@@ -1225,7 +1225,7 @@ class SihosExternalRepository
         $stmt->execute($params);
 
         $claves = [];
-        foreach ($stmt->fetchAll() as $fila) {
+        while ($fila = $stmt->fetch()) {
             $claves[$fila['FacturaCodiDocu'] . '-' . $fila['FacturaNumeDocu'] . '-' . $fila['CodiCont']] = true;
         }
 

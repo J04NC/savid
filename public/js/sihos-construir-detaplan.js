@@ -55,6 +55,10 @@
         fd.append('codi_docu', pending.codiDocu);
         fd.append('nume_docu', pending.numeDocu);
 
+        if (typeof savidMostrarCargando === 'function') {
+            savidMostrarCargando('Escribiendo en SIHOS, no cierre esta ventana…', true);
+        }
+
         fetch('?url=sihos/cruceConstruirDetaPlan', {
             method: 'POST',
             body: fd,
@@ -67,11 +71,13 @@
                     setTimeout(function () { window.location.reload(); }, 1500);
                 } else {
                     btnConfirmar.disabled = false;
+                    if (typeof savidOcultarCargando === 'function') savidOcultarCargando();
                 }
             })
             .catch(function () {
                 status.textContent = 'Error de conexión.';
                 btnConfirmar.disabled = false;
+                if (typeof savidOcultarCargando === 'function') savidOcultarCargando();
             });
     });
 })();

@@ -1705,6 +1705,134 @@ class CrudService
     }
 
     /**
+     * Resuelve hacia ARRIBA la jerarquía de un valor de catálogo.
+     *
+     * getCatalogParentFieldsForFk encadena hacia abajo (elegir municipio acota
+     * las comunas). Esto hace el recorrido inverso: dado un barrio, devuelve su
+     * comuna y, subiendo por las FK, la zona, el municipio, el departamento y
+     * el país. Así el formulario rellena solo los campos que el usuario no
+     * tiene por qué conocer — el caso real es que sepa el barrio pero no la
+     * comuna.
+     *
+     * Recorre el grafo de claves foráneas, sin rutas fijas: cualquier tabla que
+     * cuelgue de otra hereda el comportamiento.
+     *
+     * Devuelve id Y etiqueta de cada nivel. La etiqueta viaja desde aquí a
+     * propósito: resolverla en el cliente exigiría una segunda búsqueda por
+     * campo, y esa búsqueda pide los padres, que en ese momento todavía no
+     * están puestos — el id quedaba bien pero la caja se veía vacía.
+     *
+     * @return array<string, array{id:int, nombre:string}> columna del contexto => valor
+     */
+    public function resolveCatalogAncestors(string $contextTable, string $fkColumn, int $value): array
+    {
+        $contextTable = $this->resolveCatalogContextTable($contextTable, $fkColumn);
+        $fk = $this->getForeignKeyForColumn($contextTable, $fkColumn);
+
+        if ($fk === null || $value <= 0) {
+            return [];
+        }
+
+        $ctxCols = [];
+        foreach ($this->pdo->query('SHOW COLUMNS FROM `' . $this->sqlIdentifierTable($contextTable) . '`') as $c) {
+            $ctxCols[$c['Field']] = true;
+        }
+
+        // Mismas exclusiones que la cascada descendente: no son jerarquía.
+        $omitir = ['estado_id', 'empresa_id', 'sede_id', 'created_at', 'created_by',
+                   'updated_at', 'updated_by', 'deleted_at', 'deleted_by'];
+
+        $out = [];
+        $pendientes = [[$this->sqlIdentifierTable($fk['referenced_table']), $value]];
+        $vistos = [];
+        $guarda = 0;
+
+        while ($pendientes !== [] && $guarda++ < 20) {
+            [$tabla, $id] = array_shift($pendientes);
+            $marca = $tabla . '#' . $id;
+
+            if (isset($vistos[$marca])) {
+                continue;
+            }
+            $vistos[$marca] = true;
+
+            $salientes = [];
+            foreach ($this->getOutgoingForeignKeys($tabla) as $childFk) {
+                if (!in_array($childFk['column'], $omitir, true)) {
+                    $salientes[] = $childFk;
+                }
+            }
+
+            if ($salientes === []) {
+                continue;
+            }
+
+            $cols = array_map(static fn($f) => '`' . $f['column'] . '`', $salientes);
+            $stmt = $this->pdo->prepare(
+                'SELECT ' . implode(', ', $cols) . ' FROM `' . $tabla . '` WHERE `id` = ? LIMIT 1'
+            );
+            $stmt->execute([$id]);
+            $fila = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$fila) {
+                continue;
+            }
+
+            foreach ($salientes as $childFk) {
+                $col = $childFk['column'];
+                $val = $fila[$col] ?? null;
+
+                if ($val === null || $val === '') {
+                    continue;
+                }
+
+                $refTabla = $this->sqlIdentifierTable($childFk['referenced_table']);
+
+                // Solo interesa lo que el formulario del contexto puede mostrar.
+                if (isset($ctxCols[$col]) && !isset($out[$col])) {
+                    $out[$col] = [
+                        'id' => (int)$val,
+                        'nombre' => $this->etiquetaDeFila($refTabla, (int)$val),
+                    ];
+                }
+
+                $pendientes[] = [$refTabla, (int)$val];
+            }
+        }
+
+        return $out;
+    }
+
+    /** Texto visible de una fila de catálogo (primera columna descriptiva que exista). */
+    private function etiquetaDeFila(string $table, int $id): string
+    {
+        $t = $this->sqlIdentifierTable($table);
+
+        try {
+            $cols = [];
+            foreach ($this->pdo->query('SHOW COLUMNS FROM `' . $t . '`') as $c) {
+                $cols[$c['Field']] = true;
+            }
+
+            foreach (['nombre', 'razon_social', 'descripcion', 'titulo', 'codigo'] as $cand) {
+                if (isset($cols[$cand])) {
+                    $stmt = $this->pdo->prepare('SELECT `' . $cand . '` FROM `' . $t . '` WHERE `id` = ? LIMIT 1');
+                    $stmt->execute([$id]);
+                    $v = $stmt->fetchColumn();
+
+                    if ($v !== false && $v !== null && (string)$v !== '') {
+                        return (string)$v;
+                    }
+                }
+            }
+        } catch (Throwable $e) {
+            // sin etiqueta: el formulario mostrará solo el id
+        }
+
+        return '';
+    }
+
+    /**
      * Estimación de filas (rápido) para relmode:auto.
      */
     public function getApproxTableRows(string $table): int
@@ -1889,7 +2017,93 @@ class CrudService
             $out[] = $item;
         }
 
-        return $out;
+        return $this->desambiguarOpcionesRepetidas($out, $refTable, $refFieldNames);
+    }
+
+    /**
+     * Si dos opciones comparten nombre, añade el padre entre paréntesis para
+     * poder distinguirlas: "La Esperanza (San Simón)" y "La Esperanza (Vergel)".
+     *
+     * En Ibagué hay 16 barrios con nombre repetido en comunas distintas; sin
+     * esto la lista muestra entradas idénticas y el usuario no sabe cuál elegir.
+     * Solo se toca lo repetido, para no alargar el resto de la lista.
+     *
+     * @param list<array<string,mixed>> $items
+     * @param list<string> $refFieldNames
+     * @return list<array<string,mixed>>
+     */
+    private function desambiguarOpcionesRepetidas(array $items, string $refTable, array $refFieldNames): array
+    {
+        if (count($items) < 2) {
+            return $items;
+        }
+
+        $conteo = [];
+        foreach ($items as $it) {
+            $k = mb_strtolower(trim((string)$it['nombre']));
+            $conteo[$k] = ($conteo[$k] ?? 0) + 1;
+        }
+
+        $repetidos = array_filter($conteo, static fn($n) => $n > 1);
+        if ($repetidos === []) {
+            return $items;
+        }
+
+        // Primer padre de la tabla referenciada que sirva de contexto.
+        $padre = null;
+        foreach ($this->getOutgoingForeignKeys($refTable) as $fk) {
+            if (in_array($fk['column'], ['estado_id', 'empresa_id', 'sede_id'], true)) {
+                continue;
+            }
+            if (in_array($fk['column'], $refFieldNames, true)) {
+                $padre = $fk;
+                break;
+            }
+        }
+
+        if ($padre === null) {
+            return $items;
+        }
+
+        $ids = [];
+        foreach ($items as $it) {
+            if (isset($repetidos[mb_strtolower(trim((string)$it['nombre']))])) {
+                $ids[] = (int)$it['id'];
+            }
+        }
+
+        if ($ids === []) {
+            return $items;
+        }
+
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $tPadre = $this->sqlIdentifierTable($padre['referenced_table']);
+        $col = $this->sqlIdentifierTable($padre['column']);
+
+        try {
+            $stmt = $this->pdo->prepare(
+                "SELECT h.`id` AS hid, p.`nombre` AS padre
+                 FROM `{$refTable}` h JOIN `{$tPadre}` p ON p.`id` = h.`{$col}`
+                 WHERE h.`id` IN ({$ph})"
+            );
+            $stmt->execute($ids);
+            $etiqueta = [];
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $etiqueta[(int)$r['hid']] = (string)$r['padre'];
+            }
+        } catch (Throwable $e) {
+            return $items; // el padre no tiene `nombre`: se deja la lista tal cual
+        }
+
+        foreach ($items as &$it) {
+            $p = $etiqueta[(int)$it['id']] ?? '';
+            if ($p !== '' && isset($repetidos[mb_strtolower(trim((string)$it['nombre']))])) {
+                $it['nombre'] = $it['nombre'] . ' (' . $p . ')';
+            }
+        }
+        unset($it);
+
+        return $items;
     }
 
     /**

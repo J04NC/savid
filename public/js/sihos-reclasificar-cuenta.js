@@ -70,6 +70,13 @@
         fd.append('nume_docu', pending.numeDocu);
         fd.append('cuenta_destino', selectDestino.value);
 
+        // El backend da hasta 180s a esta operación (varias idas y vueltas a
+        // SIHOS) — el overlay bloquea también "Cerrar" de este modal, para
+        // que no se pierda de vista mientras dura.
+        if (typeof savidMostrarCargando === 'function') {
+            savidMostrarCargando('Reclasificando en SIHOS, no cierre esta ventana…', true);
+        }
+
         fetch('?url=sihos/cruceReclasificarCuentaVigenciaAnterior', {
             method: 'POST',
             body: fd,
@@ -82,11 +89,13 @@
                     setTimeout(function () { window.location.reload(); }, 1500);
                 } else {
                     actualizarBotonConfirmar();
+                    if (typeof savidOcultarCargando === 'function') savidOcultarCargando();
                 }
             })
             .catch(function () {
                 status.textContent = 'Error de conexión.';
                 actualizarBotonConfirmar();
+                if (typeof savidOcultarCargando === 'function') savidOcultarCargando();
             });
     });
 })();

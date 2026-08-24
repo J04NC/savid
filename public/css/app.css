@@ -3149,6 +3149,59 @@ SAVID MODAL SYSTEM GOD
     opacity:.9;
 }
 
+/* overlay de carga global (ver savidMostrarCargando en app.js) */
+
+.savid-cargando-overlay{
+    position:fixed;
+    inset:0;
+    /* Debe cubrir hasta el modal principal (.modal, z-index:999999): si una
+       escritura larga corre con un modal SIHOS abierto encima, tiene que
+       bloquear también los botones de ESE modal (p. ej. "Cerrar"), no solo
+       el fondo de la página. */
+    z-index:1000000;
+    display:none;
+    align-items:center;
+    justify-content:center;
+    background:rgba(0,0,0,.55);
+    backdrop-filter:blur(2px);
+}
+
+.savid-cargando-overlay.activo{
+    display:flex;
+}
+
+.savid-cargando-caja{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:14px;
+    padding:28px 36px;
+    border-radius:12px;
+    background:var(--crud-th-bg,#000);
+    border:1px solid var(--crud-td-border,rgba(255,255,255,.08));
+    box-shadow:0 12px 40px rgba(0,0,0,.4);
+}
+
+.savid-cargando-spinner{
+    width:34px;
+    height:34px;
+    border-radius:50%;
+    border:3px solid rgba(29,209,161,.25);
+    border-top-color:var(--savid-accent,#1dd1a1);
+    animation:savidCargandoGiro .7s linear infinite;
+}
+
+.savid-cargando-texto{
+    font-size:14px;
+    color:var(--modal-form-text,#e5e5e5);
+    text-align:center;
+    max-width:280px;
+}
+
+@keyframes savidCargandoGiro{
+    to{ transform:rotate(360deg); }
+}
+
 /* body lock */
 
 body.modal-open{

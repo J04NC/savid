@@ -1592,6 +1592,70 @@ function crudClearInputsInGroup(groupEl) {
     });
 }
 
+/*
+ * Relleno hacia arriba de la jerarquía de catálogo.
+ *
+ * Al elegir un barrio, el servidor devuelve su comuna, zona, municipio,
+ * departamento y país (module/catalogAncestors, que recorre las claves
+ * foráneas). El caso real es que la persona conozca el barrio pero no la
+ * comuna, así que se rellenan por ella.
+ *
+ * Solo se completan los campos VACÍOS: si alguien ya eligió algo a mano no se
+ * le pisa. Y se marca __crudAutofill mientras se escribe para que el listener
+ * de cascada no interprete estos cambios como una edición del usuario y borre
+ * justamente el valor que acabamos de poner.
+ */
+function crudRellenarAncestros(form, ctx, field, value) {
+    if (!form || !ctx || !field || !value) return;
+
+    const u = new URL(window.location.href);
+    u.search = "";
+    u.searchParams.set("url", "module/catalogAncestors");
+    u.searchParams.set("context", ctx);
+    u.searchParams.set("field", field);
+    u.searchParams.set("value", value);
+
+    fetch(u.toString())
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (data) {
+            if (!data || !data.ok || !data.values) return;
+
+            form.__crudAutofill = true;
+            try {
+                Object.keys(data.values).forEach(function (col) {
+                    const info = data.values[col] || {};
+                    const val = String(info.id != null ? info.id : "");
+                    const etiqueta = String(info.nombre || "");
+                    if (val === "") return;
+
+                    const el = form.querySelector('[name="' + col.replace(/"/g, "") + '"]');
+                    if (!el || String(el.value || "").trim() !== "") return;
+
+                    el.value = val;
+
+                    // Campo de catálogo: además del id hay que mostrar la etiqueta,
+                    // que ya viene del servidor (ver resolveCatalogAncestors).
+                    const wrap = el.closest(".crud-catalog-wrap");
+                    if (wrap) {
+                        const sEl = wrap.querySelector(".crud-catalog-search");
+                        if (sEl && String(sEl.value || "").trim() === "" && etiqueta !== "") {
+                            sEl.value = etiqueta;
+                        }
+                    }
+                    el.dispatchEvent(new Event("change", { bubbles: true }));
+                });
+            } finally {
+                form.__crudAutofill = false;
+            }
+
+            const zf = form.matches("[data-crud-zona-ubicacion-toggle]")
+                ? form
+                : document.querySelector("form[data-crud-zona-ubicacion-toggle]");
+            if (zf) crudZonaUbicacionApplyFromForm(zf);
+        })
+        .catch(function () { /* el autocompletado es una ayuda: si falla, no estorba */ });
+}
+
 function crudGetZonaTipoFromForm(form) {
     if (!form) return "";
     const sel = form.querySelector('select[name="zona_id"]');
@@ -1708,6 +1772,11 @@ function initCrudCatalog() {
         const el = form.querySelector('[name="' + pName.replace(/"/g, "") + '"]');
         if (!el) return;
         const resetDependents = function () {
+            // No limpiar cuando el cambio lo produjo el relleno automático hacia
+            // arriba: si no, al poner el municipio se borraría la comuna y el
+            // barrio que originaron ese municipio.
+            if (form.__crudAutofill) return;
+
             wrapList.forEach(function (wrap) {
                 const hid = wrap.querySelector(".crud-catalog-id");
                 const searchEl = wrap.querySelector(".crud-catalog-search");
@@ -1814,6 +1883,7 @@ function initCrudCatalog() {
             activeIdx = -1;
             hid.classList.remove("input-error");
             hid.dispatchEvent(new Event("change", { bubbles: true }));
+            crudRellenarAncestros(form, ctx, field, hid.value);
         }
 
         const buildUrl = function () {
@@ -2265,6 +2335,14 @@ function initCrudValidation() {
         if (errores > 0) {
             e.preventDefault();
             alert("Complete los campos obligatorios.");
+            return;
+        }
+
+        // Submit nativo (navegación completa, no fetch): se muestra ya, sin
+        // el retraso de 200ms, porque la navegación reemplaza la página
+        // entera al terminar y no hay forma de ocultarlo a mano.
+        if (typeof savidMostrarCargando === "function") {
+            savidMostrarCargando("Guardando…", true);
         }
 
     });

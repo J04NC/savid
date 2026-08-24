@@ -53,13 +53,31 @@ class SubscriptionRepository
         return $row ?: null;
     }
 
+    /**
+     * Crea la renovación. Devuelve 0 si ya existía una para esa empresa y
+     * fecha de inicio.
+     *
+     * La exclusión la garantiza el índice único uk_suscripcion_empresa_inicio,
+     * no una comprobación previa en PHP: entre un SELECT y este INSERT cabe
+     * otra petición, y dos clics en "Renovar" creaban dos suscripciones. Aquí
+     * solo se traduce el choque (1062) en un resultado controlado.
+     */
     public function createRenewal(int $empresaId, int $planId, string $fechaInicio, string $fechaFin): int
     {
         $stmt = $this->pdo->prepare("
             INSERT INTO suscripcion (empresa_id, plan_id, fecha_inicio, fecha_fin, estado_id)
             VALUES (?, ?, ?, ?, 1)
         ");
-        $stmt->execute([$empresaId, $planId, $fechaInicio, $fechaFin]);
+
+        try {
+            $stmt->execute([$empresaId, $planId, $fechaInicio, $fechaFin]);
+        } catch (PDOException $e) {
+            if ((int)($e->errorInfo[1] ?? 0) === 1062) {
+                return 0;
+            }
+
+            throw $e;
+        }
 
         return (int)$this->pdo->lastInsertId();
     }

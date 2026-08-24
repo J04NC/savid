@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Login | Savid</title>
     <link rel="stylesheet" href="/css/login.css">
+    <?php if (TurnstileService::habilitado()): ?>
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+    <?php endif; ?>
 </head>
 <body class="login-page dark-mode">
 
@@ -40,6 +43,14 @@
                 <input type="password" name="password" placeholder="********" required>
             </div>
 
+            <?php if (TurnstileService::habilitado()): ?>
+            <?php /* sin data-theme: el login tiene un toggle manual claro/oscuro
+                     (#toggleTheme), así que se deja el valor por defecto "auto"
+                     (se adapta solo) en vez de fijarlo a un tema que podría no
+                     coincidir con lo que el usuario eligió */ ?>
+            <div class="cf-turnstile" data-sitekey="<?= htmlspecialchars(TurnstileService::siteKey()) ?>"></div>
+            <?php endif; ?>
+
             <div class="button-row">
                 <button type="submit" class="btn primary">Iniciar sesión</button>
                 <a href="?url=login/forgot" class="btn secondary">Recuperar contraseña</a>
@@ -49,6 +60,10 @@
         <div class="theme-toggle">
             <button id="toggleTheme" class="theme-icon">☀️</button>
         </div>
+
+        <p style="text-align:center; margin-top:18px; font-size:12.5px;">
+            <a href="?url=privacidad" style="color:#1dd1a1; text-decoration:none;">Política de privacidad</a>
+        </p>
     </div>
 </div>
 

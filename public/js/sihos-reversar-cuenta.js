@@ -64,6 +64,14 @@
         fd.append('nume_docu', pending.numeDocu);
         fd.append('cons_deta', pending.consDeta);
 
+        // El overlay global (z-index por encima del modal) bloquea también
+        // "Cerrar" mientras la escritura está en curso: cerrar este modal no
+        // cancela nada en el servidor, solo dejaría al usuario sin saber si
+        // terminó bien.
+        if (typeof savidMostrarCargando === 'function') {
+            savidMostrarCargando('Escribiendo en SIHOS, no cierre esta ventana…', true);
+        }
+
         fetch('?url=sihos/cruceReversarCuentaInesperada', {
             method: 'POST',
             body: fd,
@@ -76,11 +84,13 @@
                     setTimeout(function () { window.location.reload(); }, 1500);
                 } else {
                     btnConfirmar.disabled = false;
+                    if (typeof savidOcultarCargando === 'function') savidOcultarCargando();
                 }
             })
             .catch(function () {
                 status.textContent = 'Error de conexión.';
                 btnConfirmar.disabled = false;
+                if (typeof savidOcultarCargando === 'function') savidOcultarCargando();
             });
     });
 })();

@@ -18,6 +18,84 @@ document.addEventListener("DOMContentLoaded", function () {
 
 window.addEventListener("pageshow", cleanupStaleOverlays);
 
+/*
+ * =====================================================
+ * OVERLAY DE CARGA GLOBAL
+ * =====================================================
+ * Bloquea la interacción con el resto de la pantalla mientras dura una
+ * operación lenta (guardar, generar un reporte, escribir en SIHOS…). Antes
+ * cada sitio manejaba su propia espera a su manera — o no la manejaba: los
+ * botones de escritura de SIHOS solo se deshabilitaban a sí mismos y el
+ * resto de la pantalla quedaba libre, así que se podía cerrar el modal o
+ * navegar mientras la escritura seguía en curso en el servidor.
+ *
+ * Uso para peticiones fetch (mostrar antes, ocultar siempre en el finally):
+ *   savidMostrarCargando("Guardando…");
+ *   try { await fetch(...); } finally { savidOcultarCargando(); }
+ *
+ * Uso para un <form> de navegación completa (submit normal, sin fetch): se
+ * muestra inmediato (sin el retraso) porque la navegación reemplaza el
+ * documento entero al terminar — no hace falta ni es posible ocultarlo a
+ * mano:
+ *   savidMostrarCargando("Generando reporte…", true);
+ *   // se deja continuar el submit nativo
+ *
+ * El retraso de 200ms (para fetch) evita el parpadeo de mostrar y ocultar
+ * de inmediato en operaciones que en la práctica son instantáneas.
+ */
+let savidCargandoTimer = null;
+let savidCargandoProfundidad = 0;
+
+function savidMostrarCargando(texto, inmediato) {
+    savidCargandoProfundidad++;
+    clearTimeout(savidCargandoTimer);
+
+    const pintar = function () {
+        let overlay = document.getElementById("savidCargandoOverlay");
+        if (!overlay) {
+            overlay = document.createElement("div");
+            overlay.id = "savidCargandoOverlay";
+            overlay.className = "savid-cargando-overlay";
+            overlay.innerHTML =
+                '<div class="savid-cargando-caja">' +
+                '<div class="savid-cargando-spinner" aria-hidden="true"></div>' +
+                '<div class="savid-cargando-texto"></div>' +
+                "</div>";
+            document.body.appendChild(overlay);
+        }
+        overlay.querySelector(".savid-cargando-texto").textContent = texto || "Procesando…";
+        overlay.classList.add("activo");
+    };
+
+    if (inmediato) {
+        pintar();
+    } else {
+        savidCargandoTimer = setTimeout(pintar, 200);
+    }
+}
+
+function savidOcultarCargando() {
+    savidCargandoProfundidad = Math.max(0, savidCargandoProfundidad - 1);
+    if (savidCargandoProfundidad > 0) {
+        return;
+    }
+    clearTimeout(savidCargandoTimer);
+    const overlay = document.getElementById("savidCargandoOverlay");
+    if (overlay) {
+        overlay.classList.remove("activo");
+    }
+}
+
+/** Fuerza el overlay a cerrado, ignorando la profundidad — usar solo al recuperar la página (ver cleanupStaleOverlays). */
+function savidOcultarCargandoForzado() {
+    savidCargandoProfundidad = 0;
+    clearTimeout(savidCargandoTimer);
+    const overlay = document.getElementById("savidCargandoOverlay");
+    if (overlay) {
+        overlay.classList.remove("activo");
+    }
+}
+
 /**
  * Quita capas invisibles que a veces quedan abiertas y bloquean clics (p. ej. menú Columnas de DataTables).
  */
@@ -48,6 +126,20 @@ document.addEventListener("click", function (e) {
     }
     window.setTimeout(cleanupStaleOverlays, 0);
 }, true);
+
+// Restaurar desde el historial (botón atrás) puede traer de vuelta el
+// overlay de carga visible y bloqueando la pantalla para siempre — la
+// operación que lo mostró ya no está en curso en esta vista restaurada.
+// A propósito NO va dentro de cleanupStaleOverlays(): esa función también
+// se dispara en CUALQUIER clic del documento (ver arriba, con setTimeout 0),
+// y ese mismo clic puede ser justo el que llama a savidMostrarCargando()
+// (p. ej. el submit de un <form> con overlay inmediato) — apagarlo ahí lo
+// cerraba a los pocos milisegundos de haberlo abierto.
+window.addEventListener("pageshow", function () {
+    if (typeof savidOcultarCargandoForzado === "function") {
+        savidOcultarCargandoForzado();
+    }
+});
 
 /* =====================================================
 SIDEBAR
@@ -183,8 +275,16 @@ function initModalSystem() {
             box.classList.remove("modal-permisos");
         }
 
+        // El modal en sí ya cubre la pantalla y bloquea la interacción con
+        // el fondo (ver body.modal-open); aquí solo se usa el mismo spinner
+        // visual del overlay global (sin su caja con fondo/sombra, pensada
+        // para flotar sobre la página, no para ir dentro de otro modal) para
+        // que se vea consistente en todo el sistema.
         container.innerHTML =
-            `<div class="modal-loader">${loading}</div>`;
+            '<div class="modal-loader">'
+            + '<div class="savid-cargando-spinner" style="margin:0 auto 14px;" aria-hidden="true"></div>'
+            + loading
+            + '</div>';
 
         let fetchUrl = "?url=" + url;
         if (url.includes("context/cambiarSede") && !url.includes("partial=")) {
