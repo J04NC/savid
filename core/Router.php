@@ -179,6 +179,25 @@ class Router
             'cruceConstruirDetaPlan',
         ];
 
+        /*
+         * Misma razón que $sihosCruceAccionMethods: sihos/nominaPilaExportar
+         * no tiene ítem de menú propio (es la descarga .xlsx del reporte
+         * sihos/nominaPila), así que sin este caso especial caería al
+         * fallback genérico de PermisoService::resolveItemAccionId() sobre
+         * el segmento raíz "sihos" (Conexión SIHOS), sin relación con el
+         * reporte de nómina.
+         */
+        $sihosNominaPilaAccionMethods = ['nominaPilaExportar'];
+
+        /*
+         * Misma razón: sihos/nominaPilaCorreccionAplicar (la escritura AJAX
+         * de la pantalla de corrección) no tiene ítem de menú propio — su
+         * pantalla es sihos/nominaPilaCorreccion. El permiso fino ('guardar')
+         * se re-valida dentro del propio controller; aquí solo se evita que
+         * caiga al fallback genérico sobre el segmento raíz "sihos".
+         */
+        $sihosNominaPilaCorreccionAccionMethods = ['nominaPilaCorreccionAplicar'];
+
         if (SessionManager::userLogged()
             && $controllerName === 'UsuarioController'
             && in_array($method, $usuarioJsonLookupMethods, true)
@@ -214,6 +233,12 @@ class Router
             && !($controllerName === 'SihosController'
                 && in_array($method, $sihosCruceAccionMethods, true)
                 && PermisoService::can('sihos/cruce', 'ver'))
+            && !($controllerName === 'SihosController'
+                && in_array($method, $sihosNominaPilaAccionMethods, true)
+                && PermisoService::can('sihos/nominaPila', 'ver'))
+            && !($controllerName === 'SihosController'
+                && in_array($method, $sihosNominaPilaCorreccionAccionMethods, true)
+                && PermisoService::can('sihos/nominaPilaCorreccion', 'ver'))
             && !PermisoService::can($rutaCompleta, 'ver')) {
             http_response_code(403);
             exit('Acceso denegado.');

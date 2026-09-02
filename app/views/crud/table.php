@@ -21,6 +21,7 @@ function getConfigFromComment($comment){
         'placeholder' => '',
         'relmode' => 'select',
         'uppercase' => false,
+        'readonly' => false,
         'title' => '',
         'label' => '',
         'span' => '',
@@ -96,6 +97,10 @@ function getConfigFromComment($comment){
 
         if ($part === 'uppercase') {
             $config['uppercase'] = true;
+        }
+
+        if ($part === 'readonly') {
+            $config['readonly'] = true;
         }
     }
 
@@ -524,6 +529,7 @@ class="form-input crud-catalog-search <?= $error ? 'input-error' : '' ?>"
 
 <select name="<?= $campo ?>"
 <?= $requiredAttr ?>
+<?= !empty($config['readonly']) ? 'disabled ' : '' ?>
 data-label="<?= htmlspecialchars($fieldLabel, ENT_QUOTES, 'UTF-8') ?>"
 data-rules="<?= $config['rules'] ?>"
 class="form-input <?= $error ? 'input-error' : '' ?>">
@@ -646,6 +652,7 @@ type="<?= $config['type'] ?>"
 name="<?= $campo ?>"
 value="<?= htmlspecialchars($value) ?>"
 <?= $requiredAttr ?>
+<?= !empty($config['readonly']) ? 'disabled ' : '' ?>
 placeholder="<?= $config['placeholder'] ?>"
 data-label="<?= htmlspecialchars($fieldLabel, ENT_QUOTES, 'UTF-8') ?>"
 data-rules="<?= $config['rules'] ?>"
@@ -867,6 +874,11 @@ if (!empty($crudContextTable) && $crudContextTable === 'acad_exercise') {
     $aejsPath = defined('BASE_PATH') ? BASE_PATH . '/public/js/acad-exercise-config.js' : '';
     $aejsV = ($aejsPath !== '' && is_readable($aejsPath)) ? (int) filemtime($aejsPath) : time();
     echo '<script src="/js/acad-exercise-config.js?v=' . $aejsV . '"></script>';
+}
+if (!empty($crudContextTable) && $crudContextTable === 'tercero_nomina') {
+    $tnjsPath = defined('BASE_PATH') ? BASE_PATH . '/public/js/tercero-nomina-crud.js' : '';
+    $tnjsV = ($tnjsPath !== '' && is_readable($tnjsPath)) ? (int) filemtime($tnjsPath) : time();
+    echo '<script src="/js/tercero-nomina-crud.js?v=' . $tnjsV . '"></script>';
 }
 ?>
 

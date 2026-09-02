@@ -115,6 +115,12 @@ class LoginController
     /**
      * POST ?url=login/forgotSend — envía el enlace si el usuario/correo existe.
      * Siempre redirige con el mismo mensaje genérico (anti-enumeración de usuarios).
+     *
+     * Throttle por IP (ForgotPasswordThrottleService, 5 solicitudes/15 min):
+     * evita que se pueda lanzar sin límite este endpoint (spam de correos de
+     * recuperación, sondeo masivo de identificadores). El mensaje de bloqueo
+     * no revela nada sobre ninguna cuenta — solo indica que ESA IP debe
+     * esperar, así que es seguro mostrarlo distinto del mensaje genérico.
      */
     public function forgotSend()
     {
@@ -124,11 +130,26 @@ class LoginController
         }
 
         $identificador = trim($_POST['identificador'] ?? '');
+        $ip = (string)(RequestIpService::current() ?? '');
+
+        $throttle = new ForgotPasswordThrottleService();
+        $estado = $throttle->checkBlocked($ip);
+
+        if ($estado['blocked']) {
+            $_SESSION['forgot_message'] = sprintf(
+                'Demasiadas solicitudes desde esta conexión. Intente de nuevo en %d minuto(s).',
+                $estado['retryAfterMinutes']
+            );
+            header('Location: ?url=login/forgot');
+            exit;
+        }
 
         if ($identificador !== '') {
+            $throttle->recordAttempt($ip, $identificador);
+
             try {
                 $service = new PasswordResetService();
-                $service->requestReset($identificador, RequestIpService::current());
+                $service->requestReset($identificador, $ip);
             } catch (Throwable $e) {
                 error_log('PasswordResetService::requestReset: ' . $e->getMessage());
             }

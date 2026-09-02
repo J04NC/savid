@@ -25,6 +25,14 @@ class CrudService
             return $this->getTableDataRol();
         }
 
+        if ($tabla === 'tercero') {
+            return $this->getTableDataTercero();
+        }
+
+        if ($tabla === 'tercero_nomina') {
+            return $this->getTableDataTerceroNomina();
+        }
+
         $columns = $this->getColumns($tabla);
 
         $fields = array_column($columns, 'Field');
@@ -146,6 +154,190 @@ class CrudService
         $stmt->execute([$empresaId]);
 
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Listado de terceros con el documento principal (terceroidentificacion.principal = 1)
+     * traído por LEFT JOIN, solo para mostrarlo en la grilla — la edición real de las
+     * identificaciones (varias por tercero) vive en el modal "Identificaciones"
+     * (?url=tercero/identificaciones/{id}, TerceroController).
+     */
+    private function getTableDataTercero(): array
+    {
+        $select = 't.*';
+        $joins = '';
+
+        if ($this->tableExists('terceroidentificacion')) {
+            $select .= ', ti.tipodocumento_id, ti.numero AS numero_documento';
+            $joins = ' LEFT JOIN `terceroidentificacion` ti ON ti.tercero_id = t.id AND ti.principal = 1';
+        }
+
+        $notDeleted = SoftDeleteService::supports($this->pdo, 'tercero')
+            ? SoftDeleteService::sqlAndNotDeleted($this->pdo, 'tercero', 't')
+            : '';
+
+        $sql = "SELECT $select FROM tercero t{$joins} WHERE 1=1{$notDeleted} ORDER BY t.id DESC";
+
+        return $this->pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Columnas sintéticas (no en la tabla `tercero`) con el documento principal —
+     * ver getTableDataTercero(). Solo lectura (`readonly`, sin `disabled` no se
+     * envían al guardar): la edición real de identificaciones (varias por tercero,
+     * marcar principal, etc.) vive en el modal "Identificaciones", no en este form.
+     *
+     * @return list<array{Field: string, Type: string, IS_NULLABLE: string, COLUMN_COMMENT: string}>
+     */
+    public function getTerceroIdentificacionSyntheticColumns(): array
+    {
+        return [
+            ['Field' => 'tipodocumento_id', 'Type' => 'smallint', 'IS_NULLABLE' => 'YES',
+                'COLUMN_COMMENT' => 'type:text|relmode:select|order:1|label:Tipo doc.|show:form,table|readonly|title:Documento principal — gestione desde el botón Identificaciones'],
+            ['Field' => 'numero_documento', 'Type' => 'varchar', 'IS_NULLABLE' => 'YES',
+                'COLUMN_COMMENT' => 'type:text|order:2|label:Número doc.|show:form,table|readonly|title:Documento principal — gestione desde el botón Identificaciones'],
+        ];
+    }
+
+    /**
+     * `tercero_nomina` con la identidad resuelta (tipo/número de documento y razón
+     * social del tercero, vía terceroidentificacion) en vez del solo id de la FK —
+     * mismo criterio de getTableDataTercero(), sin necesidad de remapeo porque
+     * `tercero_nomina` no tiene columnas propias que choquen con esos nombres.
+     *
+     * Filtrada ESTRICTAMENTE por empresa de sesión (`tn.empresa_id = sesión`):
+     * ya no hay filas "compartidas" — cada empresa solo ve y solo puede tocar
+     * sus propias filas, nunca las de otra (aunque apunten al mismo tercero).
+     * Sin empresa en sesión (por ejemplo, superadmin sin empresa seleccionada)
+     * se listan todas — igual que el resto del CRUD genérico cuando no hay
+     * `$_SESSION['empresa_id']`.
+     *
+     * `empresa_nombre` es de solo lectura (razón social de la empresa dueña de
+     * la fila) — reemplaza mostrar el `empresa_id` crudo en la grilla.
+     */
+    private function getTableDataTerceroNomina(): array
+    {
+        $select = 'tn.*';
+        $joins = '';
+        $params = [];
+
+        if ($this->tableExists('terceroidentificacion') && $this->tableExists('tercero')) {
+            $select .= ', ti.tipodocumento_id, ti.numero AS numero_documento, ti.dv AS documento_dv, t.razon_social';
+            $joins .= ' INNER JOIN `terceroidentificacion` ti ON ti.id = tn.terceroidentificacion_id'
+                . ' INNER JOIN `tercero` t ON t.id = ti.tercero_id';
+        }
+
+        if ($this->tableExists('empresa')) {
+            $select .= ', et.razon_social AS empresa_nombre';
+            $joins .= ' LEFT JOIN `empresa` e ON e.id = tn.empresa_id'
+                . ' LEFT JOIN `tercero` et ON et.id = e.tercero_id';
+        }
+
+        $notDeleted = SoftDeleteService::supports($this->pdo, 'tercero_nomina')
+            ? SoftDeleteService::sqlAndNotDeleted($this->pdo, 'tercero_nomina', 'tn')
+            : '';
+
+        $whereEmpresa = '';
+        if (isset($_SESSION['empresa_id']) && (int)$_SESSION['empresa_id'] > 0) {
+            $whereEmpresa = ' AND tn.empresa_id = ?';
+            $params[] = (int)$_SESSION['empresa_id'];
+        }
+
+        $sql = "SELECT $select FROM tercero_nomina tn{$joins} WHERE 1=1{$notDeleted}{$whereEmpresa} ORDER BY tn.id DESC";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Columnas sintéticas (no en la tabla `tercero_nomina`) con la identidad del
+     * tercero, EDITABLES en el formulario (a diferencia de las de `tercero`, que son
+     * solo lectura) — al guardar, resolveTerceroNominaIdentidadForSave() las resuelve
+     * contra `tercero`/`terceroidentificacion` (crea o reutiliza por tipo+número).
+     *
+     * `empresa_nombre` es de solo lectura (show:table): informa a qué empresa
+     * pertenece la fila (o "COMPARTIDO ENTRE EMPRESAS"); `empresa_id` en sí queda
+     * oculto — ver applyTerceroNominaColumnPresentation() — porque se asigna
+     * siempre desde la sesión al guardar (nunca lo elige el usuario).
+     *
+     * @return list<array{Field: string, Type: string, IS_NULLABLE: string, COLUMN_COMMENT: string}>
+     */
+    public function getTerceroNominaIdentidadSyntheticColumns(): array
+    {
+        return [
+            ['Field' => 'tipodocumento_id', 'Type' => 'smallint', 'IS_NULLABLE' => 'NO',
+                'COLUMN_COMMENT' => 'type:text|order:5|relmode:select|label:Tipo de documento|required'],
+            ['Field' => 'numero_documento', 'Type' => 'varchar', 'IS_NULLABLE' => 'NO',
+                'COLUMN_COMMENT' => 'type:text|order:6|label:Número de documento|required|placeholder:Sin puntos ni DV'],
+            ['Field' => 'documento_dv', 'Type' => 'varchar', 'IS_NULLABLE' => 'YES',
+                'COLUMN_COMMENT' => 'type:text|order:7|label:DV|show:table|title:Dígito de verificación — se calcula solo cuando el tipo es NIT'],
+            ['Field' => 'razon_social', 'Type' => 'varchar', 'IS_NULLABLE' => 'NO',
+                'COLUMN_COMMENT' => 'type:text|order:8|label:Razón social|uppercase|required'],
+            ['Field' => 'empresa_nombre', 'Type' => 'varchar', 'IS_NULLABLE' => 'YES',
+                'COLUMN_COMMENT' => 'order:35|label:Empresa|show:table|title:Empresa dueña de esta fila (o compartida entre todas); se asigna sola desde su sesión al guardar'],
+        ];
+    }
+
+    /**
+     * Oculta del form/grilla de `tercero_nomina`:
+     * - `terceroidentificacion_id`: la FK real, reemplazada por los campos
+     *   sintéticos de identidad (tipo/número de documento, razón social).
+     * - `empresa_id`: se asigna siempre desde la empresa de sesión al guardar
+     *   (ver resolveTerceroNominaIdentidadForSave() / auto-completado genérico de
+     *   CrudService::save()); la grilla muestra en su lugar `empresa_nombre`
+     *   (solo lectura). Mostrar `empresa_id` con su `rel:` normal aquí producía
+     *   además una etiqueta rota ("tercero_id" en vez de "Empresa") porque el
+     *   bridge de relación reutiliza la directiva `label:` tanto para el texto
+     *   del campo como para la columna de despliegue — más simple resolverlo
+     *   con la columna de solo lectura que con ese mecanismo compartido.
+     *
+     * @param list<array<string, mixed>> $columns
+     * @return list<array<string, mixed>>
+     */
+    public function applyTerceroNominaColumnPresentation(array $columns): array
+    {
+        foreach ($columns as &$col) {
+            $field = $col['Field'] ?? '';
+            if ($field === 'terceroidentificacion_id' || $field === 'empresa_id') {
+                $col['COLUMN_COMMENT'] = 'show:none|order:9999';
+            }
+        }
+        unset($col);
+
+        return $columns;
+    }
+
+    /**
+     * ¿Existe ya un tercero con este tipo+número de documento? Usado por el
+     * formulario de `tercero_nomina` (ver ModuleController::terceroNominaLookup())
+     * para autocompletar razón social/DV y avisar que el tercero ya existe en el
+     * sistema (posiblemente de otra empresa) antes de guardar.
+     *
+     * @return array{found: bool, razon_social?: string, dv?: string|null}
+     */
+    public function buscarTerceroPorDocumento(int $tipodocumentoId, string $numero): array
+    {
+        $st = $this->pdo->prepare(
+            'SELECT t.razon_social, ti.dv
+             FROM terceroidentificacion ti
+             INNER JOIN tercero t ON t.id = ti.tercero_id
+             WHERE ti.tipodocumento_id = ? AND TRIM(ti.numero) = TRIM(?)
+             LIMIT 1'
+        );
+        $st->execute([$tipodocumentoId, $numero]);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+
+        if ($row === false) {
+            return ['found' => false];
+        }
+
+        return [
+            'found' => true,
+            'razon_social' => (string)$row['razon_social'],
+            'dv' => $row['dv'] !== null ? (string)$row['dv'] : null,
+        ];
     }
 
     /**
@@ -922,10 +1114,11 @@ class CrudService
 
         $usuarioTx = ($tabla === 'usuario');
         $empresaTx = ($tabla === 'empresa');
+        $terceroNominaTx = ($tabla === 'tercero_nomina');
 
         $usuarioSaveCtx = null;
 
-        if ($empresaTx) {
+        if ($empresaTx || $terceroNominaTx) {
             $this->pdo->beginTransaction();
         }
 
@@ -971,6 +1164,10 @@ class CrudService
                 $this->resolveEmpresaTerceroForSave($data, $id);
                 $this->syncTerceroFromEmpresaForm($data);
                 $this->resolveRepresentanteLegalForSave($data);
+            }
+
+            if ($terceroNominaTx) {
+                $this->resolveTerceroNominaIdentidadForSave($data);
             }
 
             /*
@@ -1142,7 +1339,7 @@ class CrudService
                 }
             }
 
-            if ($usuarioTx || $empresaTx) {
+            if ($usuarioTx || $empresaTx || $terceroNominaTx) {
                 if ($ok) {
                     $this->pdo->commit();
                 } elseif ($this->pdo->inTransaction()) {
@@ -1153,7 +1350,7 @@ class CrudService
             return $ok;
 
         } catch (Throwable $e) {
-            if (($usuarioTx || $empresaTx) && $this->pdo->inTransaction()) {
+            if (($usuarioTx || $empresaTx || $terceroNominaTx) && $this->pdo->inTransaction()) {
                 $this->pdo->rollBack();
             }
 
@@ -1303,6 +1500,135 @@ class CrudService
         $data['documento_dv'] = (string)$dv;
         $st = $this->pdo->prepare('UPDATE terceroidentificacion SET dv = ? WHERE id = ?');
         $st->execute([$dv, $identificacionId]);
+    }
+
+    /**
+     * Resuelve `terceroidentificacion_id` para tercero_nomina a partir de los
+     * campos sintéticos del formulario (tipodocumento_id/numero_documento/
+     * razon_social).
+     *
+     * IMPORTANTE — a propósito NO es simétrico con resolveEmpresaTerceroForSave():
+     * si el tipo+número YA existe, se reutiliza tal cual (identificacion_id) y NO
+     * se toca `tercero.razon_social` ni el `dv` — el tercero es una identidad
+     * compartida por el sistema entero (puede estar en uso por otra empresa), y
+     * esta pantalla es de una sola empresa. Permitir que cualquier empresa
+     * reescriba la razón social de un tercero ajeno con solo escribir su NIT era
+     * justo el riesgo que se pidió cerrar. Los campos del formulario en ese caso
+     * son solo para BUSCAR, no para editar — el JS (tercero-nomina-crud.js) ya
+     * los pone en readonly cuando encuentra una coincidencia, pero esta es la
+     * protección real (el JS se puede saltar).
+     *
+     * Si el tipo+número NO existe todavía, sí se crea el tercero nuevo con los
+     * datos del formulario (razón social incluida) — ahí sí son los datos reales
+     * a guardar, no una búsqueda.
+     *
+     * @param array<string, mixed> $data
+     */
+    private function resolveTerceroNominaIdentidadForSave(array &$data): void
+    {
+        /*
+         * `empresa_id` es NOT NULL en `tercero_nomina` pero está oculto en el
+         * formulario (show:none — se asigna sola desde la sesión, nunca la
+         * elige el usuario). Si no hay empresa en sesión (típico: superadmin
+         * navegando sin haber elegido empresa/sede todavía) y tampoco vino en
+         * el POST, más abajo el auto-completado genérico de save() la dejaría
+         * en NULL y la validación de "obligatorio" reventaría sobre un campo
+         * que nunca se renderiza — el usuario vería la página "recargarse"
+         * sin ningún mensaje visible. Se corta aquí con un error explícito.
+         */
+        $empresaId = (int)($data['empresa_id'] ?? ($_SESSION['empresa_id'] ?? 0));
+        if ($empresaId <= 0) {
+            throw new Exception(json_encode([
+                'general' => 'No hay una empresa seleccionada en su sesión — Terceros Nómina necesita una empresa activa para guardar. Cambie de empresa/sede desde el menú superior e intente de nuevo.',
+            ], JSON_UNESCAPED_UNICODE));
+        }
+
+        $tipodocumentoId = (int)($data['tipodocumento_id'] ?? 0);
+        $numero = trim((string)($data['numero_documento'] ?? ''));
+        $razonSocial = trim((string)($data['razon_social'] ?? ''));
+
+        if ($tipodocumentoId <= 0 || $numero === '' || $razonSocial === '') {
+            throw new Exception(json_encode([
+                'general' => 'Tipo de documento, número de documento y razón social son obligatorios.',
+            ], JSON_UNESCAPED_UNICODE));
+        }
+
+        $esNit = $tipodocumentoId === EmpresaTerceroLookupService::TIPODOCUMENTO_NIT_ID;
+
+        $st = $this->pdo->prepare(
+            'SELECT id FROM terceroidentificacion WHERE tipodocumento_id = ? AND TRIM(numero) = TRIM(?) LIMIT 1'
+        );
+        $st->execute([$tipodocumentoId, $numero]);
+        $existente = $st->fetch(PDO::FETCH_ASSOC);
+
+        if ($existente !== false) {
+            $identificacionId = (int)$existente['id'];
+
+            $this->assertTerceroNominaNoDuplicado($data, $identificacionId);
+
+            $data['terceroidentificacion_id'] = $identificacionId;
+
+            return;
+        }
+
+        $razonSocial = function_exists('mb_strtoupper') ? mb_strtoupper($razonSocial) : strtoupper($razonSocial);
+
+        $st = $this->pdo->prepare(
+            'INSERT INTO tercero (tipopersona_id, razon_social, estado_id) VALUES (?, ?, 1)'
+        );
+        $st->execute([EmpresaTerceroLookupService::TIPOPERSONA_JURIDICA_ID, $razonSocial]);
+        $nuevoTerceroId = (int)$this->pdo->lastInsertId();
+
+        $dv = $esNit ? self::colombianNitDvFromNumber($numero) : null;
+
+        $st = $this->pdo->prepare(
+            'INSERT INTO terceroidentificacion (tercero_id, tipodocumento_id, numero, dv, principal, estado_id) VALUES (?, ?, ?, ?, 1, 1)'
+        );
+        $st->execute([$nuevoTerceroId, $tipodocumentoId, $numero, $dv]);
+
+        $data['terceroidentificacion_id'] = (int)$this->pdo->lastInsertId();
+        $data['documento_dv'] = $dv !== null ? (string)$dv : '';
+    }
+
+    /**
+     * Rechaza con un error entendible (en vez de dejar que reviente la
+     * UNIQUE(terceroidentificacion_id, tipo_tercero_id, empresa_id) con una
+     * excepción SQL cruda) un tercero_nomina repetido para el mismo tercero +
+     * tipo dentro de la misma empresa. Se calcula la MISMA empresa efectiva que
+     * usará el auto-completado genérico de CrudService::save() (si `empresa_id`
+     * no viene en el POST, cae a la empresa de sesión) porque este chequeo corre
+     * ANTES de que ese auto-completado se aplique.
+     */
+    private function assertTerceroNominaNoDuplicado(array $data, int $identificacionId): void
+    {
+        $tipoTerceroId = (int)($data['tipo_tercero_id'] ?? 0);
+        if ($tipoTerceroId <= 0) {
+            return;
+        }
+
+        // Misma regla que el auto-completado genérico de CrudService::save() (más
+        // abajo en el flujo): si `empresa_id` no viene en el POST, será la empresa
+        // de sesión. Este chequeo corre antes de que ese auto-completado se aplique,
+        // así que hay que anticipar el mismo valor.
+        $empresaEfectiva = (int)($data['empresa_id'] ?? ($_SESSION['empresa_id'] ?? 0));
+        $idActual = (int)($data['id'] ?? 0);
+
+        $notDeleted = SoftDeleteService::supports($this->pdo, 'tercero_nomina')
+            ? SoftDeleteService::sqlAndNotDeleted($this->pdo, 'tercero_nomina')
+            : '';
+
+        $st = $this->pdo->prepare(
+            "SELECT id FROM tercero_nomina
+             WHERE terceroidentificacion_id = ? AND tipo_tercero_id = ? AND empresa_id = ? AND id <> ?
+             {$notDeleted} LIMIT 1"
+        );
+        $st->execute([$identificacionId, $tipoTerceroId, $empresaEfectiva, $idActual]);
+
+        if ($st->fetchColumn()) {
+            throw new Exception(json_encode([
+                'general' => 'Ya existe un registro de este tercero con este tipo para su empresa.',
+            ], JSON_UNESCAPED_UNICODE));
+        }
     }
 
     /**

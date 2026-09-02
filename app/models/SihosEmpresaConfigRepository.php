@@ -34,6 +34,71 @@ class SihosEmpresaConfigRepository
     }
 
     /**
+     * Municipio de la empresa (empresa → tercero → municipio, catálogo
+     * territorial de SAVID), en MAYÚSCULAS y sin tildes (conserva la Ñ, que
+     * no es una tilde) — mismo formato que tenía el valor fijo que
+     * reemplaza ('LA UNION', sin tilde) en la columna 'Ciu' del reporte
+     * PILA (SihosNominaPilaService/SihosNominaPilaCorreccionService, ver
+     * SihosExternalRepository::fetchNominaPila()): el operador de aportes en
+     * línea es estricto con el formato de ese archivo, así que se normaliza
+     * aquí en vez de confiar en cómo esté digitado el municipio en el
+     * catálogo territorial.
+     *
+     * @return string vacío si la empresa no tiene tercero o el tercero no
+     *     tiene municipio asignado — el llamador decide qué hacer con eso
+     *     (hoy: dejar la columna vacía en vez de inventar un valor).
+     */
+    public function municipioEmpresa(int $empresaId): string
+    {
+        $stmt = $this->pdo->prepare('
+            SELECT m.nombre
+            FROM empresa e
+            INNER JOIN tercero t ON t.id = e.tercero_id
+            INNER JOIN municipio m ON m.id = t.municipio_id
+            WHERE e.id = ?
+            LIMIT 1
+        ');
+        $stmt->execute([$empresaId]);
+        $nombre = $stmt->fetchColumn();
+
+        if ($nombre === false || trim((string)$nombre) === '') {
+            return '';
+        }
+
+        $nombre = mb_strtoupper(trim((string)$nombre), 'UTF-8');
+
+        return strtr($nombre, ['Á' => 'A', 'É' => 'E', 'Í' => 'I', 'Ó' => 'O', 'Ú' => 'U', 'Ü' => 'U']);
+    }
+
+    /**
+     * Salario mínimo mensual vigente de la empresa para un año (tabla
+     * `sihos_salario_minimo`, motor CRUD genérico, ítem "SIHOS > REPORTES >
+     * NÓMINA > SALARIO MÍNIMO") — usado por
+     * SihosExternalRepository::fetchNominaPila() para el piso de 1 SMLDV
+     * del retroactivo de vacaciones (ver docblock de esa sección).
+     *
+     * @return float 0.0 si no hay valor configurado para esa empresa/año —
+     *     el llamador lo pasa tal cual a fetchNominaPila(), donde 0.0 es un
+     *     no-op explícito (nunca null, ver docblock de esa función).
+     */
+    public function salarioMinimoMensual(int $empresaId, int $ano): float
+    {
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'sihos_salario_minimo');
+
+        $stmt = $this->pdo->prepare("
+            SELECT valor
+            FROM sihos_salario_minimo
+            WHERE empresa_id = ? AND ano = ? {$nd}
+            ORDER BY id DESC
+            LIMIT 1
+        ");
+        $stmt->execute([$empresaId, $ano]);
+        $valor = $stmt->fetchColumn();
+
+        return $valor === false ? 0.0 : (float)$valor;
+    }
+
+    /**
      * @param array{host:string,puerto:int,base_datos:string,usuario:string,codi_inst:string,password_cifrado:?string,charset:string,usuario_escritura:?string,password_escritura_cifrado:?string} $data
      */
     public function upsert(int $empresaId, array $data): void

@@ -1378,4 +1378,235 @@ class SihosExternalWriteRepository
             $tiDoTerc ?? '', $nuDoTerc ?? '', $tiDoRefe, $nuDoRefe, null, $valor, $usuaDigi,
         ]);
     }
+
+    /**
+     * Corrige en `DetaNomi` un concepto de nómina para que el TOTAL
+     * (`ValoEmpe`+`ValoPatr`) quede igual al valor que exige el operador de
+     * aportes en línea — usado por SihosNominaPilaCorreccionService a partir
+     * del CSV de "posibles correcciones" del portal.
+     *
+     * Por defecto ($ajustarValoEmpe=false) solo toca `ValoPatr`: `ValoEmpe`
+     * (aporte del empleado, ya descontado de su pago) queda intacto —
+     * decisión explícita del usuario, para no afectar un valor que ya pudo
+     * haberse pagado al trabajador. Esto cubre pensión/salud/CCF/SENA/ICBF.
+     *
+     * EXCEPCIÓN DELIBERADA — $ajustarValoEmpe=true (SOLO para Fondo de
+     * Solidaridad Pensional): ese concepto en SIHOS tiene `ValoPatr` SIEMPRE
+     * en $0 — no existe aporte patronal para ese fondo, es 100% a cargo del
+     * empleado (verificado contra un caso real: ValoEmpe=$129.100,
+     * ValoPatr=$0.00). Para ese concepto específico no hay "aporte
+     * patronal" que subir o bajar: la única forma real de corregirlo es
+     * ajustando `ValoEmpe`. El llamador (SihosNominaPilaCorreccionService)
+     * decide este flag SOLO para 'fondo_solidaridad', nunca para los demás
+     * conceptos — la protección de `ValoEmpe` sigue intacta para todo lo
+     * demás.
+     *
+     * Re-verifica DENTRO de la transacción, no solo antes de empezar (mismo
+     * principio que el resto de esta clase):
+     *  1) Que la nómina (el documento contable CodiDocu-NumeDocu en EncaCont)
+     *     siga SIN causar — si ya se causó (confirmó) entre la vista previa y
+     *     este clic, se rechaza: SIHOS exige una nota de ajuste contable para
+     *     tocar una nómina ya confirmada, este método nunca la genera.
+     *  2) Que siga habiendo EXACTAMENTE una línea (`ConsConc`) para ese
+     *     concepto — si apareció una segunda línea mientras tanto (novedad
+     *     registrada después de la vista previa), se rechaza: no hay forma
+     *     segura de adivinar en cuál aplicar el ajuste.
+     *  3) Relee fresco el valor que se deja fijo (`ValoEmpe` normalmente,
+     *     `ValoPatr` si $ajustarValoEmpe) para calcular el nuevo valor (no
+     *     el de la vista previa, que puede haber quedado desactualizado).
+     *
+     * @return array{ok:bool,motivo?:string,valoEmpe?:float,valoPatrAntes?:float,valoPatrDespues?:float}
+     * @throws PDOException en errores reales de BD (no en rechazos de negocio, esos se devuelven como ok=false)
+     */
+    public function corregirValoPatrNomina(
+        string $codiDocu,
+        string $numeDocu,
+        string $codiAno,
+        string $codiMes,
+        string $tipoDocu,
+        string $numePers,
+        string $codiConc,
+        float $totalEsperado,
+        string $usuaDigi,
+        bool $ajustarValoEmpe = false
+    ): array {
+        return $this->conBloqueo(
+            'nominapatr:' . $codiDocu . ':' . $numeDocu . ':' . $tipoDocu . ':' . $numePers . ':' . $codiConc,
+            function () use ($codiDocu, $numeDocu, $codiAno, $codiMes, $tipoDocu, $numePers, $codiConc, $totalEsperado, $usuaDigi, $ajustarValoEmpe): array {
+                return $this->corregirValoPatrNominaBloqueado(
+                    $codiDocu, $numeDocu, $codiAno, $codiMes, $tipoDocu, $numePers, $codiConc, $totalEsperado, $usuaDigi, $ajustarValoEmpe
+                );
+            }
+        );
+    }
+
+    /** @see corregirValoPatrNomina (ya con el bloqueo tomado) */
+    private function corregirValoPatrNominaBloqueado(
+        string $codiDocu,
+        string $numeDocu,
+        string $codiAno,
+        string $codiMes,
+        string $tipoDocu,
+        string $numePers,
+        string $codiConc,
+        float $totalEsperado,
+        string $usuaDigi,
+        bool $ajustarValoEmpe
+    ): array {
+        $pdo = $this->connect();
+        $codiInst = $this->codiInst();
+
+        $pdo->beginTransaction();
+
+        try {
+            $stmt = $pdo->prepare('SELECT Causado FROM EncaCont WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ? FOR UPDATE');
+            $stmt->execute([$codiInst, $codiDocu, $numeDocu]);
+            $causado = $stmt->fetchColumn();
+
+            if ($causado === false) {
+                $pdo->rollBack();
+
+                return ['ok' => false, 'motivo' => "El documento de nómina {$codiDocu}-{$numeDocu} ya no existe en SIHOS."];
+            }
+
+            if ((int)$causado === 1) {
+                $pdo->rollBack();
+
+                return [
+                    'ok' => false,
+                    'motivo' => "La nómina {$codiDocu}-{$numeDocu} ya está confirmada (causada) en SIHOS — no se modifica aquí. Use la nota de ajuste habitual.",
+                ];
+            }
+
+            $stmt = $pdo->prepare(
+                'SELECT ConsConc, ValoEmpe, ValoPatr FROM DetaNomi
+                 WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ? AND CodiAno = ? AND CAST(CodiMes AS SIGNED) = ?
+                   AND TipoDocu = ? AND NumePers = ? AND CodiConc = ?
+                 FOR UPDATE'
+            );
+            $stmt->execute([$codiInst, $codiDocu, $numeDocu, $codiAno, $codiMes, $tipoDocu, $numePers, $codiConc]);
+            $lineas = $stmt->fetchAll();
+
+            if ($lineas === []) {
+                $pdo->rollBack();
+
+                return ['ok' => false, 'motivo' => 'La línea de nómina a corregir ya no existe — puede que ya se haya corregido o borrado.'];
+            }
+
+            if (count($lineas) > 1) {
+                $pdo->rollBack();
+
+                return [
+                    'ok' => false,
+                    'motivo' => 'El concepto tiene más de una línea en SIHOS (novedad partida en el período) — no se puede corregir automáticamente.',
+                ];
+            }
+
+            $consConc = (string)$lineas[0]['ConsConc'];
+            $valoEmpeActual = (float)$lineas[0]['ValoEmpe'];
+            $valoPatrActual = (float)$lineas[0]['ValoPatr'];
+
+            if ($ajustarValoEmpe) {
+                // Fondo de Solidaridad Pensional: ValoPatr se deja fijo
+                // (siempre debería ser $0 para este concepto, pero se relee
+                // igual en vez de asumirlo) y se ajusta ValoEmpe.
+                $valoEmpeDespues = round($totalEsperado - $valoPatrActual, 2);
+                $stmt = $pdo->prepare(
+                    'UPDATE DetaNomi SET ValoEmpe = ?, FechModi = CURDATE(), HoraModi = CURTIME(), UsuaModi = ?
+                     WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ? AND CodiAno = ? AND CAST(CodiMes AS SIGNED) = ?
+                       AND TipoDocu = ? AND NumePers = ? AND CodiConc = ? AND ConsConc = ?'
+                );
+                $stmt->execute([
+                    $valoEmpeDespues, $usuaDigi, $codiInst, $codiDocu, $numeDocu, $codiAno, $codiMes,
+                    $tipoDocu, $numePers, $codiConc, $consConc,
+                ]);
+
+                // FSP es una deducción del empleado (ValoEmpe): el "total
+                // deducido"/"neto a pagar" del documento vive únicamente en
+                // la línea de SUELDO (`Concepto.EsSueldo='1'`, nunca en las
+                // demás líneas — verificado con datos reales: ValoDedu de
+                // SUELDO = suma de ValoEmpe de TODAS las líneas de deducción
+                // del documento, ValoNeto = ValoDeve - ValoDedu). Si no se
+                // ajusta también aquí, el neto que muestra SIHOS queda
+                // desactualizado por la diferencia. Los otros 5 conceptos
+                // corregibles (pensión/salud/CCF/SENA/ICBF) SIEMPRE ajustan
+                // ValoPatr (aporte patronal) — nunca tocan lo que se le
+                // deduce al empleado — por eso este ajuste es EXCLUSIVO de
+                // FSP, a pedido explícito del usuario.
+                $deltaValoEmpe = round($valoEmpeDespues - $valoEmpeActual, 2);
+                $sueldoAjustado = false;
+
+                if (abs($deltaValoEmpe) >= 0.01) {
+                    $stmtSueldo = $pdo->prepare(
+                        'SELECT ConsConc FROM DetaNomi d
+                         INNER JOIN Concepto c ON c.CodiInst = d.CodiInst AND c.CodiConc = d.CodiConc
+                         WHERE d.CodiInst = ? AND d.CodiDocu = ? AND d.NumeDocu = ? AND d.CodiAno = ? AND CAST(d.CodiMes AS SIGNED) = ?
+                           AND d.TipoDocu = ? AND d.NumePers = ? AND c.EsSueldo = \'1\'
+                         FOR UPDATE'
+                    );
+                    $stmtSueldo->execute([$codiInst, $codiDocu, $numeDocu, $codiAno, $codiMes, $tipoDocu, $numePers]);
+                    $lineasSueldo = $stmtSueldo->fetchAll();
+
+                    if (count($lineasSueldo) === 1) {
+                        $consConcSueldo = (string)$lineasSueldo[0]['ConsConc'];
+                        $stmtActualizarSueldo = $pdo->prepare(
+                            'UPDATE DetaNomi d
+                             INNER JOIN Concepto c ON c.CodiInst = d.CodiInst AND c.CodiConc = d.CodiConc
+                             SET d.ValoDedu = d.ValoDedu + ?, d.ValoNeto = d.ValoNeto - ?,
+                                 d.FechModi = CURDATE(), d.HoraModi = CURTIME(), d.UsuaModi = ?
+                             WHERE d.CodiInst = ? AND d.CodiDocu = ? AND d.NumeDocu = ? AND d.CodiAno = ? AND CAST(d.CodiMes AS SIGNED) = ?
+                               AND d.TipoDocu = ? AND d.NumePers = ? AND c.EsSueldo = \'1\' AND d.ConsConc = ?'
+                        );
+                        $stmtActualizarSueldo->execute([
+                            $deltaValoEmpe, $deltaValoEmpe, $usuaDigi,
+                            $codiInst, $codiDocu, $numeDocu, $codiAno, $codiMes, $tipoDocu, $numePers, $consConcSueldo,
+                        ]);
+                        $sueldoAjustado = true;
+                    }
+                    // Si no hay exactamente una línea de SUELDO en este
+                    // documento (0 o >1, caso atípico), se deja tal cual —
+                    // la corrección de FSP en sí ya quedó aplicada arriba;
+                    // no se bloquea por esto.
+                }
+
+                $pdo->commit();
+
+                return [
+                    'ok' => true,
+                    'valoEmpe' => $valoEmpeDespues,
+                    'valoPatrAntes' => $valoPatrActual,
+                    'valoPatrDespues' => $valoPatrActual,
+                    'valoEmpeAntes' => $valoEmpeActual,
+                    'sueldoValoDeduValoNetoAjustado' => $sueldoAjustado,
+                ];
+            }
+
+            $valoPatrDespues = round($totalEsperado - $valoEmpeActual, 2);
+
+            $stmt = $pdo->prepare(
+                'UPDATE DetaNomi SET ValoPatr = ?, FechModi = CURDATE(), HoraModi = CURTIME(), UsuaModi = ?
+                 WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ? AND CodiAno = ? AND CAST(CodiMes AS SIGNED) = ?
+                   AND TipoDocu = ? AND NumePers = ? AND CodiConc = ? AND ConsConc = ?'
+            );
+            $stmt->execute([
+                $valoPatrDespues, $usuaDigi, $codiInst, $codiDocu, $numeDocu, $codiAno, $codiMes,
+                $tipoDocu, $numePers, $codiConc, $consConc,
+            ]);
+
+            $pdo->commit();
+
+            return [
+                'ok' => true,
+                'valoEmpe' => $valoEmpeActual,
+                'valoPatrAntes' => $valoPatrActual,
+                'valoPatrDespues' => $valoPatrDespues,
+            ];
+        } catch (PDOException $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+
+            throw $e;
+        }
+    }
 }

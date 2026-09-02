@@ -306,6 +306,40 @@ class ModuleController
         ], JSON_UNESCAPED_UNICODE);
     }
 
+    /**
+     * ¿Ya existe un tercero con este tipo+número de documento? Usado por el
+     * formulario de `tercero_nomina` (tercero-nomina-crud.js) para autocompletar
+     * razón social/DV cuando el documento coincide con un tercero que ya existe
+     * en el sistema (de cualquier empresa) y avisar que al guardar quedará
+     * vinculado a la empresa de la sesión actual — ver
+     * CrudService::buscarTerceroPorDocumento().
+     */
+    public function terceroNominaLookup(): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+
+        if (!PermisoService::can('tercero_nomina', 'ver')) {
+            http_response_code(403);
+            echo json_encode(['ok' => false, 'error' => 'forbidden'], JSON_UNESCAPED_UNICODE);
+
+            return;
+        }
+
+        $tipodocumentoId = (int)($_GET['tipodocumento_id'] ?? 0);
+        $numero = trim((string)($_GET['numero'] ?? ''));
+
+        if ($tipodocumentoId <= 0 || $numero === '') {
+            echo json_encode(['ok' => true, 'found' => false], JSON_UNESCAPED_UNICODE);
+
+            return;
+        }
+
+        $crudService = new CrudService();
+        $resultado = $crudService->buscarTerceroPorDocumento($tipodocumentoId, $numero);
+
+        echo json_encode(array_merge(['ok' => true], $resultado), JSON_UNESCAPED_UNICODE);
+    }
+
     public function __call($method,$params)
     {
         $this->index();

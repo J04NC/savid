@@ -170,6 +170,40 @@ class ModuleService
             return $columns;
         }
 
+        if ($tabla === 'tercero') {
+            $existingFields = array_column($columns, 'Field');
+
+            foreach ($this->crudService->getTerceroIdentificacionSyntheticColumns() as $syn) {
+                if (!in_array($syn['Field'], $existingFields, true)) {
+                    $columns[] = $syn;
+                }
+            }
+
+            if (in_array('tipodocumento_id', array_column($columns, 'Field'), true)) {
+                $relations['tipodocumento_id'] = 'tipodocumento';
+            }
+
+            return $columns;
+        }
+
+        if ($tabla === 'tercero_nomina') {
+            $existingFields = array_column($columns, 'Field');
+
+            foreach ($this->crudService->getTerceroNominaIdentidadSyntheticColumns() as $syn) {
+                if (!in_array($syn['Field'], $existingFields, true)) {
+                    $columns[] = $syn;
+                }
+            }
+
+            $columns = $this->crudService->applyTerceroNominaColumnPresentation($columns);
+
+            if (in_array('tipodocumento_id', array_column($columns, 'Field'), true)) {
+                $relations['tipodocumento_id'] = 'tipodocumento';
+            }
+
+            return $columns;
+        }
+
         if ($tabla === 'empresa') {
             $existingFields = array_column($columns, 'Field');
 

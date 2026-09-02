@@ -1391,4 +1391,1170 @@ class SihosExternalRepository
             'Lineas4312' => $lineas4312,
         ];
     }
+
+    /**
+     * Reporte de nómina para "Aportes en línea" (PILA): una fila por
+     * empleado con sus datos y valores de cotización (pensión, salud, ARL,
+     * parafiscales) del período dado — más filas adicionales del mismo
+     * empleado cuando aplica VACACIONES, incapacidad (EG/RP), licencia no
+     * remunerada, licencia de maternidad, o retroactivo de vacaciones "solo"
+     * (ver más abajo) en el período (cada novedad se reporta como su propia
+     * fila). El documento base de salario ya NO es 'NE' fijo — ver "Nómina
+     * de Empleados con más de un documento" abajo.
+     *
+     * `DetaNomi.CodiMes` se guarda de forma inconsistente ('7' sin cero a
+     * la izquierda o '07' con él, según cómo se causó cada documento) — se
+     * filtra por ambas formas en todo el reporte, incluida la de VACACIONES.
+     *
+     * El chequeo de retiro (columnas RET/FECH_RET, contra
+     * `Empleado.FechFinV`) usa el MISMO año/mes del período reportado — no
+     * es un mes fijo aparte (decisión confirmada por el usuario: la
+     * consulta original traía un mes distinto al del resto del reporte,
+     * era un resto de una ejecución anterior, no una regla de negocio).
+     *
+     * `Ciu` (municipio) ya NO viene hardcodeado ('LA UNION' fijo, como en la
+     * consulta original) — lo resuelve el llamador (empresa → tercero →
+     * municipio del catálogo territorial de SAVID, vía
+     * `SihosEmpresaConfigRepository::municipioEmpresa()`) y se pasa como
+     * parámetro `$municipio` (ligado a `:municipio` en las 6 ramas), para
+     * que el reporte muestre el municipio real de la empresa que se está
+     * generando, no siempre el de Unión. `Depa` ('VALLE') y el resto de
+     * literales fijos (Tipo de Cotizante, Actividad Económica '3861001',
+     * ARL 'COLMENA', etc.) siguen tal cual de la consulta original — son
+     * constantes de esta empresa/sede, no catálogo de la instalación de
+     * SIHOS; nadie ha pedido aún generalizarlos.
+     *
+     * A diferencia del resto de este repositorio, `Empleado`/`DetaNomi` no
+     * se filtran por `CodiInst` en la consulta original (nómina es única
+     * por instalación, sin puestos satélite con nómina propia en los casos
+     * reales) — aun así se agrega `e.CodiInst = :codiInst` en cada
+     * subconsulta para mantener el mismo aislamiento por institución que el
+     * resto del módulo.
+     *
+     * NÓMINA DE EMPLEADOS CON MÁS DE UN DOCUMENTO (2026-08-31, verificado
+     * contra SIHOS real de Hospital de Roldanillo antes de aplicarse):
+     *
+     * El bloque principal ("normal") ya NO restringe `CodiDocu` al valor
+     * fijo 'NE' — lo resuelve dinámicamente vía `codiDocuPorDocuApli(41)`
+     * (Nómina de Empleados, catálogo `DocuApli`). Esto importa por dos
+     * razones distintas, ambas confirmadas con datos reales de Roldanillo:
+     *
+     *   1) Una institución puede tener VARIOS documentos de Nómina de
+     *      Empleados a la vez, uno por tipo de vinculación (Roldanillo:
+     *      'NE' administrativa, 'NEO' oficial, 'NOP' operativa, además de
+     *      'NEA'/'NEX'/'TPN' sin movimiento real de CodiConc=1 hoy). Con el
+     *      filtro fijo a 'NE', los ~70 empleados de Roldanillo vinculados
+     *      bajo 'NEO'/'NOP' NO aparecían en absoluto en la fila "normal" del
+     *      reporte (sí en sus novedades — vacaciones/incapacidad/licencias
+     *      — porque esos bloques nunca filtraron por documento).
+     *   2) Un empleado con cambio de cargo A MITAD DE MES puede tener su
+     *      sueldo partido entre DOS documentos de Nómina de Empleados en el
+     *      MISMO período (caso real verificado: 25 días en 'NE' + 1 día en
+     *      'NOP' = 26 días trabajados). Antes, el filtro fijo a 'NE' + el
+     *      JOIN de ARL/CCF/SENA/ICBF por (CodiDocu,NumeDocu) EXACTO del
+     *      documento anclado significaba que la porción del OTRO documento
+     *      se perdía por completo — no solo los días, también su parte de
+     *      ARL/CCF/SENA/ICBF (verificado: para ese empleado, la cotización
+     *      ARL real reportada subía de $264.900 a $344.600 al sumar ambos
+     *      documentos).
+     *
+     * Por eso el ancla ya NO es una fila cruda de `DetaNomi` (`d`): es una
+     * subconsulta que SUMA Cantidad/ValoBase/ValoEmpe/ValoPatr de
+     * `CodiConc='1'` agrupando por empleado+período, restringida a los
+     * `CodiDocu` resueltos de Nómina de Empleados — así un empleado con su
+     * sueldo partido entre documentos produce UNA sola fila con los totales
+     * correctos, en vez de una fila con un valor arbitrario de uno de los
+     * dos (comportamiento no determinista de MySQL con `ONLY_FULL_GROUP_BY`
+     * desactivado, que es como ya corría esta consulta).
+     *
+     * Como consecuencia, las subconsultas ARL/Para(CCF)/sena/icbf/fond(FSP)
+     * — que antes empataban por (CodiDocu,NumeDocu) EXACTO del ancla, porque
+     * asumían un solo documento — pasan al mismo patrón que AFP/EPS/BPara: se
+     * agregan (SUM) por empleado+período, restringidas también a los
+     * `CodiDocu` de Nómina de Empleados (antes esa restricción venía gratis
+     * del empate exacto por documento; al aflojar el empate hay que
+     * declararla explícita para no recoger, por ejemplo, una línea de ARL
+     * que por error viviera en el documento de Retroactivos). `inca`/`LM`/
+     * `LNR`/`hyr` (incapacidad, licencia maternidad, licencia no remunerada,
+     * horas-extra/bonificaciones — esta última solo alimenta el indicador
+     * VST) tenían el MISMO problema estructural (empate por documento
+     * exacto) y se corrigieron igual, aunque no estén ligadas a Nómina de
+     * Empleados específicamente — un valor real puede vivir bajo cualquier
+     * documento del período. Efecto colateral verificado (no un bug nuevo):
+     * el indicador VST ahora se detecta correctamente incluso cuando la
+     * bonificación/hora-extra vive en un documento distinto al ancla — antes
+     * podía quedar en 'NO' por error para esos casos.
+     *
+     * `hyr`/VST — criterio ampliado (2026-09): además de recargos, horas
+     * extra, gastos de representación y bonificación por servicios
+     * (RDF/RDO/RNF/RNO/HEDF/HEDO/HENF/HENO/EsGasRep/EsBoniSe), cualquier
+     * concepto de RETROACTIVO que sí compute para IBC (`c.BaseIBC='1'` junto
+     * con `EsRetroa` o cualquiera de las banderas `Retr*` del catálogo
+     * `Concepto`) también marca VST='SI'. Un retroactivo pagado en el
+     * período (sueldo, recargos, horas extra, gastos de representación,
+     * bonificación de servicios, vacaciones, etc.) es, por definición, un
+     * ingreso adicional no permanente que sube el IBC ese mes — coincide con
+     * la definición oficial de "Variación de Salario Transitoria" del
+     * operador de aportes en línea. Los retroactivos con `BaseIBC='2'`
+     * (p. ej. RETROACTIVO PRIMA VACACIONES, RETROACTIVO AUX TRANSPORTE en
+     * los catálogos reales de Roldanillo/La Unión) quedan fuera a propósito:
+     * no afectan el IBC, así que no constituyen VST. Esta bandera es
+     * puramente informativa (columna VST del reporte) — no toca ningún
+     * cálculo de base ni de cotización, así que no interfiere con la lógica
+     * ya verificada de retroactivo de vacaciones (`retroSoloSubquery`/
+     * `retroTotalSubquery`) ni con `fusionarNormalConUnicaNovedad()`.
+     *
+     * De paso se corrigió un error real de precedencia de operadores en el
+     * WHERE de `inca` (`c.EsIncapa='1' or c.EsIncEmp='1' OR c.EsIncaRP='1'
+     * AND d.CodiAno=...` sin paréntesis alrededor del OR se evalúa como
+     * `EsIncapa='1' or EsIncEmp='1' or (EsIncaRP='1' AND periodo=...)` — los
+     * dos primeros casos NUNCA se filtraban por período). Se agregaron los
+     * paréntesis correctos.
+     *
+     * También se detectó y corrigió, al normalizar estas subconsultas, un
+     * riesgo de fila duplicada por la inconsistencia de padding de
+     * `CodiMes` explicada arriba: IBC/AFP/EPS agrupaban por el `CodiMes`
+     * crudo (sin normalizar '7' vs '07' a un mismo grupo) — inofensivo
+     * mientras el ancla también fuera una fila cruda con un CodiMes crudo
+     * (comparación texto=texto, sin coerción), pero el nuevo ancla expone
+     * `CodiMes` como entero (`CAST(...AS SIGNED)`, necesario para fusionar
+     * '7' y '07' del propio ancla) — comparar ese entero contra el CodiMes
+     * crudo de AFP/EPS fuerza a MySQL a coaccionar AMBAS variantes de
+     * padding al mismo número, haciendo que un empleado con datos en ambas
+     * variantes calzara con dos filas de AFP/EPS a la vez (fila duplicada).
+     * Se corrigió agrupando también por `CAST(CodiMes AS SIGNED)` en
+     * IBC/AFP/EPS (mismo patrón que BPara ya usaba) — verificado contra el
+     * caso real que lo disparaba (Unión, un empleado con una bonificación
+     * repartida entre 'NE' con CodiMes='6' y otro documento con CodiMes='06'
+     * en el mismo período) antes y después del cambio.
+     *
+     * RETROACTIVO DE VACACIONES (2026-08-31, a pedido del usuario,
+     * verificado contra SIHOS real de Roldanillo — único cliente con este
+     * mecanismo activo hoy):
+     *
+     * Algunas instituciones liquidan un pago retroactivo relacionado con
+     * vacaciones (p. ej. un ajuste de prima/sueldo de vacaciones calculado
+     * y pagado meses después) en un documento aparte, "Nómina de
+     * Retroactivos" (`DocuApli` global 86 — Roldanillo: `CodiDocu='NR'`),
+     * bajo un concepto con el flag `Concepto.RetrVaca='1'` (distinto de
+     * `EsVacaci='1'`, la vacación real). Igual que el resto de conceptos
+     * `RETROACTIVO*`, ese pago SÍ debe contar como base de pensión/salud/
+     * parafiscales (`Concepto.BaseIBC='1'`, `BasePara='1'` — verificado en
+     * el catálogo real), pero NO como base de ARL (`Concepto.BaseArl='2'`
+     * — false — a diferencia de "RETROACTIVO SUELDO", que sí tiene
+     * `BaseArl='1'`): no hay exposición a riesgo laboral en un ajuste de
+     * vacaciones, exactamente la misma regla que ya aplica a una vacación
+     * real (ver bloque VACACIONES más abajo, que tampoco cotiza ARL).
+     *
+     * El manejo depende de si el empleado YA tiene una fila real de
+     * VACACIONES (`EsVacaci='1'`) en el mismo período — decisión explícita
+     * del usuario:
+     *
+     *   - SI la tiene: el valor del retroactivo se SUMA a esa fila (a la
+     *     base de pensión/EPS/CCF/SENA/ICBF, nunca a ARL) — no se crea una
+     *     fila aparte. Ver el JOIN a `retro` dentro del bloque VACACIONES.
+     *   - SI NO la tiene (el empleado no tomó vacaciones reales este
+     *     período, solo tiene el ajuste retroactivo): se genera una fila
+     *     SINTÉTICA con la misma forma que una fila de VACACIONES real (VAC
+     *     = 'VACACIONES', para que el operador de aportes en línea le dé el
+     *     mismo tratamiento: sí pensión/salud/parafiscales, nunca ARL —
+     *     `COTIZACION ARL` queda en blanco igual que en una vacación real),
+     *     con 1 día (`D_AFP`/`D_EPS`/`D_ARL`/`D_PARA`) y fecha de inicio/fin
+     *     el primer día del período reportado (no hay un rango real de
+     *     `ConcEmpl` que citar, al no ser una vacación tomada de verdad). Es
+     *     el último bloque `UNION ALL` — solo se agrega si la institución
+     *     tiene documentos de Retroactivos (`codiDocuPorDocuApli(86)` no
+     *     vacío); si no, ese bloque se omite por completo (Unión no lo usa
+     *     hoy, la consulta queda idéntica a como estaba).
+     *
+     * El día "prestado" (fila sintética) se RESTA de los días trabajados de
+     * la fila normal (`D_AFP`/`D_EPS`/`D_ARL`/`D_PARA` del ancla), para que
+     * el total de días del período (trabajados + vacaciones) siga cuadrando
+     * — vía el criterio "tiene retroactivo Y NO tiene vacación real este
+     * período" (subconsulta `retroSolo`, con `NOT EXISTS` sobre
+     * `EsVacaci='1'`), el mismo que decide si se crea la fila sintética.
+     * Cuando el empleado SÍ tiene vacación real, NO se resta ningún día de
+     * la fila normal — el retroactivo no le agrega un día de ausencia
+     * distinto al que ya tiene la vacación real.
+     *
+     * SIEMPRE (tenga o no vacación real, decisión explícita del usuario) se
+     * resta de la fila normal el VALOR del retroactivo — base (`I.B.C.
+     * PENSION`/`EPS`/`CCF`/`IBC Otros Parafiscales`, nunca ARL) y su
+     * cotización calculada (base × tarifa de cada administradora), vía una
+     * segunda subconsulta `retro` (sin el `NOT EXISTS`, `retroTotalSubquery`
+     * — la misma que ya se usa para sumarlo en la fila de vacaciones real),
+     * unida por empleado+período sin condición sobre vacación real. Antes de
+     * esto, el valor del retroactivo quedaba SOLO sumado en la fila de
+     * vacaciones (real o sintética) pero seguía también dentro de la base y
+     * la cotización real de la fila normal (`IBC`/`AFP`/`EPS`/`BPara`/`Para`/
+     * `sena`/`icbf` no lo excluían) — contado dos veces. Verificado con dos
+     * casos reales (uno con vacación real fusionada, otro solo con fila
+     * sintética): tras la resta, tanto el I.B.C. como la cotización de la
+     * fila normal bajan exactamente en el valor del retroactivo, en las 5
+     * administradoras (AFP/EPS/CCF/SENA/ICBF).
+     *
+     * PISO DE 1 DÍA DE SALARIO MÍNIMO en la fila SINTÉTICA de retroactivo de
+     * vacaciones (2026-09-01, a pedido del usuario, caso real confirmado:
+     * empleado con retroactivo de vacaciones de solo $19.406 — muy por
+     * debajo de 1 día de salario mínimo — el operador exige base $58.750
+     * (16% → $9.400) en vez del valor real exportado ($3.105). El operador
+     * de aportes en línea no acepta un IBC diario menor a 1 SMLDV (salario
+     * mínimo legal diario vigente = salario mínimo mensual / 30) en ninguna
+     * fila reportada. `$salarioMinimoMensual` (parámetro nuevo, resuelto por
+     * `SihosNominaPilaService::buildFilas()` desde la configuración de la
+     * empresa — 0.0 si no está configurado, NUNCA null: en MySQL
+     * `GREATEST(x,NULL)` da `NULL`, no `x`, así que pasar null rompería la
+     * columna en silencio) se divide entre 30 (`:smlvDiario`) y se usa así:
+     *   - Fila SINTÉTICA (rama 6, `retro.ValoEmpe` = `retroSoloSubquery`):
+     *     las 5 bases (`I.B.C. PENSION`/`EPS`/`ARL`/`CCF`/`IBC Otros
+     *     Parafiscales`) y sus cotizaciones/`Total_AFP` usan
+     *     `GREATEST(retro.ValoEmpe,:smlvDiario)` en vez del valor crudo.
+     *   - Fila NORMAL (rama 1): en vez de restar el valor crudo del
+     *     retroactivo, resta el MISMO valor con piso aplicado
+     *     (`GREATEST(retroSolo.ValoEmpe,:smlvDiario)`) — así el total
+     *     combinado (fila sintética + fila normal) NO cambia, solo se
+     *     reacomoda para que la fila sintética cumpla el piso. Se usa
+     *     `retroSolo` (no `retro`/`retroTotalSubquery`) a propósito: cuando
+     *     el empleado SÍ tiene vacación real este período (branch 2,
+     *     `retroSolo` es NULL), la resta de la fila normal sigue exactamente
+     *     como antes — el piso NO se aplica ahí todavía (alcance de esta
+     *     primera versión, a pedido del usuario: solo el caso de retroactivo
+     *     de vacaciones SIN vacación real).
+     *
+     * `I.B.C. ARL` de la fila de VACACIONES (real fusionada; en la
+     * sintética ya era el caso) SÍ suma el retroactivo (`d.ValoEmpe+retro.ValoEmpe`,
+     * igual que PENSION/EPS/CCF/Otros Parafiscales de esa misma fila) — a
+     * pedido explícito del usuario, para que las 5 columnas de IBC de una
+     * misma fila muestren siempre el mismo valor (consistencia visual del
+     * reporte). `COTIZACION ARL` de esa fila sigue en blanco: el aumento es
+     * solo de la base mostrada, nunca genera una cotización de riesgos
+     * nueva — `RETROACTIVO VACACIONES` sigue sin ser base real de ARL
+     * (`BaseArl='2'`, ver más abajo).
+     *
+     * `I.B.C. ARL` de la fila NORMAL (2026-09-01, a pedido del usuario):
+     * hasta acá venía de `ARL.ValoBase` — el valor que el propio SIHOS ya
+     * calculó en su línea interna "RIESGOS PROFESIONALES A.R.L." (concepto
+     * `EsRiePro='1'`), restringida a los documentos de Nómina de Empleados
+     * (`$inEmp`). Esa línea NUNCA mira el documento de Retroactivos, así
+     * que cualquier retroactivo o VST (horas extra, recargos, gastos de
+     * representación) que subiera el I.B.C. de PENSION/EPS (vía `IBC.ValoEmpe`,
+     * sin restricción de documento) se quedaba fuera de I.B.C. ARL — caso
+     * real detectado: empleado con RETROACTIVO SUELDO en el documento de
+     * Retroactivos, I.B.C. PENSION/EPS=5.486.077 pero I.B.C. ARL=3.762.886
+     * (solo el sueldo del documento normal).
+     *
+     * Se evaluó usar `Concepto.BaseArl='1'` para completar la diferencia
+     * (mismo enfoque intentado antes para retroactivo de vacaciones con el
+     * empleado 16553468, revertido) pero **`BaseArl` es inconsistente entre
+     * empresas**: `RETROACTIVO SUELDO` (CodiConc=49) tiene `BaseArl='2'` en
+     * Roldanillo pero `BaseArl='1'` en La Unión — el mismo concepto, dos
+     * valores distintos según cómo lo configuró cada hospital en su propio
+     * catálogo. No es una fuente confiable.
+     *
+     * En vez de eso, `I.B.C. ARL` de la fila normal ahora usa **la misma
+     * fórmula exacta que `I.B.C. PENSION`/`I.B.C. EPS`**: `IBC.ValoEmpe`
+     * (pool de `BaseIBC='1'`, sin restricción de documento) menos las
+     * mismas restas de vacaciones/incapacidad/licencia de maternidad/
+     * retroactivo-vacaciones. Por construcción, ARL siempre queda igual a
+     * AFP/EPS en la fila normal — sin depender de `BaseArl`. El retroactivo
+     * de vacaciones sigue excluido de ARL en esta fila (se resta `retro.ValoEmpe`,
+     * igual que en PENSION/EPS), consistente con que vacaciones no genera
+     * riesgo ARL. `COTIZACION ARL` (`ARL.ValoPatr`) no se tocó — sigue
+     * siendo el valor que ya calculó SIHOS, mismo criterio que en la fila
+     * de vacaciones fusionada: solo se completa la base, nunca se inventa
+     * una cotización nueva.
+     *
+     * `COTIZACION AFP`/`EPS`/`CCF`/`SENA`/`ICBF` de la fila NORMAL
+     * (2026-09-01, investigado a pedido del usuario, caso real: empleado con
+     * RETROACTIVO SUELDO, "Valor Cotización" de pensión salió $602.100 en
+     * vez de $877.800): MISMO problema estructural que `I.B.C. ARL` arriba,
+     * pero en la cotización en vez de la base — `(AFP.ValoEmpe+AFP.ValoPatr)`
+     * (y su equivalente para EPS/CCF/SENA/ICBF) es la línea que el propio
+     * SIHOS ya calculó, que vive SOLO en el documento de Nómina de
+     * Empleados y no se actualiza automáticamente cuando se digita un
+     * RETROACTIVO SUELDO/RECARGOS/HORAS EXTRAS/GASTOS REPRESENTACIÓN u otro
+     * concepto VST en el documento de Retroactivos.
+     *
+     * SE INTENTÓ un arreglo ADITIVO (sumar a la cotización de SIHOS el
+     * `ROUND(extra × tarifa,-2)` de la porción de VST/retroactivo, con
+     * `extra` = base ya calculada arriba menos `d.ValoEmpe` del ancla) y se
+     * REVIRTIÓ: SIHOS recalcula esa línea de forma ASÍNCRONA (a veces sí, a
+     * veces no, sin patrón fijo desde este código) — confirmado con el mismo
+     * empleado real, cuya línea de SIHOS pasó de reflejar solo el sueldo a
+     * reflejar sueldo+retroactivo completo entre dos consultas de esta misma
+     * sesión, sin ningún cambio de código de por medio. El arreglo aditivo
+     * asumía que la línea de SIHOS SIEMPRE está incompleta (le falta el
+     * VST/retroactivo) — cuando SIHOS ya la había recalculado por su cuenta,
+     * el mismo ajuste duplicaba el valor ($1.153.500 en vez de $877.800).
+     * No hay forma confiable de saber, solo mirando `AFP.ValoEmpe+ValoPatr`,
+     * si esa línea YA incluye el VST/retroactivo o no.
+     *
+     * PENDIENTE: la fórmula sigue siendo `(AFP.ValoEmpe+AFP.ValoPatr)` menos
+     * las restas de vacaciones/incapacidad/licencia no remunerada (12%)/
+     * licencia de maternidad/retroactivo-vacaciones, sin cambios — igual que
+     * antes de esta investigación. Sigue existiendo la ventana de riesgo
+     * documentada arriba (cotización incompleta si se genera el archivo
+     * antes de que SIHOS recalcule su propia línea) hasta definir una
+     * fórmula robusta que no dependa de si SIHOS ya recalculó o no.
+     *
+     * INCAPACIDAD PRÓRROGA (2026-09-01, a pedido del usuario): existe un
+     * cuarto flag de incapacidad en `Concepto`, `EsIncaPr='1'` (incapacidad
+     * prorrogada — cuando la incapacidad inicial se extiende), además de
+     * `EsIncapa`/`EsIncEmp`/`EsIncaRP`, que ya se usaban. La subconsulta
+     * `inca` (resta de la fila normal) y el bloque de incapacidad (genera su
+     * propia fila) SOLO revisaban esos tres — un empleado con TODO el mes en
+     * incapacidad prórroga (`EsIncaPr='1'`, `BaseIBC='1'`) no obtenía fila de
+     * incapacidad propia (0 líneas con esos tres flags) y sus días (30)
+     * nunca se reportaban en ninguna fila, mientras su valor sí se colaba en
+     * el I.B.C. de la fila normal (por el flag `BaseIBC='1'`, ajeno al tipo
+     * de incapacidad). Se agregó `OR c.EsIncaPr='1'` a ambos WHERE — mismo
+     * tratamiento que ya tenían los otros tres tipos de incapacidad, sin
+     * necesidad de una rama nueva.
+     *
+     * `fetchNominaPila()` no reconstruye la "suma esperada real" multi-
+     * porción que sí hace `SihosNominaPilaCorreccionService` (no hay
+     * columna "COTIZACION RETRO VACACIONES" en el formato de cargue que
+     * comparar) — el valor tomado es directamente el retroactivo tal cual
+     * está en SIHOS para el período, sin reconstrucción.
+     *
+     * Además de las 90 columnas de la plantilla, se agregan 4 columnas AL
+     * FINAL — `AFP_NIT`, `EPS_NIT`, `ARL_NIT`, `CCF_NIT` — con el NIT
+     * (`CodiTerc.NumeTerc`, tal cual, con guión y DV) de la administradora
+     * que ya se resuelve en el JOIN para el nombre; solo sirven para que
+     * SihosNominaPilaService cruce contra `tercero_nomina` de SAVID por NIT
+     * (más confiable que cruzar por texto) y las descarta antes de armar la
+     * grilla/Excel — nunca deben llegar a `ENCABEZADOS` ni al archivo final.
+     *
+     * @param float $salarioMinimoMensual salario mínimo mensual vigente del
+     *     año reportado, para el piso de 1 SMLDV del retroactivo de
+     *     vacaciones (ver docblock de esa sección más arriba). 0.0 (valor
+     *     por defecto) si no hay configuración — el piso simplemente no
+     *     aplica, nunca pasar null (rompe `GREATEST` en MySQL).
+     * @return list<array<string, mixed>> una fila por empleado/novedad, con
+     *     las 90 columnas de "Tipo ID" (TipoDocu) a "Valor Cotización ICBF"
+     *     (COTIZACION ICBF) del formato de cargue de aportes en línea —
+     *     columnas B..CM de la plantilla de liquidación (la columna "No."
+     *     y las columnas de ESAP/MEN/Exonerado/UPC adicional al final de la
+     *     plantilla no las produce esta consulta) — más las 4 columnas de
+     *     NIT descritas arriba, solo para cruce interno.
+     */
+    public function fetchNominaPila(string $codiAno, string $codiMes, string $municipio, float $salarioMinimoMensual = 0.0): array
+    {
+        $codiMesCorto = ltrim($codiMes, '0');
+        if ($codiMesCorto === '') {
+            $codiMesCorto = '0';
+        }
+        $codiMesPadded = str_pad($codiMesCorto, 2, '0', STR_PAD_LEFT);
+
+        // Piso de 1 día de salario mínimo (SMLDV) para el retroactivo de
+        // vacaciones — ver docblock de :smlvDiario más abajo. 0.0 (sin
+        // configurar) es un no-op: GREATEST(x,0) siempre da x para una base
+        // positiva, y en MySQL GREATEST(x,NULL) da NULL (rompería la
+        // columna) — por eso nunca se pasa null aquí, siempre un float.
+        // round() a peso entero (2026-09-02, a pedido del usuario): el
+        // salario mínimo mensual no siempre es múltiplo exacto de 30, así
+        // que la división sola arrastra decimales (verificado real:
+        // $1.300.000/30 = $43.333,333...) a las columnas de BASE (I.B.C.
+        // PENSION/EPS/ARL/CCF/Otros Parafiscales), que a diferencia de las
+        // de cotización no llevan ROUND() propio. SIHOS jamás guarda
+        // centavos (todo `ValoEmpe`/`ValoBase` es peso entero) — redondear
+        // aquí es justamente lo fiel a ese formato, no un valor inventado.
+        $smlvDiario = round($salarioMinimoMensual / 30);
+
+        $codiDocuEmpleados = $this->codiDocuPorDocuApli(self::DOCUAPLI_NOMINA_EMPLEADOS);
+        if ($codiDocuEmpleados === []) {
+            return [];
+        }
+        $paramsEmp = [];
+        foreach ($codiDocuEmpleados as $i => $codiDocu) {
+            $paramsEmp["docuEmp{$i}"] = $codiDocu;
+        }
+        $inEmp = implode(',', array_map(static fn (string $k): string => ":{$k}", array_keys($paramsEmp)));
+
+        $codiDocuRetro = $this->codiDocuPorDocuApli(self::DOCUAPLI_NOMINA_RETROACTIVOS);
+        $tieneRetro = $codiDocuRetro !== [];
+        $paramsRetro = [];
+        foreach ($codiDocuRetro as $i => $codiDocu) {
+            $paramsRetro["docuRetro{$i}"] = $codiDocu;
+        }
+        // Placeholder inocuo (nunca calza ningún CodiDocu real) cuando la
+        // institución no tiene documentos de Retroactivos — así el bloque
+        // `retroSolo` de más abajo sigue siendo SQL válido (LEFT JOIN que
+        // entonces nunca calza nada) sin necesitar una segunda variante de
+        // la consulta.
+        $inRetro = $tieneRetro
+            ? implode(',', array_map(static fn (string $k): string => ":{$k}", array_keys($paramsRetro)))
+            : "''";
+
+        // Retroactivo de vacaciones (Concepto.RetrVaca='1') SOLO para
+        // empleados que este período NO tengan una línea real de vacaciones
+        // (EsVacaci='1') — ver docblock. Reutilizada para restar 1 día de la
+        // fila normal y como origen de la fila sintética de VACACIONES.
+        $retroSoloSubquery = "
+            select r.TipoDocu, r.NumePers, r.CodiAno, CAST(r.CodiMes AS SIGNED) as CodiMes, SUM(r.ValoEmpe) as ValoEmpe
+            from DetaNomi r
+            inner join Concepto cr on (r.CodiConc=cr.CodiConc and r.CodiInst=cr.CodiInst)
+            where cr.RetrVaca='1' and r.CodiInst=:codiInst and r.CodiDocu in ({$inRetro})
+              and r.CodiAno=:codiAno and (r.CodiMes=:codiMesCorto or r.CodiMes=:codiMesPadded) and r.ValoEmpe<>0
+              and not exists (
+                  select 1 from DetaNomi v inner join Concepto cv on (v.CodiConc=cv.CodiConc and v.CodiInst=cv.CodiInst)
+                  where cv.EsVacaci='1' and v.CodiInst=r.CodiInst and v.TipoDocu=r.TipoDocu and v.NumePers=r.NumePers
+                    and v.CodiAno=r.CodiAno and CAST(v.CodiMes AS SIGNED)=CAST(r.CodiMes AS SIGNED) and v.ValoEmpe<>0
+              )
+            group by r.TipoDocu, r.NumePers, r.CodiAno, CAST(r.CodiMes AS SIGNED)
+        ";
+
+        // Mismo retroactivo, SIN el filtro NOT EXISTS — usada solo dentro
+        // del bloque VACACIONES real, que por su propio WHERE ya garantiza
+        // que el empleado SÍ tiene línea de vacaciones ese período.
+        $retroTotalSubquery = "
+            select r.TipoDocu, r.NumePers, r.CodiAno, CAST(r.CodiMes AS SIGNED) as CodiMes, SUM(r.ValoEmpe) as ValoEmpe
+            from DetaNomi r
+            inner join Concepto cr on (r.CodiConc=cr.CodiConc and r.CodiInst=cr.CodiInst)
+            where cr.RetrVaca='1' and r.CodiInst=:codiInst and r.CodiDocu in ({$inRetro})
+              and r.CodiAno=:codiAno and (r.CodiMes=:codiMesCorto or r.CodiMes=:codiMesPadded) and r.ValoEmpe<>0
+            group by r.TipoDocu, r.NumePers, r.CodiAno, CAST(r.CodiMes AS SIGNED)
+        ";
+
+        $sql = "
+select e.TipoDocu,e.NumePers,e.Ape1Pers,e.Ape2Pers,e.Nom1Pers,e.Nom2Pers,'VALLE' AS 'Depa',:municipio AS 'Ciu','1. DEPENDIENTE' AS 'T_C','NINGUNO' AS 'ST_C',
+'190' AS HorasLabo,'NO' AS 'Extranjero','NO' AS 'RES_EXT','' AS 'FECH_RAD_EXT','NO' AS 'ING','' AS 'FECH_ING',if(year(e.FechFinV)=:codiAno AND month(e.FechFinV)=:codiMesCorto,'Todos los sistemas (ARL, AFP, CCF, EPS)','NO') AS 'RET',if(year(e.FechFinV)=:codiAno AND month(e.FechFinV)=:codiMesCorto,e.FechFinV,'') AS 'FECH_RET',
+'NO' AS TDE,'NO' AS TAE,'NO' AS TDP,'NO' AS TAP,'' AS VSP,'' AS 'Fecha VSP',if(hyr.ValoEmpe<>'','SI','NO') AS VST,'NO' as 'SLN','' AS 'Inicio SLN','' AS 'Fin  SLN',
+'NO' as 'IGE','' AS 'Inicio IGE','' AS 'Fin IGE','NO' as 'LMA','' AS 'Inicio LMA','' AS 'Fin LMA',
+'NO' as 'VAC', '' as 'INICIO VAC-LR','' as 'FIN VAC-LR','NO' AS AVP,'NO' AS VCT,'' AS 'Inicio VCT','' AS 'Fin VCT','' AS IRL,'' AS 'Inicio IRL','' AS 'Fin IRL','NO' AS 'Correcciones',
+e.Salario as Salario,'NO' AS 'Salario Integral','NO' AS 'Salario Variable',ctafp.NombTerc AS AFP,(d.Cantidad - if(retroSolo.ValoEmpe is null,0,1)) AS 'D_AFP',
+IBC.ValoEmpe-if(vac.ValoEmpe IS NULL,0,vac.ValoEmpe)-if(inca.ValoEmpe IS NULL,0,inca.ValoEmpe)-if(LM.ValoEmpe IS NULL,0,LM.ValoEmpe)-if(retroSolo.ValoEmpe is null,if(retro.ValoEmpe IS NULL,0,retro.ValoEmpe),GREATEST(retroSolo.ValoEmpe,:smlvDiario)) as 'I.B.C. PENSION',if(arp.CodiClas in ('3','5'),'26%','16%') AS Tarifa_AFP,(AFP.ValoEmpe+AFP.ValoPatr)-round((if(vac.ValoEmpe IS NULL,0,vac.ValoEmpe)*if(arp.CodiClas in ('3','5'),26,16))/100,-2)-round((if(inca.ValoEmpe IS NULL,0,inca.ValoEmpe)*if(arp.CodiClas in ('3','5'),26,16))/100,-2)-round((if(LNR.ValoEmpe IS NULL,0,LNR.ValoEmpe)*12)/100,-2)-round((if(LM.ValoEmpe IS NULL,0,LM.ValoEmpe)*if(arp.CodiClas in ('3','5'),26,16))/100,-2)-round((if(retroSolo.ValoEmpe is null,if(retro.ValoEmpe IS NULL,0,retro.ValoEmpe),GREATEST(retroSolo.ValoEmpe,:smlvDiario))*if(arp.CodiClas in ('3','5'),26,16))/100,-2) as 'COTIZACION AFP',
+if(arp.CodiClas in ('3','5'),'1. Actividades de alto riesgo','Sin Riesgo') as 'In_altoR','' AS 'Cotización Voluntaria Afiliado','' AS 'Cotización Voluntaria Empleador',
+fond.ValoEmpe as 'FSolidaridad','' AS 'Fondo Subsistencia','' AS 'Valor no Retenido',(AFP.ValoEmpe+AFP.ValoPatr)+if(fond.ValoEmpe is null,'',fond.ValoEmpe) as 'Total_AFP','NINGUNA' AS 'AFP Destino',
+cteps.NombTerc AS EPS,(d.Cantidad - if(retroSolo.ValoEmpe is null,0,1)) AS 'D_EPS',IBC.ValoEmpe-if(vac.ValoEmpe IS NULL,0,vac.ValoEmpe)-if(inca.ValoEmpe IS NULL,0,inca.ValoEmpe)-if(LM.ValoEmpe IS NULL,0,LM.ValoEmpe)-if(retroSolo.ValoEmpe is null,if(retro.ValoEmpe IS NULL,0,retro.ValoEmpe),GREATEST(retroSolo.ValoEmpe,:smlvDiario)) as 'I.B.C. EPS','12.50%' AS Tarifa,(EPS.ValoEmpe+EPS.ValoPatr)-round((if(vac.ValoEmpe IS NULL,0,vac.ValoEmpe)*12.5)/100,-2)-round((if(inca.ValoEmpe IS NULL,0,inca.ValoEmpe)*12.5)/100,-2)-round((if(LNR.ValoEmpe IS NULL,0,LNR.ValoEmpe)*8.5)/100,-2)-round((if(LM.ValoEmpe IS NULL,0,LM.ValoEmpe)*12.5)/100,-2)-round((if(retroSolo.ValoEmpe is null,if(retro.ValoEmpe IS NULL,0,retro.ValoEmpe),GREATEST(retroSolo.ValoEmpe,:smlvDiario))*12.5)/100,-2) as 'COTIZACION EPS',
+'0' AS 'Valor UPC','' AS 'No Autorización Incapacidad EG',inca.ValoEmpe as VInca,'' AS 'No Autorización LMA',LM.ValoEmpe as VLMA,'NINGUNA' AS 'EPS Destino',
+ctarl.NombTerc AS ARL,(d.Cantidad - if(retroSolo.ValoEmpe is null,0,1)) AS 'D_ARL',IBC.ValoEmpe-if(vac.ValoEmpe IS NULL,0,vac.ValoEmpe)-if(inca.ValoEmpe IS NULL,0,inca.ValoEmpe)-if(LM.ValoEmpe IS NULL,0,LM.ValoEmpe)-if(retroSolo.ValoEmpe is null,if(retro.ValoEmpe IS NULL,0,retro.ValoEmpe),GREATEST(retroSolo.ValoEmpe,:smlvDiario)) as 'I.B.C. ARL',ROUND(arp.PorcClAr,3) as 'TARIFA ARL','NINGUNA' AS Clase,'RIESGO 3' AS 'Centro de Trabajo','3861001' AS 'Actividad Económica',
+(ARL.ValoPatr) as 'COTIZACION ARL',(d.Cantidad - if(retroSolo.ValoEmpe is null,0,1)) AS 'D_PARA',caja.NombTerc AS CCF,BPara.ValoEmpe-if(vac.ValoEmpe IS NULL,0,vac.ValoEmpe)-if(LM.ValoEmpe IS NULL,0,LM.ValoEmpe)-if(retroSolo.ValoEmpe is null,if(retro.ValoEmpe IS NULL,0,retro.ValoEmpe),GREATEST(retroSolo.ValoEmpe,:smlvDiario)) as 'I.B.C. CCF','4.00%' AS 'Tarifa CCF',
+Para.ValoPatr-round((if(vac.ValoEmpe IS NULL,0,vac.ValoEmpe)*4)/100,-2)-round((if(LM.ValoEmpe IS NULL,0,LM.ValoEmpe)*4)/100,-2)-round((if(retroSolo.ValoEmpe is null,if(retro.ValoEmpe IS NULL,0,retro.ValoEmpe),GREATEST(retroSolo.ValoEmpe,:smlvDiario))*4)/100,-2) as 'COTIZACION CCF',BPara.ValoEmpe-if(vac.ValoEmpe IS NULL,0,vac.ValoEmpe)-if(LM.ValoEmpe IS NULL,0,LM.ValoEmpe)-if(retroSolo.ValoEmpe is null,if(retro.ValoEmpe IS NULL,0,retro.ValoEmpe),GREATEST(retroSolo.ValoEmpe,:smlvDiario)) AS 'IBC Otros Parafiscales','2.00%' AS 'Tarifa SENA',sena.ValoPatr-round((if(vac.ValoEmpe IS NULL,0,vac.ValoEmpe)*2)/100,-2)-round((if(LM.ValoEmpe IS NULL,0,LM.ValoEmpe)*2)/100,-2)-round((if(retroSolo.ValoEmpe is null,if(retro.ValoEmpe IS NULL,0,retro.ValoEmpe),GREATEST(retroSolo.ValoEmpe,:smlvDiario))*2)/100,-2) as 'COTIZACION SENA','3.00%' AS 'Tarifa ICBF',icbf.ValoPatr-round((if(vac.ValoEmpe IS NULL,0,vac.ValoEmpe)*3)/100,-2)-round((if(LM.ValoEmpe IS NULL,0,LM.ValoEmpe)*3)/100,-2)-round((if(retroSolo.ValoEmpe is null,if(retro.ValoEmpe IS NULL,0,retro.ValoEmpe),GREATEST(retroSolo.ValoEmpe,:smlvDiario))*3)/100,-2) as 'COTIZACION ICBF',ctafp.NumeTerc AS AFP_NIT,cteps.NumeTerc AS EPS_NIT,ctarl.NumeTerc AS ARL_NIT,caja.NumeTerc AS CCF_NIT
+from Empleado e
+inner join (
+    select TipoDocu, NumePers, CodiAno, CAST(CodiMes AS SIGNED) as CodiMes,
+           SUM(Cantidad) as Cantidad, SUM(ValoBase) as ValoBase, SUM(ValoEmpe) as ValoEmpe, SUM(ValoPatr) as ValoPatr
+    from DetaNomi
+    where CodiInst=:codiInst and CodiConc='1' and CodiDocu in ({$inEmp})
+      and CodiAno=:codiAno and (CodiMes=:codiMesCorto or CodiMes=:codiMesPadded)
+    group by TipoDocu, NumePers, CodiAno, CAST(CodiMes AS SIGNED)
+) d on (e.CodiInst=:codiInst and e.TipoDocu=d.TipoDocu and e.NumePers=d.NumePers)
+inner join ClasiARP arp on (e.ClasiARP=arp.CodiClas)
+left join CodiTerc ctafp on (e.TiDoAFP=ctafp.TipoDocu and e.NuDoAFP=ctafp.NumeTerc)
+left join CodiTerc cteps on (e.TiDoEPS=cteps.TipoDocu and e.NuDoEPS=cteps.NumeTerc)
+left join CodiTerc ctarl on (e.TiDoARP=ctarl.TipoDocu and e.NuDoARP=ctarl.NumeTerc)
+left join CodiTerc caja on (e.TiDoCaja=caja.TipoDocu and e.NuDoCaja=caja.NumeTerc)
+left JOIN (
+select e.TipoDocu,e.NumePers,sum(d.ValoBase) as ValoBase,d.CodiDocu,d.NumeDocu,sum(d.ValoEmpe) as ValoEmpe,sum(d.ValoPatr) as ValoPatr,d.CodiAno,d.CodiMes
+from Empleado e
+inner join DetaNomi d on (e.CodiInst=d.CodiInst and e.TipoDocu=d.TipoDocu and e.NumePers=d.NumePers and e.CodiInst=:codiInst)
+inner join Concepto c on (d.CodiConc=c.CodiConc)
+where c.BaseIBC='1'
+AND d.CodiAno=:codiAno AND (d.CodiMes=:codiMesCorto OR d.CodiMes=:codiMesPadded)
+group by e.TipoDocu,e.NumePers,d.CodiAno,CAST(d.CodiMes AS SIGNED)
+) as IBC
+on (e.TipoDocu=IBC.TipoDocu and e.NumePers=IBC.NumePers and d.CodiAno=IBC.CodiAno and CAST(d.CodiMes AS SIGNED)=IBC.CodiMes)
+left JOIN (
+select e.TipoDocu,e.NumePers,sum(d.ValoBase) as ValoBase,d.CodiDocu,d.NumeDocu,sum(d.ValoEmpe) as ValoEmpe,sum(d.ValoPatr) as ValoPatr,d.CodiAno,d.CodiMes
+from Empleado e
+inner join DetaNomi d on (e.CodiInst=d.CodiInst and e.TipoDocu=d.TipoDocu and e.NumePers=d.NumePers and e.CodiInst=:codiInst)
+inner join Concepto c on (d.CodiConc=c.CodiConc)
+where c.EsPensio='1'
+AND d.CodiAno=:codiAno AND (d.CodiMes=:codiMesCorto OR d.CodiMes=:codiMesPadded)
+group by e.TipoDocu,e.NumePers,d.CodiAno,CAST(d.CodiMes AS SIGNED)
+) as AFP
+on (e.TipoDocu=AFP.TipoDocu and e.NumePers=AFP.NumePers and d.CodiAno=AFP.CodiAno and CAST(d.CodiMes AS SIGNED)=CAST(AFP.CodiMes AS SIGNED))
+left JOIN (
+select e.TipoDocu,e.NumePers,sum(d.ValoBase) as ValoBase,d.CodiDocu,d.NumeDocu,sum(d.ValoEmpe) as ValoEmpe,sum(d.ValoPatr) as ValoPatr,d.CodiAno,d.CodiMes
+from Empleado e
+inner join DetaNomi d on (e.CodiInst=d.CodiInst and e.TipoDocu=d.TipoDocu and e.NumePers=d.NumePers and e.CodiInst=:codiInst)
+inner join Concepto c on (d.CodiConc=c.CodiConc)
+where c.EsSalud='1'
+AND d.CodiAno=:codiAno AND (d.CodiMes=:codiMesCorto OR d.CodiMes=:codiMesPadded)
+group by e.TipoDocu,e.NumePers,d.CodiAno,CAST(d.CodiMes AS SIGNED)
+) as EPS
+on (e.TipoDocu=EPS.TipoDocu and e.NumePers=EPS.NumePers and d.CodiAno=EPS.CodiAno and CAST(d.CodiMes AS SIGNED)=CAST(EPS.CodiMes AS SIGNED))
+left JOIN (
+select e.TipoDocu,e.NumePers,sum(d.ValoBase) as ValoBase,d.CodiAno,CAST(d.CodiMes AS SIGNED) as CodiMes,sum(d.ValoEmpe) as ValoEmpe,sum(d.ValoPatr) as ValoPatr
+from Empleado e
+inner join DetaNomi d on (e.CodiInst=d.CodiInst and e.TipoDocu=d.TipoDocu and e.NumePers=d.NumePers and e.CodiInst=:codiInst)
+inner join Concepto c on (d.CodiConc=c.CodiConc) where c.EsRiePro='1' and d.CodiDocu in ({$inEmp})
+AND d.CodiAno=:codiAno AND (d.CodiMes=:codiMesCorto OR d.CodiMes=:codiMesPadded)
+group by e.TipoDocu,e.NumePers,d.CodiAno,CAST(d.CodiMes AS SIGNED)
+) as ARL
+on (e.TipoDocu=ARL.TipoDocu and e.NumePers=ARL.NumePers and d.CodiAno=ARL.CodiAno and CAST(d.CodiMes AS SIGNED)=ARL.CodiMes)
+left JOIN (
+select e.TipoDocu,e.NumePers,sum(d.ValoBase) as ValoBase,d.CodiDocu,d.NumeDocu,sum(d.ValoEmpe) as ValoEmpe,sum(d.ValoPatr) as ValoPatr,d.CodiAno,d.CodiMes
+from Empleado e
+inner join DetaNomi d on (e.CodiInst=d.CodiInst and e.TipoDocu=d.TipoDocu and e.NumePers=d.NumePers and e.CodiInst=:codiInst)
+inner join Concepto c on (d.CodiConc=c.CodiConc)
+where c.BasePara='1'
+AND d.CodiAno=:codiAno AND (d.CodiMes=:codiMesCorto OR d.CodiMes=:codiMesPadded)
+group by e.TipoDocu,e.NumePers,d.CodiAno,CAST(d.CodiMes AS SIGNED)
+) as BPara
+on (e.TipoDocu=BPara.TipoDocu and e.NumePers=BPara.NumePers and d.CodiAno=BPara.CodiAno and CAST(d.CodiMes AS SIGNED)=BPara.CodiMes)
+left JOIN (
+select e.TipoDocu,e.NumePers,sum(d.ValoBase) as ValoBase,d.CodiAno,CAST(d.CodiMes AS SIGNED) as CodiMes,sum(d.ValoEmpe) as ValoEmpe,sum(d.ValoPatr) as ValoPatr
+from Empleado e
+inner join DetaNomi d on (e.CodiInst=d.CodiInst and e.TipoDocu=d.TipoDocu and e.NumePers=d.NumePers and e.CodiInst=:codiInst)
+inner join Concepto c on (d.CodiConc=c.CodiConc) where c.EsCaja='1' and d.CodiDocu in ({$inEmp})
+AND d.CodiAno=:codiAno AND (d.CodiMes=:codiMesCorto OR d.CodiMes=:codiMesPadded)
+group by e.TipoDocu,e.NumePers,d.CodiAno,CAST(d.CodiMes AS SIGNED)
+) as Para
+on (e.TipoDocu=Para.TipoDocu and e.NumePers=Para.NumePers and d.CodiAno=Para.CodiAno and CAST(d.CodiMes AS SIGNED)=Para.CodiMes)
+left JOIN (
+select e.TipoDocu,e.NumePers,sum(d.ValoBase) as ValoBase,d.CodiAno,CAST(d.CodiMes AS SIGNED) as CodiMes,sum(d.ValoEmpe) as ValoEmpe,sum(d.ValoPatr) as ValoPatr
+from Empleado e
+inner join DetaNomi d on (e.CodiInst=d.CodiInst and e.TipoDocu=d.TipoDocu and e.NumePers=d.NumePers and e.CodiInst=:codiInst)
+inner join Concepto c on (d.CodiConc=c.CodiConc) where c.EsSena='1' and d.CodiDocu in ({$inEmp})
+AND d.CodiAno=:codiAno AND (d.CodiMes=:codiMesCorto OR d.CodiMes=:codiMesPadded)
+group by e.TipoDocu,e.NumePers,d.CodiAno,CAST(d.CodiMes AS SIGNED)
+) as sena
+on (e.TipoDocu=sena.TipoDocu and e.NumePers=sena.NumePers and d.CodiAno=sena.CodiAno and CAST(d.CodiMes AS SIGNED)=sena.CodiMes)
+left JOIN (
+select e.TipoDocu,e.NumePers,sum(d.ValoBase) as ValoBase,d.CodiAno,CAST(d.CodiMes AS SIGNED) as CodiMes,sum(d.ValoEmpe) as ValoEmpe,sum(d.ValoPatr) as ValoPatr
+from Empleado e
+inner join DetaNomi d on (e.CodiInst=d.CodiInst and e.TipoDocu=d.TipoDocu and e.NumePers=d.NumePers and e.CodiInst=:codiInst)
+inner join Concepto c on (d.CodiConc=c.CodiConc) where c.EsIcbf='1' and d.CodiDocu in ({$inEmp})
+AND d.CodiAno=:codiAno AND (d.CodiMes=:codiMesCorto OR d.CodiMes=:codiMesPadded)
+group by e.TipoDocu,e.NumePers,d.CodiAno,CAST(d.CodiMes AS SIGNED)
+) as icbf
+on (e.TipoDocu=icbf.TipoDocu and e.NumePers=icbf.NumePers and d.CodiAno=icbf.CodiAno and CAST(d.CodiMes AS SIGNED)=icbf.CodiMes)
+left JOIN (
+select e.TipoDocu,e.NumePers,sum(d.ValoBase) as ValoBase,d.CodiAno,CAST(d.CodiMes AS SIGNED) as CodiMes,sum(d.ValoEmpe) as ValoEmpe,sum(d.ValoPatr) as ValoPatr
+from Empleado e
+inner join DetaNomi d on (e.CodiInst=d.CodiInst and e.TipoDocu=d.TipoDocu and e.NumePers=d.NumePers and e.CodiInst=:codiInst)
+inner join Concepto c on (d.CodiConc=c.CodiConc)
+where c.EsSolPen='1' and d.CodiDocu in ({$inEmp})
+AND d.CodiAno=:codiAno AND (d.CodiMes=:codiMesCorto OR d.CodiMes=:codiMesPadded)
+group by e.TipoDocu,e.NumePers,d.CodiAno,CAST(d.CodiMes AS SIGNED)
+) as fond
+on (e.TipoDocu=fond.TipoDocu and e.NumePers=fond.NumePers and d.CodiAno=fond.CodiAno and CAST(d.CodiMes AS SIGNED)=fond.CodiMes)
+left JOIN (
+select e.TipoDocu,e.NumePers,sum(d.ValoBase) as ValoBase,d.CodiAno,CAST(d.CodiMes AS SIGNED) as CodiMes,sum(d.ValoEmpe) as ValoEmpe
+from Empleado e
+inner join DetaNomi d on (e.CodiInst=d.CodiInst and e.TipoDocu=d.TipoDocu and e.NumePers=d.NumePers and e.CodiInst=:codiInst)
+inner join Concepto c on (d.CodiConc=c.CodiConc)
+where (c.EsIncapa='1' or c.EsIncEmp='1' OR c.EsIncaRP='1' OR c.EsIncaPr='1')
+AND d.CodiAno=:codiAno AND (d.CodiMes=:codiMesCorto OR d.CodiMes=:codiMesPadded)
+group by e.TipoDocu,e.NumePers,d.CodiAno,CAST(d.CodiMes AS SIGNED)
+) as inca
+on (e.TipoDocu=inca.TipoDocu and e.NumePers=inca.NumePers and d.CodiAno=inca.CodiAno and CAST(d.CodiMes AS SIGNED)=inca.CodiMes)
+left JOIN (
+select e.TipoDocu,e.NumePers,sum(d.ValoBase) as ValoBase,d.CodiAno,CAST(d.CodiMes AS SIGNED) as CodiMes,sum(d.ValoEmpe) as ValoEmpe
+from Empleado e
+inner join DetaNomi d on (e.CodiInst=d.CodiInst and e.TipoDocu=d.TipoDocu and e.NumePers=d.NumePers and e.CodiInst=:codiInst)
+inner join Concepto c on (d.CodiConc=c.CodiConc)
+where (c.RDF='1' or c.RDO='1' or c.RNF='1' or c.RNO='1' or c.HEDF='1' or c.HEDO='1' or c.HENF='1' or c.HENO='1' or c.EsGasRep='1' or c.EsBoniSe='1'
+    or (c.BaseIBC='1' and (c.EsRetroa='1' or c.RetrSuel='1' or c.RetrAuTr='1' or c.RetrSuAl='1' or c.RetrInca='1' or c.RetrVaca='1' or c.RetrPrVa='1' or c.RetrPrSe='1' or c.RetrPrNa='1' or c.RetrCesa='1' or c.RetrInCe='1' or c.RetrReca='1' or c.RetrHoEx='1' or c.RetrGaRe='1' or c.RetrQuin='1' or c.RetrBoSe='1' or c.RetrPrAn='1' or c.RetrSoSu='1' or c.RetrBoRe='1' or c.RetrSind='1' or c.RetrPrTe='1' or c.RetrViat='1' or c.RetrOtro='1')))
+AND d.CodiAno=:codiAno AND (d.CodiMes=:codiMesCorto OR d.CodiMes=:codiMesPadded)
+group by e.TipoDocu,e.NumePers,d.CodiAno,CAST(d.CodiMes AS SIGNED)
+) as hyr
+on (e.TipoDocu=hyr.TipoDocu and e.NumePers=hyr.NumePers AND d.CodiAno=hyr.CodiAno AND CAST(d.CodiMes AS SIGNED)=hyr.CodiMes)
+left JOIN (
+select e.TipoDocu,e.NumePers,sum(d.ValoBase) as ValoBase,d.CodiAno,CAST(d.CodiMes AS SIGNED) as CodiMes,sum(d.ValoEmpe) as ValoEmpe,sum(d.ValoPatr) as ValoPatr,sum(d.Cantidad) as Cantidad
+from Empleado e
+inner join DetaNomi d on (e.CodiInst=d.CodiInst and e.TipoDocu=d.TipoDocu and e.NumePers=d.NumePers and e.CodiInst=:codiInst)
+inner join Concepto c on (d.CodiConc=c.CodiConc)
+where c.EsLiMate='1' and d.CodiDocu in ({$inEmp})
+AND d.CodiAno=:codiAno AND (d.CodiMes=:codiMesCorto OR d.CodiMes=:codiMesPadded)
+group by e.TipoDocu,e.NumePers,d.CodiAno,CAST(d.CodiMes AS SIGNED)
+) as LM
+on (e.TipoDocu=LM.TipoDocu and e.NumePers=LM.NumePers and d.CodiAno=LM.CodiAno and CAST(d.CodiMes AS SIGNED)=LM.CodiMes)
+left JOIN (
+select e.TipoDocu,e.NumePers,sum(d.ValoBase) as ValoBase,d.CodiAno,CAST(d.CodiMes AS SIGNED) as CodiMes,sum(d.ValoEmpe) as ValoEmpe,sum(d.ValoPatr) as ValoPatr
+from Empleado e
+inner join DetaNomi d on (e.CodiInst=d.CodiInst and e.TipoDocu=d.TipoDocu and e.NumePers=d.NumePers and e.CodiInst=:codiInst)
+inner join Concepto c on (d.CodiConc=c.CodiConc)
+where c.EsLiNoRe='1' and d.CodiDocu in ({$inEmp})
+AND d.CodiAno=:codiAno AND (d.CodiMes=:codiMesCorto OR d.CodiMes=:codiMesPadded)
+group by e.TipoDocu,e.NumePers,d.CodiAno,CAST(d.CodiMes AS SIGNED)
+) as LNR
+on (e.TipoDocu=LNR.TipoDocu and e.NumePers=LNR.NumePers and d.CodiAno=LNR.CodiAno and CAST(d.CodiMes AS SIGNED)=LNR.CodiMes)
+left JOIN(
+select e.TipoDocu,e.NumePers,d.ValoBase,d.CodiDocu,d.NumeDocu,d.ValoEmpe,d.ValoPatr,ce.FechInic,ce.FechFina,'SI' as sino
+from Empleado e
+inner join DetaNomi d on (e.CodiInst=d.CodiInst and e.TipoDocu=d.TipoDocu and e.NumePers=d.NumePers and e.CodiInst=:codiInst)
+inner join Concepto c on (d.CodiConc=c.CodiConc)
+inner join ConcEmpl ce on (e.TipoDocu=ce.TipoDocu and e.NumePers=ce.NumePers and d.CodiConc=ce.CodiConc)
+where c.EsVacaci='1' and d.CodiAno=:codiAno and (d.CodiMes=:codiMesCorto or d.CodiMes=:codiMesPadded) AND d.ValoEmpe<>0
+)as vac
+on (e.TipoDocu=vac.TipoDocu and e.NumePers=vac.NumePers)
+left JOIN (
+    {$retroSoloSubquery}
+) as retroSolo
+on (e.TipoDocu=retroSolo.TipoDocu and e.NumePers=retroSolo.NumePers and d.CodiAno=retroSolo.CodiAno and d.CodiMes=retroSolo.CodiMes)
+left JOIN (
+    {$retroTotalSubquery}
+) as retro
+on (e.TipoDocu=retro.TipoDocu and e.NumePers=retro.NumePers and d.CodiAno=retro.CodiAno and d.CodiMes=retro.CodiMes)
+UNION ALL
+select e.TipoDocu,e.NumePers,e.Ape1Pers,e.Ape2Pers,e.Nom1Pers,e.Nom2Pers,'VALLE' AS 'Depa',:municipio AS 'Ciu','1. DEPENDIENTE' AS 'T_C','NINGUNO' AS 'ST_C',
+'190' AS HorasLabo,'NO' AS 'Extranjero','NO' AS 'RES_EXT','' AS 'FECH_RAD_EXT','NO' AS 'ING','' AS 'FECH_ING','NO' AS 'RET','' AS 'FECH_RET',
+'NO' AS TDE,'NO' AS TAE,'NO' AS TDP,'NO' AS TAP,'' AS VSP,'' AS 'Fecha VSP','NO' AS VST,'NO' as 'SLN','' AS 'Inicio SLN','' AS 'Fin  SLN',
+'NO' as 'IGE','' AS 'Inicio IGE','' AS 'Fin IGE','NO' as 'LMA','' AS 'Inicio LMA','' AS 'Fin LMA',
+'VACACIONES' as 'VAC', ce.FechInic as 'INICIO VAC-LR',ce.FechFina as 'FIN VAC-LR','NO' AS AVP,'NO' AS VCT,'' AS 'Inicio VCT','' AS 'Fin VCT','' AS IRL,'' AS 'Inicio IRL','' AS 'Fin IRL','NO' AS 'Correcciones',
+e.Salario as Salario,'NO' AS 'Salario Integral','NO' AS 'Salario Variable',ctafp.NombTerc AS AFP,sum(d.Cantidad) AS 'D_AFP',
+(d.ValoEmpe+IFNULL(retro.ValoEmpe,0)) as 'I.B.C. PENSION','16%' AS Tarifa,ROUND(((d.ValoEmpe+IFNULL(retro.ValoEmpe,0))*16)/100,0) as 'COTIZACION AFP',
+if(arp.CodiClas in ('3','5'),'1. Actividades de alto riesgo','Sin Riesgo') as 'In_altoR','' AS 'Cotización Voluntaria Afiliado','' AS 'Cotización Voluntaria Empleador',
+'' as 'FSolidaridad','' AS 'Fondo Subsistencia','' AS 'Valor no Retenido',ROUND(((d.ValoEmpe+IFNULL(retro.ValoEmpe,0))*16)/100,0) as 'Total_AFP','NINGUNA' AS 'AFP Destino',
+cteps.NombTerc AS EPS,sum(d.Cantidad) AS 'D_EPS',(d.ValoEmpe+IFNULL(retro.ValoEmpe,0)) as 'I.B.C. EPS','12.50%' AS Tarifa,ROUND(((d.ValoEmpe+IFNULL(retro.ValoEmpe,0))*12.5)/100,0) as 'COTIZACION EPS',
+'0' AS 'Valor UPC','' AS 'No Autorización Incapacidad EG','' as VInca,'' AS 'No Autorización LMA','' as VLMA,'NINGUNA' AS 'EPS Destino',
+ctarl.NombTerc AS ARL,d.Cantidad AS 'D_ARL',(d.ValoEmpe+IFNULL(retro.ValoEmpe,0)) as 'I.B.C. ARL',ROUND(arp.PorcClAr,3) AS 'TARIFA ARL','NINGUNA' AS Clase,'RIESGO 3' AS 'Centro de Trabajo','3861001' AS 'Actividad Económica',
+'' as 'COTIZACION ARL',sum(d.Cantidad) AS 'D_PARA',caja.NombTerc AS CCF,(d.ValoEmpe+IFNULL(retro.ValoEmpe,0)) as 'I.B.C. CCF','4.00%' AS 'Tarifa CCF',
+ROUND(((sum(d.ValoEmpe)+IFNULL(MAX(retro.ValoEmpe),0))*4)/100,-2) as 'COTIZACION CCF',(d.ValoEmpe+IFNULL(retro.ValoEmpe,0)) AS 'IBC Otros Parafiscales','2.00%' AS 'Tarifa SENA',ROUND(((sum(d.ValoEmpe)+IFNULL(MAX(retro.ValoEmpe),0))*2)/100,-2) as 'COTIZACION SENA','3.00%' AS 'Tarifa ICBF',ROUND(((sum(d.ValoEmpe)+IFNULL(MAX(retro.ValoEmpe),0))*3)/100,-2) as 'COTIZACION ICBF',ctafp.NumeTerc AS AFP_NIT,cteps.NumeTerc AS EPS_NIT,ctarl.NumeTerc AS ARL_NIT,caja.NumeTerc AS CCF_NIT
+from Empleado e
+inner join DetaNomi d on (e.CodiInst=d.CodiInst and e.TipoDocu=d.TipoDocu and e.NumePers=d.NumePers and e.CodiInst=:codiInst)
+inner join Concepto c on (d.CodiConc=c.CodiConc)
+inner join ConcEmpl ce on (e.TipoDocu=ce.TipoDocu and e.NumePers=ce.NumePers and d.CodiConc=ce.CodiConc)
+inner join ClasiARP arp on (e.ClasiARP=arp.CodiClas)
+left join CodiTerc ctafp on (e.TiDoAFP=ctafp.TipoDocu and e.NuDoAFP=ctafp.NumeTerc)
+left join CodiTerc cteps on (e.TiDoEPS=cteps.TipoDocu and e.NuDoEPS=cteps.NumeTerc)
+left join CodiTerc ctarl on (e.TiDoARP=ctarl.TipoDocu and e.NuDoARP=ctarl.NumeTerc)
+left join CodiTerc caja on (e.TiDoCaja=caja.TipoDocu and e.NuDoCaja=caja.NumeTerc)
+left JOIN (
+    {$retroTotalSubquery}
+) as retro
+on (e.TipoDocu=retro.TipoDocu and e.NumePers=retro.NumePers and d.CodiAno=retro.CodiAno and CAST(d.CodiMes AS SIGNED)=retro.CodiMes)
+where c.EsVacaci='1' and d.CodiAno=:codiAno AND (d.CodiMes=:codiMesCorto or d.CodiMes=:codiMesPadded) AND d.ValoEmpe<>0
+group by e.NumePers
+union ALL
+select e.TipoDocu,e.NumePers,e.Ape1Pers,e.Ape2Pers,e.Nom1Pers,e.Nom2Pers,'VALLE' AS 'Depa',:municipio AS 'Ciu','1. DEPENDIENTE' AS 'T_C','NINGUNO' AS 'ST_C',
+'190' AS HorasLabo,'NO' AS 'Extranjero','NO' AS 'RES_EXT','' AS 'FECH_RAD_EXT','NO' AS 'ING','' AS 'FECH_ING','NO' AS 'RET','' AS 'FECH_RET',
+'NO' AS TDE,'NO' AS TAE,'NO' AS TDP,'NO' AS TAP,'' AS VSP,'' AS 'Fecha VSP','NO' AS VST,'NO' as 'SLN','' AS 'Inicio SLN','' AS 'Fin  SLN',
+'SI' as 'IGE','' AS 'Inicio IGE','' AS 'Fin IGE','NO' as 'LMA','' AS 'Inicio LMA','' AS 'Fin LMA',
+'NO' as 'VAC', '' as 'INICIO VAC-LR','' as 'FIN VAC-LR','NO' AS AVP,'NO' AS VCT,'' AS 'Inicio VCT','' AS 'Fin VCT','' AS IRL,'' AS 'Inicio IRL','' AS 'Fin IRL','NO' AS 'Correcciones',
+e.Salario as Salario,'NO' AS 'Salario Integral','NO' AS 'Salario Variable',ctafp.NombTerc AS AFP,sum(d.Cantidad) AS 'D_AFP',
+sum(d.ValoEmpe) as 'I.B.C. PENSION','16%' AS Tarifa,ROUND((sum(d.ValoEmpe)*16)/100,-2) as 'COTIZACION AFP',
+if(arp.CodiClas in ('3','5'),'1. Actividades de alto riesgo','Sin Riesgo') as 'In_altoR','' AS 'Cotización Voluntaria Afiliado','' AS 'Cotización Voluntaria Empleador',
+'' as 'FSolidaridad','' AS 'Fondo Subsistencia','' AS 'Valor no Retenido',ROUND((sum(d.ValoEmpe)*16)/100,-2) as 'Total_AFP','NINGUNA' AS 'AFP Destino',
+cteps.NombTerc AS EPS,sum(d.Cantidad) AS 'D_EPS',sum(d.ValoEmpe) as 'I.B.C. EPS','12.50%' AS Tarifa,ROUND((sum(d.ValoEmpe)*12.5)/100,-2) as 'COTIZACION EPS',
+'0' AS 'Valor UPC','' AS 'No Autorización Incapacidad EG','' as VInca,'' AS 'No Autorización LMA','' as VLMA,'NINGUNA' AS 'EPS Destino',
+ctarl.NombTerc AS ARL,sum(d.Cantidad) AS 'D_ARL',sum(d.ValoEmpe) as 'I.B.C. ARL',ROUND(arp.PorcClAr,3) AS 'TARIFA ARL','NINGUNA' AS Clase,'RIESGO 3' AS 'Centro de Trabajo','3861001' AS 'Actividad Económica',
+'' as 'COTIZACION ARL',sum(d.Cantidad) AS 'D_PARA',caja.NombTerc AS CCF,'' as 'I.B.C. CCF','4.00%' AS 'Tarifa CCF',
+'' as 'COTIZACION CCF','' AS 'IBC Otros Parafiscales','2.00%' AS 'Tarifa SENA','' as 'COTIZACION SENA','3.00%' AS 'Tarifa ICBF','' as 'COTIZACION ICBF',ctafp.NumeTerc AS AFP_NIT,cteps.NumeTerc AS EPS_NIT,ctarl.NumeTerc AS ARL_NIT,caja.NumeTerc AS CCF_NIT
+from Empleado e
+inner join DetaNomi d on (e.CodiInst=d.CodiInst and e.TipoDocu=d.TipoDocu and e.NumePers=d.NumePers and e.CodiInst=:codiInst)
+inner join Concepto c on (d.CodiConc=c.CodiConc)
+inner join ClasiARP arp on (e.ClasiARP=arp.CodiClas)
+left join CodiTerc ctafp on (e.TiDoAFP=ctafp.TipoDocu and e.NuDoAFP=ctafp.NumeTerc)
+left join CodiTerc cteps on (e.TiDoEPS=cteps.TipoDocu and e.NuDoEPS=cteps.NumeTerc)
+left join CodiTerc ctarl on (e.TiDoARP=ctarl.TipoDocu and e.NuDoARP=ctarl.NumeTerc)
+left join CodiTerc caja on (e.TiDoCaja=caja.TipoDocu and e.NuDoCaja=caja.NumeTerc)
+WHERE (c.EsIncapa='1' or c.EsIncEmp='1' or c.EsIncaRP='1' or c.EsIncaPr='1') and d.CodiAno=:codiAno and (d.CodiMes=:codiMesCorto or d.CodiMes=:codiMesPadded) AND ValoEmpe<>0
+group by e.NumePers
+UNION ALL
+select e.TipoDocu,e.NumePers,e.Ape1Pers,e.Ape2Pers,e.Nom1Pers,e.Nom2Pers,'VALLE' AS 'Depa',:municipio AS 'Ciu','1. DEPENDIENTE' AS 'T_C','NINGUNO' AS 'ST_C',
+'190' AS HorasLabo,'NO' AS 'Extranjero','NO' AS 'RES_EXT','' AS 'FECH_RAD_EXT','NO' AS 'ING','' AS 'FECH_ING','NO' AS 'RET','' AS 'FECH_RET',
+'NO' AS TDE,'NO' AS TAE,'NO' AS TDP,'NO' AS TAP,'' AS VSP,'' AS 'Fecha VSP','NO' AS VST,if(d.ValoEmpe<>'','LICENCIA NO REMUNERADA','NO') as 'SLN','' AS 'Inicio SLN','' AS 'Fin  SLN',
+'NO' as 'IGE','' AS 'Inicio IGE','' AS 'Fin IGE','NO' as 'LMA','' AS 'Inicio LMA','' AS 'Fin LMA',
+'NO' as 'VAC', '' as 'INICIO VAC-LR','' as 'FIN VAC-LR','NO' AS AVP,'NO' AS VCT,'' AS 'Inicio VCT','' AS 'Fin VCT','' AS IRL,'' AS 'Inicio IRL','' AS 'Fin IRL','NO' AS 'Correcciones',
+e.Salario as Salario,'NO' AS 'Salario Integral','NO' AS 'Salario Variable',ctafp.NombTerc AS AFP,sum(d.Cantidad) AS 'D_AFP',
+sum(d.ValoEmpe) as 'I.B.C. PENSION','12%' AS Tarifa,ROUND((sum(d.ValoEmpe)*12)/100,-2) as 'COTIZACION AFP',
+if(arp.CodiClas in ('3','5'),'1. Actividades de alto riesgo','Sin Riesgo') as 'In_altoR','' AS 'Cotización Voluntaria Afiliado','' AS 'Cotización Voluntaria Empleador',
+'' as 'FSolidaridad','' AS 'Fondo Subsistencia','' AS 'Valor no Retenido',ROUND((sum(d.ValoEmpe)*12)/100,-2) as 'Total_AFP','NINGUNA' AS 'AFP Destino',
+cteps.NombTerc AS EPS,sum(d.Cantidad) AS 'D_EPS',sum(d.ValoEmpe) as 'I.B.C. EPS','8.50%' AS Tarifa,ROUND((sum(d.ValoEmpe)*8.5)/100,-2) as 'COTIZACION EPS',
+'0' AS 'Valor UPC','' AS 'No Autorización Incapacidad EG','' as VInca,'' AS 'No Autorización LMA','' as VLMA,'NINGUNA' AS 'EPS Destino',
+ctarl.NombTerc AS ARL,sum(d.Cantidad) AS 'D_ARL',d.ValoEmpe as 'I.B.C. ARL',ROUND(arp.PorcClAr,3) AS 'TARIFA ARL','NINGUNA' AS Clase,'RIESGO 3' AS 'Centro de Trabajo','3861001' AS 'Actividad Económica',
+'' as 'COTIZACION ARL',sum(d.Cantidad) AS 'D_PARA',caja.NombTerc AS CCF,'' as 'I.B.C. CCF','4.00%' AS 'Tarifa CCF',
+'' as 'COTIZACION CCF','' AS 'IBC Otros Parafiscales','2.00%' AS 'Tarifa SENA','' as 'COTIZACION SENA','3.00%' AS 'Tarifa ICBF','' as 'COTIZACION ICBF',ctafp.NumeTerc AS AFP_NIT,cteps.NumeTerc AS EPS_NIT,ctarl.NumeTerc AS ARL_NIT,caja.NumeTerc AS CCF_NIT
+from Empleado e
+inner join DetaNomi d on (e.CodiInst=d.CodiInst and e.TipoDocu=d.TipoDocu and e.NumePers=d.NumePers and e.CodiInst=:codiInst)
+inner join Concepto c on (d.CodiConc=c.CodiConc)
+inner join ClasiARP arp on (e.ClasiARP=arp.CodiClas)
+left join CodiTerc ctafp on (e.TiDoAFP=ctafp.TipoDocu and e.NuDoAFP=ctafp.NumeTerc)
+left join CodiTerc cteps on (e.TiDoEPS=cteps.TipoDocu and e.NuDoEPS=cteps.NumeTerc)
+left join CodiTerc ctarl on (e.TiDoARP=ctarl.TipoDocu and e.NuDoARP=ctarl.NumeTerc)
+left join CodiTerc caja on (e.TiDoCaja=caja.TipoDocu and e.NuDoCaja=caja.NumeTerc)
+WHERE (c.EsLiNoRe='1') and d.CodiAno=:codiAno and (d.CodiMes=:codiMesCorto or d.CodiMes=:codiMesPadded) AND ValoEmpe<>0
+group by e.NumePers
+UNION ALL
+select e.TipoDocu,e.NumePers,e.Ape1Pers,e.Ape2Pers,e.Nom1Pers,e.Nom2Pers,'VALLE' AS 'Depa',:municipio AS 'Ciu','1. DEPENDIENTE' AS 'T_C','NINGUNO' AS 'ST_C',
+'190' AS HorasLabo,'NO' AS 'Extranjero','NO' AS 'RES_EXT','' AS 'FECH_RAD_EXT','NO' AS 'ING','' AS 'FECH_ING','NO' AS 'RET','' AS 'FECH_RET',
+'NO' AS TDE,'NO' AS TAE,'NO' AS TDP,'NO' AS TAP,'' AS VSP,'' AS 'Fecha VSP','NO' AS VST,'NO' as 'SLN','' AS 'Inicio SLN','' AS 'Fin  SLN',
+'NO' as 'IGE','' AS 'Inicio IGE','' AS 'Fin IGE','SI' as 'LMA','' AS 'Inicio LMA','' AS 'Fin LMA',
+'NO' as 'VAC', '' as 'INICIO VAC-LR','' as 'FIN VAC-LR','NO' AS AVP,'NO' AS VCT,'' AS 'Inicio VCT','' AS 'Fin VCT','' AS IRL,'' AS 'Inicio IRL','' AS 'Fin IRL','NO' AS 'Correcciones',
+e.Salario as Salario,'NO' AS 'Salario Integral','NO' AS 'Salario Variable',ctafp.NombTerc AS AFP,sum(d.Cantidad) AS 'D_AFP',
+sum(d.ValoEmpe) as 'I.B.C. PENSION','16%' AS Tarifa,ROUND((sum(d.ValoEmpe)*16)/100,-2) as 'COTIZACION AFP',
+if(arp.CodiClas in ('3','5'),'1. Actividades de alto riesgo','Sin Riesgo') as 'In_altoR','' AS 'Cotización Voluntaria Afiliado','' AS 'Cotización Voluntaria Empleador',
+'' as 'FSolidaridad','' AS 'Fondo Subsistencia','' AS 'Valor no Retenido',ROUND((sum(d.ValoEmpe)*16)/100,-2) as 'Total_AFP','NINGUNA' AS 'AFP Destino',
+cteps.NombTerc AS EPS,sum(d.Cantidad) AS 'D_EPS',sum(d.ValoEmpe) as 'I.B.C. EPS','12.50%' AS Tarifa,ROUND((sum(d.ValoEmpe)*12.5)/100,-2) as 'COTIZACION EPS',
+'0' AS 'Valor UPC','' AS 'No Autorización Incapacidad EG','' as VInca,'' AS 'No Autorización LMA','' as VLMA,'NINGUNA' AS 'EPS Destino',
+ctarl.NombTerc AS ARL,sum(d.Cantidad) AS 'D_ARL',d.ValoEmpe as 'I.B.C. ARL',ROUND(arp.PorcClAr,3) AS 'TARIFA ARL','NINGUNA' AS Clase,'RIESGO 3' AS 'Centro de Trabajo','3861001' AS 'Actividad Económica',
+'' as 'COTIZACION ARL',sum(d.Cantidad) AS 'D_PARA',caja.NombTerc AS CCF,d.ValoEmpe as 'I.B.C. CCF','4.00%' AS 'Tarifa CCF',
+ROUND((sum(d.ValoEmpe)*4)/100,-2) as 'COTIZACION CCF',d.ValoEmpe AS 'IBC Otros Parafiscales','2.00%' AS 'Tarifa SENA',ROUND((sum(d.ValoEmpe)*2)/100,-2) as 'COTIZACION SENA','3.00%' AS 'Tarifa ICBF',ROUND((sum(d.ValoEmpe)*3)/100,-2) as 'COTIZACION ICBF',ctafp.NumeTerc AS AFP_NIT,cteps.NumeTerc AS EPS_NIT,ctarl.NumeTerc AS ARL_NIT,caja.NumeTerc AS CCF_NIT
+from Empleado e
+inner join DetaNomi d on (e.CodiInst=d.CodiInst and e.TipoDocu=d.TipoDocu and e.NumePers=d.NumePers and e.CodiInst=:codiInst)
+inner join Concepto c on (d.CodiConc=c.CodiConc)
+inner join ClasiARP arp on (e.ClasiARP=arp.CodiClas)
+left join CodiTerc ctafp on (e.TiDoAFP=ctafp.TipoDocu and e.NuDoAFP=ctafp.NumeTerc)
+left join CodiTerc cteps on (e.TiDoEPS=cteps.TipoDocu and e.NuDoEPS=cteps.NumeTerc)
+left join CodiTerc ctarl on (e.TiDoARP=ctarl.TipoDocu and e.NuDoARP=ctarl.NumeTerc)
+left join CodiTerc caja on (e.TiDoCaja=caja.TipoDocu and e.NuDoCaja=caja.NumeTerc)
+WHERE (c.EsLiMate='1') and d.CodiAno=:codiAno and (d.CodiMes=:codiMesCorto or d.CodiMes=:codiMesPadded) AND ValoEmpe<>0
+group by e.NumePers";
+
+        if ($tieneRetro) {
+            $sql .= "
+UNION ALL
+select e.TipoDocu,e.NumePers,e.Ape1Pers,e.Ape2Pers,e.Nom1Pers,e.Nom2Pers,'VALLE' AS 'Depa',:municipio AS 'Ciu','1. DEPENDIENTE' AS 'T_C','NINGUNO' AS 'ST_C',
+'190' AS HorasLabo,'NO' AS 'Extranjero','NO' AS 'RES_EXT','' AS 'FECH_RAD_EXT','NO' AS 'ING','' AS 'FECH_ING','NO' AS 'RET','' AS 'FECH_RET',
+'NO' AS TDE,'NO' AS TAE,'NO' AS TDP,'NO' AS TAP,'' AS VSP,'' AS 'Fecha VSP','NO' AS VST,'NO' as 'SLN','' AS 'Inicio SLN','' AS 'Fin  SLN',
+'NO' as 'IGE','' AS 'Inicio IGE','' AS 'Fin IGE','NO' as 'LMA','' AS 'Inicio LMA','' AS 'Fin LMA',
+'VACACIONES' as 'VAC', :fechaRetroVac as 'INICIO VAC-LR',:fechaRetroVac as 'FIN VAC-LR','NO' AS AVP,'NO' AS VCT,'' AS 'Inicio VCT','' AS 'Fin VCT','' AS IRL,'' AS 'Inicio IRL','' AS 'Fin IRL','NO' AS 'Correcciones',
+e.Salario as Salario,'NO' AS 'Salario Integral','NO' AS 'Salario Variable',ctafp.NombTerc AS AFP,1 AS 'D_AFP',
+GREATEST(retro.ValoEmpe,:smlvDiario) as 'I.B.C. PENSION','16%' AS Tarifa,ROUND((GREATEST(retro.ValoEmpe,:smlvDiario)*16)/100,0) as 'COTIZACION AFP',
+if(arp.CodiClas in ('3','5'),'1. Actividades de alto riesgo','Sin Riesgo') as 'In_altoR','' AS 'Cotización Voluntaria Afiliado','' AS 'Cotización Voluntaria Empleador',
+'' as 'FSolidaridad','' AS 'Fondo Subsistencia','' AS 'Valor no Retenido',ROUND((GREATEST(retro.ValoEmpe,:smlvDiario)*16)/100,0) as 'Total_AFP','NINGUNA' AS 'AFP Destino',
+cteps.NombTerc AS EPS,1 AS 'D_EPS',GREATEST(retro.ValoEmpe,:smlvDiario) as 'I.B.C. EPS','12.50%' AS Tarifa,ROUND((GREATEST(retro.ValoEmpe,:smlvDiario)*12.5)/100,0) as 'COTIZACION EPS',
+'0' AS 'Valor UPC','' AS 'No Autorización Incapacidad EG','' as VInca,'' AS 'No Autorización LMA','' as VLMA,'NINGUNA' AS 'EPS Destino',
+ctarl.NombTerc AS ARL,1 AS 'D_ARL',GREATEST(retro.ValoEmpe,:smlvDiario) as 'I.B.C. ARL',ROUND(arp.PorcClAr,3) AS 'TARIFA ARL','NINGUNA' AS Clase,'RIESGO 3' AS 'Centro de Trabajo','3861001' AS 'Actividad Económica',
+'' as 'COTIZACION ARL',1 AS 'D_PARA',caja.NombTerc AS CCF,GREATEST(retro.ValoEmpe,:smlvDiario) as 'I.B.C. CCF','4.00%' AS 'Tarifa CCF',
+ROUND((GREATEST(retro.ValoEmpe,:smlvDiario)*4)/100,-2) as 'COTIZACION CCF',GREATEST(retro.ValoEmpe,:smlvDiario) AS 'IBC Otros Parafiscales','2.00%' AS 'Tarifa SENA',ROUND((GREATEST(retro.ValoEmpe,:smlvDiario)*2)/100,-2) as 'COTIZACION SENA','3.00%' AS 'Tarifa ICBF',ROUND((GREATEST(retro.ValoEmpe,:smlvDiario)*3)/100,-2) as 'COTIZACION ICBF',ctafp.NumeTerc AS AFP_NIT,cteps.NumeTerc AS EPS_NIT,ctarl.NumeTerc AS ARL_NIT,caja.NumeTerc AS CCF_NIT
+from Empleado e
+inner join (
+    {$retroSoloSubquery}
+) as retro
+on (e.TipoDocu=retro.TipoDocu and e.NumePers=retro.NumePers)
+inner join ClasiARP arp on (e.ClasiARP=arp.CodiClas)
+left join CodiTerc ctafp on (e.TiDoAFP=ctafp.TipoDocu and e.NuDoAFP=ctafp.NumeTerc)
+left join CodiTerc cteps on (e.TiDoEPS=cteps.TipoDocu and e.NuDoEPS=cteps.NumeTerc)
+left join CodiTerc ctarl on (e.TiDoARP=ctarl.TipoDocu and e.NuDoARP=ctarl.NumeTerc)
+left join CodiTerc caja on (e.TiDoCaja=caja.TipoDocu and e.NuDoCaja=caja.NumeTerc)
+where e.CodiInst=:codiInst";
+        }
+
+        $sql .= "\nORDER BY Ape1Pers, Ape2Pers, Nom1Pers, NumePers";
+
+        $params = array_merge([
+            'codiInst' => $this->codiInst(),
+            'codiAno' => $codiAno,
+            'codiMesCorto' => $codiMesCorto,
+            'codiMesPadded' => $codiMesPadded,
+            'municipio' => $municipio,
+            'smlvDiario' => $smlvDiario,
+        ], $paramsEmp, $paramsRetro);
+
+        if ($tieneRetro) {
+            $params['fechaRetroVac'] = sprintf('%04d-%02d-01', (int)$codiAno, (int)$codiMesPadded);
+        }
+
+        $stmt = $this->connect()->prepare($sql);
+        $stmt->execute($params);
+
+        return $stmt->fetchAll();
+    }
+
+    /**
+     * Columnas booleanas de `Concepto` que identifican, sin depender de un
+     * número de concepto fijo (varía por institución), cuál es "el" concepto
+     * de cotización obligatoria de cada rubro — usadas por
+     * `buscarConceptoCorreccionNomina()` (SihosNominaPilaCorreccionService,
+     * que corrige DetaNomi, y SihosPlanillaIntegradaService, que solo
+     * compara y muestra diferencias). Lista blanca cerrada: nunca se
+     * interpola directamente un valor de entrada externa en SQL.
+     *
+     * 'arl' (riesgos laborales) solo lo usa SihosPlanillaIntegradaService —
+     * SihosNominaPilaCorreccionService lo deja fuera de alcance a propósito
+     * (ver su docblock): un POST forjado con concepto=arl hacia esa acción
+     * de escritura no debe colarse solo porque este flag exista aquí (esa
+     * clase valida contra su propia lista MAPA_CODIGO_ERROR, más estricta).
+     *
+     * 'fondo_solidaridad' (Fondo de Solidaridad Pensional) SÍ lo usan ambas
+     * clases: SihosPlanillaIntegradaService para comparar/mostrar, y
+     * SihosNominaPilaCorreccionService para corregir (códigos de error
+     * 836/837 del CSV del operador). Es un `CodiConc` DISTINTO de 'pension'
+     * en SIHOS (verificado: "PENSION A.F.P" y "FONDO DE SOLIDARIDAD
+     * PENSIONAL" son dos líneas separadas de `DetaNomi`, `EsPensio`/`EsSolPen`
+     * nunca están ambos en '1' a la vez) y su `ValoPatr` es SIEMPRE $0 (100%
+     * a cargo del empleado, sin aporte patronal — verificado con datos
+     * reales) — por eso SihosNominaPilaCorreccionService lo corrige
+     * ajustando `ValoEmpe`, la única excepción a su regla general de nunca
+     * tocar ese campo. Además, el dinero de FSP se remite A TRAVÉS de la AFP
+     * del empleado, así que SihosPlanillaIntegradaService lo suma junto con
+     * 'pension' al comparar el total liquidado por administradora.
+     */
+    public const FLAGS_CONCEPTO_CORRECCION = [
+        'pension' => 'EsPensio',
+        'salud' => 'EsSalud',
+        'ccf' => 'EsCaja',
+        'sena' => 'EsSENA',
+        'icbf' => 'EsICBF',
+        'arl' => 'EsRiePro',
+        'fondo_solidaridad' => 'EsSolPen',
+    ];
+
+    /**
+     * Códigos del catálogo GLOBAL `DocuApli` (tabla sin `CodiInst` — es la
+     * misma numeración en cualquier institución de SIHOS) para "Nómina de
+     * Empleados" y "Nómina de Vacaciones" — confirmado consultando
+     * `DocuApli` real (CodiTipo 41 → NombTipo "Nomina de Empleados",
+     * CodiTipo 45 → "Nomina de Vacaciones"). NUNCA se hardcodea la letra de
+     * `CodiDocu` (p. ej. 'NE'/'NV'): esa letra es configurable por
+     * institución en `MaesDocu.CodiDocu` — lo estable entre instalaciones es
+     * el código numérico de `DocuApli`. `codiDocuNominaCotizacion()` resuelve
+     * en tiempo de ejecución, contra `MaesDocu` de la institución conectada,
+     * qué `CodiDocu` real corresponde a cada uno de estos dos tipos.
+     */
+    private const DOCUAPLI_NOMINA_EMPLEADOS = 41;
+    private const DOCUAPLI_NOMINA_VACACIONES = 45;
+
+    /**
+     * Documento(s) de "Nómina de Retroactivos" (`DocuApli` global 86,
+     * confirmado contra `DocuApli` real) — algunas instituciones (p. ej.
+     * Hospital de Roldanillo, `CodiDocu='NR'`) liquidan los conceptos
+     * `RETROACTIVO*` en un documento aparte de la nómina normal, en vez de
+     * dentro del/los documento(s) de Nómina de Empleados. `fetchNominaPila()`
+     * lo usa SOLO para localizar el retroactivo de vacaciones (`Concepto.RetrVaca='1'`
+     * — ver su docblock); el resto de conceptos `RETROACTIVO*` (sueldo, horas
+     * extra, prima, etc.) no los toca este reporte, quedan fuera de alcance.
+     * Una institución sin documentos de este `DocuApli` (p. ej. Unión antes
+     * de empezar a usar este mecanismo) resuelve a `[]` y el mecanismo
+     * simplemente no aplica — no es un requisito, es oportunista.
+     */
+    private const DOCUAPLI_NOMINA_RETROACTIVOS = 86;
+
+    /** @var array<int,list<string>> caché en memoria por DocuApli — ver codiDocuPorDocuApli() */
+    private array $codiDocuPorDocuApliCache = [];
+
+    /** @var list<string>|null caché en memoria de codiDocuNominaCotizacion(), ver su docblock */
+    private ?array $codiDocuNominaCotizacionCache = null;
+
+    /**
+     * `CodiDocu`(s) de esta institución para un `DocuApli` del catálogo
+     * GLOBAL `DocuApli` (tabla sin `CodiInst` — misma numeración en
+     * cualquier instalación de SIHOS). NUNCA se hardcodea la letra de
+     * `CodiDocu` (p. ej. 'NE'/'NV'/'NR'): esa letra, y CUÁNTOS documentos
+     * hay de un mismo tipo, son configurables por institución en
+     * `MaesDocu.CodiDocu` — verificado que varía: Unión tiene un solo
+     * documento de Nómina de Empleados ('NE'), mientras que Hospital de
+     * Roldanillo tiene seis bajo el mismo `DocuApli` 41 (NE administrativa,
+     * NEA aprendiz, NEO oficial, NEX nómina extra, NOP operativa, TPN
+     * traslado provisión nómina) — todos se incluyen aquí, no solo los que
+     * en la práctica tienen movimiento hoy, para no tener que tocar este
+     * código si la institución empieza a usar uno que hoy está inactivo.
+     *
+     * Cacheado en memoria por instancia y por `DocuApli` — el mismo
+     * repositorio se reutiliza dentro de una misma ejecución (reporte PILA
+     * completo, o bucle de corrección) y esta consulta no cambia mientras
+     * tanto.
+     *
+     * @return list<string> vacío si la institución no tiene documentos de ese DocuApli
+     */
+    private function codiDocuPorDocuApli(int $docuApli): array
+    {
+        if (isset($this->codiDocuPorDocuApliCache[$docuApli])) {
+            return $this->codiDocuPorDocuApliCache[$docuApli];
+        }
+
+        $stmt = $this->connect()->prepare('SELECT CodiDocu FROM MaesDocu WHERE CodiInst = ? AND DocuApli = ?');
+        $stmt->execute([$this->codiInst(), $docuApli]);
+
+        return $this->codiDocuPorDocuApliCache[$docuApli] = array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /**
+     * Resuelve los `CodiDocu` reales de esta institución (`CodiInst`) para
+     * "Nómina de Empleados" y "Nómina de Vacaciones" — los documentos donde
+     * puede vivir una cotización obligatoria de un empleado en un período:
+     * el salario normal en el primero, el período en vacaciones en el
+     * segundo. Un empleado con vacaciones parciales en el mes puede tener,
+     * por ejemplo, Pensión/Salud completamente en el documento de
+     * vacaciones y CCF/SENA/ICBF en el de empleados — verificado con un
+     * caso real en Unión (empleado con el período entero en vacaciones:
+     * Pensión y Salud solo existían en el documento de vacaciones, el resto
+     * de conceptos solo en el de empleados). Por eso
+     * `buscarConceptoCorreccionNomina()` busca en los dos.
+     *
+     * Delega en codiDocuPorDocuApli() (una llamada cacheada por tipo) y
+     * combina ambos tipos — mismo resultado neto que la única consulta
+     * `DocuApli IN (41,45)` que este método hacía antes, solo que ahora
+     * reutiliza la misma caché por tipo que fetchNominaPila() usa para
+     * "solo Nómina de Empleados" (41) sin repetir la consulta a MaesDocu.
+     *
+     * @return list<string>
+     */
+    private function codiDocuNominaCotizacion(): array
+    {
+        if ($this->codiDocuNominaCotizacionCache !== null) {
+            return $this->codiDocuNominaCotizacionCache;
+        }
+
+        return $this->codiDocuNominaCotizacionCache = array_values(array_unique(array_merge(
+            $this->codiDocuPorDocuApli(self::DOCUAPLI_NOMINA_EMPLEADOS),
+            $this->codiDocuPorDocuApli(self::DOCUAPLI_NOMINA_VACACIONES)
+        )));
+    }
+
+    /**
+     * Busca en `DetaNomi` (documentos de Nómina de Empleados / Nómina de
+     * Vacaciones de esta institución — ver codiDocuNominaCotizacion()) las
+     * líneas del concepto pedido para un empleado y período — para el cruce
+     * de correcciones de SihosNominaPilaCorreccionService, NUNCA para el
+     * reporte normal (que sigue calculando desde IBC×tarifa).
+     *
+     * Se identifica el concepto por el flag de `Concepto` (Es<Rubro>='1'),
+     * no por un `CodiConc` fijo — dos instalaciones de SIHOS pueden numerar
+     * sus conceptos distinto. `$flagConcepto` DEBE venir de
+     * FLAGS_CONCEPTO_CORRECCION (lista blanca) — nunca de entrada externa
+     * directa, para no interpolar un nombre de columna arbitrario en SQL.
+     *
+     * Devuelve UN GRUPO por cada documento (`CodiDocu`+`NumeDocu`) donde
+     * aparece el concepto — típicamente uno (Nómina de Empleados) o, si el
+     * empleado tuvo vacaciones/incapacidad en el período, dos (también el de
+     * Vacaciones). El llamador decide que solo es "corregible sin ambigüedad"
+     * cuando hay EXACTAMENTE un grupo con EXACTAMENTE una línea (`ConsConc`)
+     * — más de un grupo, o un grupo con más de una línea, es una situación
+     * que requiere revisión humana (ver docblock de
+     * SihosNominaPilaCorreccionService::evaluarGrupo()): no hay una forma
+     * segura de adivinar en cuál aplicar el ajuste, ni de repartir el total
+     * esperado entre documentos o líneas.
+     *
+     * @return list<array{codiDocu:string,numeDocu:string,nombreDocu:string,codiConc:string,lineas:list<array{consConc:string,valoEmpe:float,valoPatr:float}>}>
+     */
+    public function buscarConceptoCorreccionNomina(
+        string $tipoDocu,
+        string $numePers,
+        string $codiAno,
+        string $codiMes,
+        string $flagConcepto
+    ): array {
+        if (!in_array($flagConcepto, self::FLAGS_CONCEPTO_CORRECCION, true)) {
+            throw new \InvalidArgumentException("Flag de concepto no permitido: {$flagConcepto}");
+        }
+
+        $codiMesCorto = ltrim($codiMes, '0');
+        $codiMesCorto = $codiMesCorto === '' ? '0' : $codiMesCorto;
+        $codiMesPadded = str_pad($codiMesCorto, 2, '0', STR_PAD_LEFT);
+
+        $codigosDocu = $this->codiDocuNominaCotizacion();
+        if ($codigosDocu === []) {
+            return [];
+        }
+
+        $paramsDocu = [];
+        $nombresDocu = [];
+        foreach ($codigosDocu as $i => $codigoDocu) {
+            $nombre = "docu{$i}";
+            $nombresDocu[] = ":{$nombre}";
+            $paramsDocu[$nombre] = $codigoDocu;
+        }
+        $placeholdersDocu = implode(',', $nombresDocu);
+
+        $stmt = $this->connect()->prepare(
+            "SELECT d.CodiDocu, d.NumeDocu, m.NombDocu, d.CodiConc, d.ConsConc, d.ValoEmpe, d.ValoPatr
+             FROM DetaNomi d
+             INNER JOIN Concepto c ON c.CodiInst = d.CodiInst AND c.CodiConc = d.CodiConc
+             INNER JOIN MaesDocu m ON m.CodiInst = d.CodiInst AND m.CodiDocu = d.CodiDocu
+             WHERE d.CodiInst = :codiInst AND d.TipoDocu = :tipoDocu AND d.NumePers = :numePers
+               AND d.CodiAno = :codiAno AND (d.CodiMes = :codiMesCorto OR d.CodiMes = :codiMesPadded)
+               AND d.CodiDocu IN ({$placeholdersDocu}) AND c.{$flagConcepto} = '1'
+             ORDER BY d.CodiDocu, d.NumeDocu, d.ConsConc"
+        );
+        $stmt->execute([
+            'codiInst' => $this->codiInst(),
+            'tipoDocu' => $tipoDocu,
+            'numePers' => $numePers,
+            'codiAno' => $codiAno,
+            'codiMesCorto' => $codiMesCorto,
+            'codiMesPadded' => $codiMesPadded,
+            ...$paramsDocu,
+        ]);
+        $filas = $stmt->fetchAll();
+
+        $grupos = [];
+        foreach ($filas as $f) {
+            $clave = $f['CodiDocu'] . '|' . $f['NumeDocu'];
+            if (!isset($grupos[$clave])) {
+                $grupos[$clave] = [
+                    'codiDocu' => (string)$f['CodiDocu'],
+                    'numeDocu' => (string)$f['NumeDocu'],
+                    'nombreDocu' => (string)$f['NombDocu'],
+                    'codiConc' => (string)$f['CodiConc'],
+                    'lineas' => [],
+                ];
+            }
+            $grupos[$clave]['lineas'][] = [
+                'consConc' => (string)$f['ConsConc'],
+                'valoEmpe' => (float)$f['ValoEmpe'],
+                'valoPatr' => (float)$f['ValoPatr'],
+            ];
+        }
+
+        return array_values($grupos);
+    }
+
+    /** ¿Ya está confirmada ("causada") la nómina de este documento en SIHOS? true si no se encuentra el documento (más seguro rechazar que asumir editable). */
+    public function nominaEstaCausada(string $codiDocu, string $numeDocu): bool
+    {
+        $stmt = $this->connect()->prepare(
+            'SELECT Causado FROM EncaCont WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?'
+        );
+        $stmt->execute([$this->codiInst(), $codiDocu, $numeDocu]);
+        $causado = $stmt->fetchColumn();
+
+        return $causado === false || (int)$causado === 1;
+    }
+
+    /** @var array<string,?string> caché en memoria de nombreEmpleado(), clave "tipoDocu|numePers" */
+    private array $nombreEmpleadoCache = [];
+
+    /**
+     * Nombre completo del empleado (Ape1 Ape2 Nom1 Nom2, tal cual está en
+     * `Empleado`, sin normalizar) — solo para etiquetar de forma legible la
+     * vista previa de corrección de nómina (SihosNominaPilaCorreccionService),
+     * nunca para el reporte PILA en sí (ese usa las columnas por separado,
+     * ver fetchNominaPila()). `null` si no se encuentra el empleado.
+     */
+    public function nombreEmpleado(string $tipoDocu, string $numePers): ?string
+    {
+        $clave = "{$tipoDocu}|{$numePers}";
+        if (array_key_exists($clave, $this->nombreEmpleadoCache)) {
+            return $this->nombreEmpleadoCache[$clave];
+        }
+
+        $stmt = $this->connect()->prepare(
+            'SELECT Ape1Pers, Ape2Pers, Nom1Pers, Nom2Pers FROM Empleado WHERE CodiInst = ? AND TipoDocu = ? AND NumePers = ?'
+        );
+        $stmt->execute([$this->codiInst(), $tipoDocu, $numePers]);
+        $fila = $stmt->fetch();
+
+        if ($fila === false) {
+            $this->nombreEmpleadoCache[$clave] = null;
+
+            return null;
+        }
+
+        $nombre = trim(implode(' ', array_filter([
+            trim((string)$fila['Ape1Pers']),
+            trim((string)$fila['Ape2Pers']),
+            trim((string)$fila['Nom1Pers']),
+            trim((string)$fila['Nom2Pers']),
+        ], static fn (string $s): bool => $s !== '')));
+
+        $this->nombreEmpleadoCache[$clave] = $nombre !== '' ? $nombre : null;
+
+        return $this->nombreEmpleadoCache[$clave];
+    }
+
+    /**
+     * Columna de `Empleado` con el NIT (`NuDoXxx`) de la administradora
+     * asignada a cada empleado, por concepto — usada por
+     * sumaCotizacionPorAdministradora() para agrupar. SENA/ICBF no
+     * aparecen aquí a propósito: son administradoras únicas y fijas para
+     * toda la institución (no se elige por empleado), así que no hay nada
+     * por lo cual agrupar — sumaCotizacionPorAdministradora() devuelve para
+     * esos dos conceptos un total único.
+     */
+    private const CAMPO_ADMINISTRADORA_POR_CONCEPTO = [
+        'pension' => 'NuDoAFP',
+        'salud' => 'NuDoEPS',
+        'arl' => 'NuDoARP',
+        'ccf' => 'NuDoCaja',
+        // El Fondo de Solidaridad Pensional se paga a través de la MISMA
+        // AFP del empleado (no tiene administradora propia) — se agrupa
+        // por el mismo campo que 'pension'.
+        'fondo_solidaridad' => 'NuDoAFP',
+    ];
+
+    /**
+     * Suma REAL en `DetaNomi` (documentos de Nómina de Empleados / Nómina
+     * de Vacaciones — igual que buscarConceptoCorreccionNomina()) de un
+     * concepto de cotización para TODO el período, agrupada por la
+     * administradora asignada a cada empleado (`Empleado.NuDoXxx`) —
+     * para el chequeo agregado de SihosPlanillaIntegradaService contra la
+     * tabla "totales por administradora" del archivo de PILA.
+     *
+     * Para 'sena'/'icbf' (sin administradora por empleado, ver
+     * CAMPO_ADMINISTRADORA_POR_CONCEPTO) se agrupa por una clave fija
+     * `''` — un único total para todo el concepto.
+     *
+     * Deliberadamente consulta `DetaNomi` de nuevo aquí (no reutiliza los
+     * totales ya calculados por fetchNominaPila()): esta pantalla existe
+     * para detectar diferencias REALES entre lo liquidado y SIHOS, así que
+     * el lado "SIHOS" de la comparación tiene que salir de la base de
+     * datos real, nunca de nuestro propio cálculo del reporte.
+     *
+     * @return array<string, float> NIT de la administradora sin DV (o `''` si no aplica) => suma
+     */
+    public function sumaCotizacionPorAdministradora(string $codiAno, string $codiMes, string $flagConcepto): array
+    {
+        if (!in_array($flagConcepto, self::FLAGS_CONCEPTO_CORRECCION, true)) {
+            throw new \InvalidArgumentException("Flag de concepto no permitido: {$flagConcepto}");
+        }
+
+        $codiMesCorto = ltrim($codiMes, '0');
+        $codiMesCorto = $codiMesCorto === '' ? '0' : $codiMesCorto;
+        $codiMesPadded = str_pad($codiMesCorto, 2, '0', STR_PAD_LEFT);
+
+        $codigosDocu = $this->codiDocuNominaCotizacion();
+        if ($codigosDocu === []) {
+            return [];
+        }
+
+        $paramsDocu = [];
+        $nombresDocu = [];
+        foreach ($codigosDocu as $i => $codigoDocu) {
+            $nombre = "docu{$i}";
+            $nombresDocu[] = ":{$nombre}";
+            $paramsDocu[$nombre] = $codigoDocu;
+        }
+        $placeholdersDocu = implode(',', $nombresDocu);
+
+        $concepto = array_search($flagConcepto, self::FLAGS_CONCEPTO_CORRECCION, true);
+        $campoAdministradora = self::CAMPO_ADMINISTRADORA_POR_CONCEPTO[$concepto] ?? null;
+
+        if ($campoAdministradora === null) {
+            // Sin administradora por empleado (SENA/ICBF): un único total.
+            $stmt = $this->connect()->prepare(
+                "SELECT SUM(d.ValoEmpe + d.ValoPatr) AS Suma
+                 FROM DetaNomi d
+                 INNER JOIN Concepto c ON c.CodiInst = d.CodiInst AND c.CodiConc = d.CodiConc
+                 WHERE d.CodiInst = :codiInst AND d.CodiAno = :codiAno
+                   AND (d.CodiMes = :codiMesCorto OR d.CodiMes = :codiMesPadded)
+                   AND d.CodiDocu IN ({$placeholdersDocu}) AND c.{$flagConcepto} = '1'"
+            );
+            $stmt->execute([
+                'codiInst' => $this->codiInst(),
+                'codiAno' => $codiAno,
+                'codiMesCorto' => $codiMesCorto,
+                'codiMesPadded' => $codiMesPadded,
+                ...$paramsDocu,
+            ]);
+            $suma = $stmt->fetchColumn();
+
+            return $suma === null ? [] : ['' => round((float)$suma, 2)];
+        }
+
+        $stmt = $this->connect()->prepare(
+            "SELECT e.{$campoAdministradora} AS Nit, SUM(d.ValoEmpe + d.ValoPatr) AS Suma
+             FROM DetaNomi d
+             INNER JOIN Concepto c ON c.CodiInst = d.CodiInst AND c.CodiConc = d.CodiConc
+             INNER JOIN Empleado e ON e.CodiInst = d.CodiInst AND e.TipoDocu = d.TipoDocu AND e.NumePers = d.NumePers
+             WHERE d.CodiInst = :codiInst AND d.CodiAno = :codiAno
+               AND (d.CodiMes = :codiMesCorto OR d.CodiMes = :codiMesPadded)
+               AND d.CodiDocu IN ({$placeholdersDocu}) AND c.{$flagConcepto} = '1'
+             GROUP BY e.{$campoAdministradora}"
+        );
+        $stmt->execute([
+            'codiInst' => $this->codiInst(),
+            'codiAno' => $codiAno,
+            'codiMesCorto' => $codiMesCorto,
+            'codiMesPadded' => $codiMesPadded,
+            ...$paramsDocu,
+        ]);
+
+        $resultado = [];
+        while ($fila = $stmt->fetch()) {
+            // `Empleado.NuDoXxx` guarda el NIT con el guión-DV (p. ej.
+            // "800224808-8") — se quita para que la clave quede en el mismo
+            // formato sin DV que usa el resto de la app (terceroidentificacion.numero)
+            // y que trae el archivo de la planilla integrada.
+            $nit = preg_replace('/-\d$/', '', trim((string)($fila['Nit'] ?? ''))) ?? '';
+            $resultado[$nit] = round((float)$fila['Suma'], 2);
+        }
+
+        return $resultado;
+    }
 }

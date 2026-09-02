@@ -718,12 +718,21 @@ button:hover{
     padding:20px;
 }
 
-/* Sin scroll vertical interno en paneles/tablas; horizontal solo si desborda el contenido */
+/* Sin scroll vertical interno en paneles/tablas; horizontal solo si desborda el contenido.
+   Se aplica tanto en la vista normal (.module-container) como dentro de un modal
+   (p. ej. el CRUD de "accion" abierto desde el modal "Acciones del ítem"): antes
+   .modal no tenía overflow-x en estos wrappers y la tabla se desbordaba sin forma
+   de scrollear. */
 .module-container .savid-dt-shell,
 .module-container .sgd-doc-table-wrap,
 .module-container .sgd-doc-versions-table-wrap,
 .module-container .sgd-doc-form-panel,
-.module-container .crud-table-wrapper{
+.module-container .crud-table-wrapper,
+.modal .savid-dt-shell,
+.modal .sgd-doc-table-wrap,
+.modal .sgd-doc-versions-table-wrap,
+.modal .sgd-doc-form-panel,
+.modal .crud-table-wrapper{
     overflow-y:visible;
     max-height:none;
 }
@@ -731,7 +740,11 @@ button:hover{
 .module-container .savid-dt-shell,
 .module-container .sgd-doc-table-wrap,
 .module-container .sgd-doc-versions-table-wrap,
-.module-container .crud-table-wrapper{
+.module-container .crud-table-wrapper,
+.modal .savid-dt-shell,
+.modal .sgd-doc-table-wrap,
+.modal .sgd-doc-versions-table-wrap,
+.modal .crud-table-wrapper{
     overflow-x:auto;
 }
 
@@ -3221,16 +3234,55 @@ body.modal-open{
     z-index:2;
 }
 
-/* scroll */
+/* scroll — mismo criterio dentro y fuera de modal, para que la barra se vea
+   igual de bien en el CRUD normal (.module-container) que en un CRUD abierto
+   dentro de un modal (p. ej. "Acciones del ítem"). */
 
-.modal *::-webkit-scrollbar{
-    width:8px;
-    height:8px;
+.modal *::-webkit-scrollbar,
+.module-container *::-webkit-scrollbar{
+    width:10px;
+    height:10px;
 }
 
-.modal *::-webkit-scrollbar-thumb{
-    background:rgba(255,255,255,.15);
+.modal *::-webkit-scrollbar-track,
+.module-container *::-webkit-scrollbar-track{
+    background:transparent;
+}
+
+/* El thumb blanco translúcido solo se ve sobre fondo oscuro; en modo claro
+   (fondo #fff, ver .light-mode .modal-content) quedaba casi invisible — de
+   ahí que la barra horizontal "no se viera" en el modal. */
+.dark-mode .modal *::-webkit-scrollbar-thumb,
+.dark-mode .module-container *::-webkit-scrollbar-thumb{
+    background:rgba(255,255,255,.22);
     border-radius:20px;
+}
+
+.dark-mode .modal *::-webkit-scrollbar-thumb:hover,
+.dark-mode .module-container *::-webkit-scrollbar-thumb:hover{
+    background:rgba(255,255,255,.38);
+}
+
+.light-mode .modal *::-webkit-scrollbar-thumb,
+.light-mode .module-container *::-webkit-scrollbar-thumb{
+    background:rgba(0,0,0,.28);
+    border-radius:20px;
+}
+
+.light-mode .modal *::-webkit-scrollbar-thumb:hover,
+.light-mode .module-container *::-webkit-scrollbar-thumb:hover{
+    background:rgba(0,0,0,.45);
+}
+
+/* Firefox: mismo criterio de contraste por tema. */
+.dark-mode .modal *,
+.dark-mode .module-container *{
+    scrollbar-color:rgba(255,255,255,.22) transparent;
+}
+
+.light-mode .modal *,
+.light-mode .module-container *{
+    scrollbar-color:rgba(0,0,0,.28) transparent;
 }
 
 /* animaciones */
@@ -5579,6 +5631,25 @@ AGREGAR AL FINAL DE public/css/app.css
     text-decoration:none;
     font-size:14px;
     cursor:pointer;
+}
+
+/*
+ * Botones "neutros" (Limpiar, Acciones custom del ítem sin color propio): el
+ * fondo/borde blanco translúcido de arriba está pensado para fondo oscuro y
+ * queda casi invisible en modo claro, mientras Guardar (-primary, verde) y
+ * Eliminar (-danger, rojo) sí destacan — se veían "sin botón" al lado de esos
+ * dos. Se mantiene el color semántico de Guardar/Eliminar (ayuda a no
+ * confundir una acción destructiva con una normal) y solo se sube el
+ * contraste de los neutros para que los 4 se perciban como botones reales.
+ */
+.dark-mode .sgd-doc-btn:not(.sgd-doc-btn-primary):not(.sgd-doc-btn-danger){
+    border-color:rgba(255,255,255,.22);
+    background:rgba(255,255,255,.08);
+}
+
+.light-mode .sgd-doc-btn:not(.sgd-doc-btn-primary):not(.sgd-doc-btn-danger){
+    border-color:rgba(0,0,0,.22);
+    background:rgba(0,0,0,.045);
 }
 
 .sgd-doc-btn:hover{
