@@ -36,6 +36,14 @@
         btnAplicar.disabled = true;
         status.textContent = 'Aplicando…';
 
+        // Escritura real en SIHOS: bloquea el resto de la pantalla mientras
+        // dura (evita navegar a mitad de la escritura) — se muestra antes
+        // del fetch y se apaga siempre al terminar, éxito o error (ver
+        // savidMostrarCargando en app.js).
+        if (typeof savidMostrarCargando === 'function') {
+            savidMostrarCargando('Aplicando correcciones en SIHOS, no cierre esta ventana…');
+        }
+
         const fd = new FormData();
         fd.append('empresa_id', form.dataset.empresaId);
         fd.append('codi_ano', form.dataset.codiAno);
@@ -86,6 +94,11 @@
             .catch(function () {
                 status.textContent = 'Error de conexión.';
                 btnAplicar.disabled = false;
+            })
+            .finally(function () {
+                if (typeof savidOcultarCargando === 'function') {
+                    savidOcultarCargando();
+                }
             });
     });
 })();

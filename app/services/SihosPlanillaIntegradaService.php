@@ -451,6 +451,30 @@ class SihosPlanillaIntegradaService
             ];
         }
 
+        // Ordenar de mayor a menor diferencia total (mismo criterio que
+        // SihosNominaPilaCorreccionService::construirVistaPrevia(), a pedido
+        // del usuario, 2026-09-02, para priorizar la revisión): suma del
+        // valor absoluto de la diferencia de TODOS los conceptos del
+        // empleado, no solo la más grande individual. Los conceptos sin
+        // `suma_sihos` (estado 'no_encontrado', nada con qué comparar) no
+        // aportan a la suma.
+        usort($resultado, static function (array $a, array $b): int {
+            $totalA = 0.0;
+            foreach ($a['conceptos'] as $c) {
+                if ($c['diferencia'] !== null) {
+                    $totalA += abs($c['diferencia']);
+                }
+            }
+            $totalB = 0.0;
+            foreach ($b['conceptos'] as $c) {
+                if ($c['diferencia'] !== null) {
+                    $totalB += abs($c['diferencia']);
+                }
+            }
+
+            return $totalB <=> $totalA;
+        });
+
         return $resultado;
     }
 

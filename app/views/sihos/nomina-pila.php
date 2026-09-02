@@ -79,7 +79,7 @@
             </p>
 
             <?php if (count($resultado['filas']) > 0): ?>
-                <form method="get" action="" class="crud-form auditoria-filters-grid" style="margin-bottom:20px;">
+                <form method="get" action="" id="sihosNominaPilaExportarForm" class="crud-form auditoria-filters-grid" style="margin-bottom:20px;">
                     <input type="hidden" name="url" value="sihos/nominaPilaExportar">
                     <input type="hidden" name="empresa_id" value="<?= (int)$empresaId ?>">
                     <input type="hidden" name="codi_ano" value="<?= htmlspecialchars($codiAno) ?>">
@@ -129,3 +129,76 @@
     <?php endif; ?>
 
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    // "Consultar" es navegación completa (submit normal, no fetch):
+    // reconstruye todo el reporte contra SIHOS — se muestra el overlay
+    // antes de dejar navegar; desaparece solo cuando la página nueva
+    // reemplaza esta (ver savidMostrarCargando en app.js, mismo patrón que
+    // sihos/cruce.php).
+    var formConsultar = document.getElementById('sihosNominaPilaForm');
+    if (formConsultar && typeof savidMostrarCargando === 'function') {
+        formConsultar.addEventListener('submit', function () {
+            savidMostrarCargando('Generando reporte…', true);
+        });
+    }
+
+    // "Descargar Excel" NO se puede tratar como navegación completa: el
+    // controller responde con Content-Disposition: attachment, así que el
+    // navegador dispara la descarga SIN reemplazar la página — si se
+    // mostrara el overlay con el modo "inmediato" (pensado para cuando la
+    // navegación lo apaga sola al llegar la página nueva), se quedaría
+    // bloqueando la pantalla PARA SIEMPRE, porque nunca llega una página
+    // nueva que lo apague. Por eso aquí se intercepta el submit, se pide
+    // el archivo por fetch (mismos parámetros del formulario) y se
+    // descarga como blob — así se puede ocultar el overlay en el momento
+    // exacto en que la respuesta ya llegó, sin importar cuánto tarde.
+    var formExportar = document.getElementById('sihosNominaPilaExportarForm');
+    if (formExportar) {
+        formExportar.addEventListener('submit', function (e) {
+            e.preventDefault();
+
+            if (typeof savidMostrarCargando === 'function') {
+                savidMostrarCargando('Generando Excel…');
+            }
+
+            var params = new URLSearchParams(new FormData(formExportar));
+
+            fetch('?' + params.toString(), { credentials: 'same-origin' })
+                .then(function (r) {
+                    if (!r.ok) {
+                        throw new Error('No se pudo generar el archivo.');
+                    }
+                    var nombre = 'sihos_nomina_pila.xlsx';
+                    var disposition = r.headers.get('Content-Disposition') || '';
+                    var match = disposition.match(/filename="?([^"]+)"?/);
+                    if (match) {
+                        nombre = match[1];
+                    }
+                    return r.blob().then(function (blob) {
+                        return { blob: blob, nombre: nombre };
+                    });
+                })
+                .then(function (resultado) {
+                    var url = URL.createObjectURL(resultado.blob);
+                    var a = document.createElement('a');
+                    a.href = url;
+                    a.download = resultado.nombre;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    URL.revokeObjectURL(url);
+                })
+                .catch(function () {
+                    alert('No se pudo generar el archivo Excel.');
+                })
+                .finally(function () {
+                    if (typeof savidOcultarCargando === 'function') {
+                        savidOcultarCargando();
+                    }
+                });
+        });
+    }
+});
+</script>

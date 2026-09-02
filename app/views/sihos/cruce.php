@@ -23,6 +23,8 @@ $assetSihosReclasificarCuenta = BASE_PATH . '/public/js/sihos-reclasificar-cuent
 $sihosReclasificarCuentaJsV = is_readable($assetSihosReclasificarCuenta) ? (int)filemtime($assetSihosReclasificarCuenta) : time();
 $assetSihosConstruirDetaPlan = BASE_PATH . '/public/js/sihos-construir-detaplan.js';
 $sihosConstruirDetaPlanJsV = is_readable($assetSihosConstruirDetaPlan) ? (int)filemtime($assetSihosConstruirDetaPlan) : time();
+$assetSihosConstruirDetaPlanMasivo = BASE_PATH . '/public/js/sihos-construir-detaplan-masivo.js';
+$sihosConstruirDetaPlanMasivoJsV = is_readable($assetSihosConstruirDetaPlanMasivo) ? (int)filemtime($assetSihosConstruirDetaPlanMasivo) : time();
 ?>
 
 <div class="module-container auditoria-page">
@@ -131,13 +133,21 @@ $sihosConstruirDetaPlanJsV = is_readable($assetSihosConstruirDetaPlan) ? (int)fi
                         <h3 class="auditoria-title" style="font-size:16px;"><?= htmlspecialchars($seccion['titulo']) ?> (<?= count($seccion['filas']) ?>)</h3>
                         <p class="auditoria-subtitle"><?= htmlspecialchars($seccion['subtitulo']) ?></p>
                     </div>
+                    <?php if (($seccion['accionConstruirDetaPlan'] ?? false) && $puedeConstruirDetaPlan): ?>
+                        <button type="button" id="btnSihosConstruirDetaPlanMasivo" class="auditoria-btn-primary" disabled>
+                            ▶️ Construir seleccionados (0)
+                        </button>
+                    <?php endif; ?>
                 </div>
 
                 <?php if ($seccion['filas'] === []): ?>
                     <p class="field-note">Sin hallazgos en este rango.</p>
                 <?php else: ?>
                     <div style="overflow-x:auto;">
-                        <table class="seguridad-table">
+                        <?php
+                        $muestraSeleccionMasiva = ($seccion['accionConstruirDetaPlan'] ?? false) && $puedeConstruirDetaPlan;
+                        ?>
+                        <table class="seguridad-table" <?= $muestraSeleccionMasiva ? 'id="sihosConstruirDetaPlanTable"' : '' ?>>
                             <?php if ($seccion['tipo'] === 'factura'): ?>
                                 <thead><tr><th>Documento</th><th>Fecha</th><th>Valor total</th><th>Tercero</th><th>Centro de costo</th></tr></thead>
                                 <tbody>
@@ -155,6 +165,11 @@ $sihosConstruirDetaPlanJsV = is_readable($assetSihosConstruirDetaPlan) ? (int)fi
                                 <?php $muestraAccionConstruirDetaPlan = $seccion['accionConstruirDetaPlan'] ?? false; ?>
                                 <thead>
                                     <tr>
+                                        <?php if ($muestraSeleccionMasiva): ?>
+                                            <th class="no-dt-filter no-dt-order no-export" aria-label="Selección">
+                                                <input type="checkbox" id="sihosConstruirDetaPlanSelectAll" aria-label="Seleccionar todo lo visible">
+                                            </th>
+                                        <?php endif; ?>
                                         <th>Documento</th><th>Fecha</th><th>Valor</th><th>Factura</th><th>Fecha factura</th><th>Tiene DetaPlan</th><th>Tiene cuenta esperada</th>
                                         <?php if ($muestraAccionConstruirDetaPlan): ?><th>Opciones</th><?php endif; ?>
                                     </tr>
@@ -162,6 +177,15 @@ $sihosConstruirDetaPlanJsV = is_readable($assetSihosConstruirDetaPlan) ? (int)fi
                                 <tbody>
                                 <?php foreach ($seccion['filas'] as $f): ?>
                                     <tr>
+                                        <?php if ($muestraSeleccionMasiva): ?>
+                                            <td class="no-export">
+                                                <?php if ((int)$f['TieneDetaPlan'] === 0): ?>
+                                                    <input type="checkbox" class="sihosConstruirDetaPlanCheckbox"
+                                                           data-codi-docu="<?= htmlspecialchars($f['CodiDocu']) ?>"
+                                                           data-nume-docu="<?= htmlspecialchars($f['NumeDocu']) ?>">
+                                                <?php endif; ?>
+                                            </td>
+                                        <?php endif; ?>
                                         <td><?= htmlspecialchars($f['CodiDocu'] . '-' . $f['NumeDocu']) ?></td>
                                         <td><?= htmlspecialchars($f['FechDocu']) ?></td>
                                         <td><?= sihosFormatoMoneda($f['ValoTota']) ?></td>
@@ -452,6 +476,46 @@ $sihosConstruirDetaPlanJsV = is_readable($assetSihosConstruirDetaPlan) ? (int)fi
             </div>
         </div>
         <script src="/js/sihos-construir-detaplan.js?v=<?= (int)$sihosConstruirDetaPlanJsV ?>"></script>
+
+        <div id="sihosConstruirDetaPlanMasivoModal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header-bar">
+                    <span>▶️ Construir DetaPlan — selección masiva</span>
+                    <span class="close-modal" id="sihosConstruirDetaPlanMasivoCerrar" role="button" tabindex="0" aria-label="Cerrar">&times;</span>
+                </div>
+                <div style="padding:16px;">
+                    <div id="sihosConstruirDetaPlanMasivoPreInicio">
+                        <p class="modal-form-alert">
+                            Esto construirá el <code>DetaPlan</code> de <strong id="sihosConstruirDetaPlanMasivoConteo">0</strong>
+                            documento(s) en SIHOS, uno por uno. Cada uno es <strong>irreversible</strong> desde SAVID. No cierre
+                            esta ventana mientras esté en proceso — si se interrumpe, puede volver a correr la selección
+                            restante después sin duplicar nada (cada documento se revisa antes de escribir).
+                        </p>
+                        <div class="form-group">
+                            <label for="sihosConstruirDetaPlanMasivoConfirmacion">Escriba <strong>CONSTRUIR</strong> para confirmar</label>
+                            <input type="text" id="sihosConstruirDetaPlanMasivoConfirmacion" class="form-input" autocomplete="off">
+                        </div>
+                        <div class="auditoria-filters-footer">
+                            <button type="button" id="sihosConstruirDetaPlanMasivoIniciar" class="auditoria-btn-primary" disabled>▶️ Iniciar</button>
+                        </div>
+                    </div>
+                    <div id="sihosConstruirDetaPlanMasivoProgreso" hidden>
+                        <p id="sihosConstruirDetaPlanMasivoContador" aria-live="polite">Procesando 0/0… (✅ 0 ok · ⚠️ 0 con error)</p>
+                        <ul id="sihosConstruirDetaPlanMasivoFallidos" style="max-height:200px; overflow-y:auto; list-style:none; padding:0; margin:0;"></ul>
+                        <div class="auditoria-filters-footer">
+                            <button type="button" id="sihosConstruirDetaPlanMasivoDetener" class="auditoria-btn-primary" style="background:#c0392b;">⏹ Detener</button>
+                        </div>
+                    </div>
+                    <div id="sihosConstruirDetaPlanMasivoResumen" hidden>
+                        <p id="sihosConstruirDetaPlanMasivoResumenTexto" aria-live="polite"></p>
+                        <div class="auditoria-filters-footer">
+                            <button type="button" id="sihosConstruirDetaPlanMasivoActualizar" class="auditoria-btn-primary">🔄 Actualizar página</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <script src="/js/sihos-construir-detaplan-masivo.js?v=<?= (int)$sihosConstruirDetaPlanMasivoJsV ?>"></script>
     <?php endif; ?>
 
     <?php if ($puedeReversarCuenta): ?>

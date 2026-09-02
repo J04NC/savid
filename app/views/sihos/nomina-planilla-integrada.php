@@ -44,7 +44,7 @@
         $mesSeleccionado = (int)ltrim($codiMes, '0');
         ?>
 
-        <form method="post" enctype="multipart/form-data" class="crud-form auditoria-filters-grid" style="margin-bottom:20px;">
+        <form method="post" enctype="multipart/form-data" id="sihosNominaPlanillaIntegradaForm" class="crud-form auditoria-filters-grid" style="margin-bottom:20px;">
             <input type="hidden" name="url" value="sihos/nominaPlanillaIntegrada">
             <input type="hidden" name="empresa_id" value="<?= (int)$empresaId ?>">
             <div class="form-group">
@@ -229,3 +229,20 @@
     <?php endif; ?>
 
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    // Formulario de navegación completa (submit normal, no fetch): sube el
+    // CSV y compara contra SIHOS empleado por empleado — puede tardar
+    // varios segundos con nóminas grandes. Se muestra el overlay antes de
+    // dejar navegar; desaparece solo cuando la página nueva reemplaza esta
+    // (ver savidMostrarCargando en app.js, mismo patrón que sihos/cruce.php
+    // y sihos/nominaPilaCorreccion).
+    var form = document.getElementById('sihosNominaPlanillaIntegradaForm');
+    if (form && typeof savidMostrarCargando === 'function') {
+        form.addEventListener('submit', function () {
+            savidMostrarCargando('Comparando contra SIHOS…', true);
+        });
+    }
+});
+</script>
