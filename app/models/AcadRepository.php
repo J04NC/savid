@@ -278,25 +278,25 @@ class AcadRepository
                 respuesta_texto, selected_option_id, audio_ruta,
                 score, feedback_en, calificado_by, calificado_at, estado_id, created_at
             ) VALUES (
-                :empresa_id, :exercise_id, :usuario_id, :iniciado_at, :enviado_at,
-                :respuesta_texto, :selected_option_id, :audio_ruta,
-                :score, :feedback_en, :calificado_by, :calificado_at, :estado_id, NOW(3)
+                ?, ?, ?, ?, ?,
+                ?, ?, ?,
+                ?, ?, ?, ?, ?, NOW(3)
             )
         ');
         $stmt->execute([
-            'empresa_id' => $data['empresa_id'],
-            'exercise_id' => $data['exercise_id'],
-            'usuario_id' => $data['usuario_id'],
-            'iniciado_at' => $data['iniciado_at'] ?? null,
-            'enviado_at' => $data['enviado_at'] ?? null,
-            'respuesta_texto' => $data['respuesta_texto'] ?? null,
-            'selected_option_id' => $data['selected_option_id'] ?? null,
-            'audio_ruta' => $data['audio_ruta'] ?? null,
-            'score' => $data['score'] ?? null,
-            'feedback_en' => $data['feedback_en'] ?? null,
-            'calificado_by' => $data['calificado_by'] ?? null,
-            'calificado_at' => $data['calificado_at'] ?? null,
-            'estado_id' => $data['estado_id'],
+            $data['empresa_id'],
+            $data['exercise_id'],
+            $data['usuario_id'],
+            $data['iniciado_at'] ?? null,
+            $data['enviado_at'] ?? null,
+            $data['respuesta_texto'] ?? null,
+            $data['selected_option_id'] ?? null,
+            $data['audio_ruta'] ?? null,
+            $data['score'] ?? null,
+            $data['feedback_en'] ?? null,
+            $data['calificado_by'] ?? null,
+            $data['calificado_at'] ?? null,
+            $data['estado_id'],
         ]);
 
         return (int)$this->pdo->lastInsertId();

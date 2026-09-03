@@ -30,8 +30,8 @@ $estadoLabels = [14 => 'Pending review', 15 => 'Graded', 16 => 'Auto-graded'];
 
             <p><?= nl2br(acadH($exercise['prompt_en'])) ?></p>
 
-            <?php if ($exercise['exercise_type_codigo'] === 'AUDIO_RESPONSE' && !empty($exercise['audio_referencia_ruta'])): ?>
-                <p><strong>Reference audio:</strong><br><audio controls src="<?= acadH($exercise['audio_referencia_ruta']) ?>"></audio></p>
+            <?php if (!empty($exercise['audio_referencia_ruta'])): ?>
+                <p><strong>Listen:</strong><br><audio controls src="<?= acadH($exercise['audio_referencia_ruta']) ?>"></audio></p>
             <?php endif; ?>
 
             <?php if ($lastAttempt): ?>

@@ -134,7 +134,8 @@ class LocalStorageDriver implements StorageDriverInterface
 
         if (!str_starts_with($key, 'sgd/')
             && !str_starts_with($key, 'empresas/')
-            && !str_starts_with($key, 'usuarios/')) {
+            && !str_starts_with($key, 'usuarios/')
+            && !str_starts_with($key, 'acad/')) {
             return null;
         }
 
