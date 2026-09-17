@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Política de privacidad | Savid</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
     <style>
         :root{
             --bg:#0b0d0c; --card:#111; --border:#2a2a2a; --text:#e5e5e5;
@@ -222,7 +224,11 @@
         <p style="margin:6px 0 0;" class="placeholder">[correo de contacto — pendiente]</p>
     </div>
 
-    <p style="margin-top:40px;"><a href="?url=login" class="volver">&larr; Volver al inicio de sesión</a></p>
+    <p style="margin-top:40px;">
+        <a href="?url=login" class="volver">&larr; Volver al inicio de sesión</a>
+        &nbsp;·&nbsp;
+        <a href="?url=avisolegal" class="volver">Aviso legal</a>
+    </p>
 </div>
 </body>
 </html>

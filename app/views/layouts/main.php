@@ -37,6 +37,10 @@ $assetsV = max(
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SAVID</title>
 
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=<?= (int)$assetsV ?>">
+<link rel="icon" type="image/png" sizes="192x192" href="/favicon-192.png?v=<?= (int)$assetsV ?>">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=<?= (int)$assetsV ?>">
+
 <link rel="stylesheet" href="/css/tokens.css?v=<?= (int)$assetsV ?>">
 <link rel="stylesheet" href="/css/app.css?v=<?= (int)$assetsV ?>">
 <link rel="stylesheet" href="/vendor/datatables/datatables.min.css?v=<?= (int)$assetsV ?>">

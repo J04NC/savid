@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Login | Savid</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
     <link rel="stylesheet" href="/css/login.css">
     <?php if (TurnstileService::habilitado()): ?>
     <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
@@ -63,6 +65,8 @@
 
         <p style="text-align:center; margin-top:18px; font-size:12.5px;">
             <a href="?url=privacidad" style="color:#1dd1a1; text-decoration:none;">Política de privacidad</a>
+            &nbsp;·&nbsp;
+            <a href="?url=avisolegal" style="color:#1dd1a1; text-decoration:none;">Aviso legal</a>
         </p>
     </div>
 </div>
