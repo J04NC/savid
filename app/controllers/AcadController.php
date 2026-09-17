@@ -3,7 +3,8 @@
 class AcadController
 {
     private ModuleService $moduleService;
-    private AcadRepository $repo;
+    private AcadStudyService $studyService;
+    private AcadPracticeViewService $practiceViewService;
     private AcadExerciseOptionService $optionService;
     private AcadExerciseService $exerciseService;
     private AcadAttemptService $attemptService;
@@ -12,7 +13,8 @@ class AcadController
     public function __construct()
     {
         $this->moduleService = new ModuleService();
-        $this->repo = new AcadRepository();
+        $this->studyService = new AcadStudyService();
+        $this->practiceViewService = new AcadPracticeViewService();
         $this->optionService = new AcadExerciseOptionService();
         $this->exerciseService = new AcadExerciseService();
         $this->attemptService = new AcadAttemptService();
@@ -46,22 +48,18 @@ class AcadController
         $levelId = (int)($_GET['level_id'] ?? 0);
         $moduleId = (int)($_GET['module_id'] ?? 0);
         $unitId = (int)($_GET['unit_id'] ?? 0);
-
-        $levels = $empresaId > 0 ? $this->repo->getLevels($empresaId) : [];
-        $modules = $levelId > 0 ? $this->repo->getModulesByLevel($empresaId, $levelId) : [];
-        $units = $moduleId > 0 ? $this->repo->getUnitsByModule($empresaId, $moduleId) : [];
-        $lessons = $unitId > 0 ? $this->repo->getLessonsByUnit($empresaId, $unitId) : [];
-        $exercises = [];
-        $currentLesson = null;
         $lessonId = (int)($_GET['lesson_id'] ?? 0);
-        if ($lessonId > 0) {
-            $currentLesson = $this->repo->findLesson($empresaId, $lessonId);
-            $exercises = $this->repo->getExercisesByLesson($empresaId, $lessonId);
-        }
 
-        $currentLevel = $levelId > 0 ? $this->repo->findLevel($empresaId, $levelId) : null;
-        $currentModule = $moduleId > 0 ? $this->repo->findModule($empresaId, $moduleId) : null;
-        $currentUnit = $unitId > 0 ? $this->repo->findUnit($empresaId, $unitId) : null;
+        $data = $this->studyService->buildViewData($empresaId, $levelId, $moduleId, $unitId, $lessonId);
+        $levels = $data['levels'];
+        $modules = $data['modules'];
+        $units = $data['units'];
+        $lessons = $data['lessons'];
+        $exercises = $data['exercises'];
+        $currentLesson = $data['currentLesson'];
+        $currentLevel = $data['currentLevel'];
+        $currentModule = $data['currentModule'];
+        $currentUnit = $data['currentUnit'];
 
         $breadcrumb = $this->moduleService->buildBreadcrumbForRuta('acad/study');
 
@@ -85,124 +83,22 @@ class AcadController
         $usuarioId = (int)($_SESSION['user_id'] ?? 0);
         $exerciseId = (int)($_GET['exercise_id'] ?? 0);
 
-        $exercise = $exerciseId > 0 ? $this->repo->findExercise($empresaId, $exerciseId) : null;
-        $options = [];
-        if ($exercise !== null && in_array($exercise['exercise_type_codigo'], ['MULTIPLE_CHOICE', 'FILL_BLANKS', 'SENTENCE_ORDER', 'DIALOGUE'], true)) {
-            $options = $this->repo->getOptionsByExercise($exerciseId);
-            if (in_array($exercise['exercise_type_codigo'], ['FILL_BLANKS', 'SENTENCE_ORDER'], true)) {
-                shuffle($options);
-            }
-        }
-        $lastAttempt = $exercise !== null
-            ? $this->repo->findLatestAttempt($empresaId, $exerciseId, $usuarioId)
-            : null;
-
-        // "Columns:" es una convención de texto libre dentro de prompt_en
-        // (igual que "___" para FILL_BLANKS): si el admin la incluye, se usa
-        // como andamiaje visual de encabezados de columna (ej. Subject |
-        // Adverb | Verb | Object | Place, tal como trae el libro) sobre el
-        // ejercicio SENTENCE_ORDER, y se retira del texto de instrucciones
-        // que ve el estudiante para no mostrarla como si fuera prosa.
-        $scaffoldColumns = [];
-        $displayPrompt = (string)($exercise['prompt_en'] ?? '');
-        if ($exercise !== null && $exercise['exercise_type_codigo'] === 'SENTENCE_ORDER') {
-            [$displayPrompt, $scaffoldColumns] = $this->extractScaffoldColumns($displayPrompt);
-        }
-
-        $referenceAudios = $exercise !== null ? $this->repo->getReferenceAudiosByExercise($exerciseId) : [];
-        $audioSlotAttempts = [];
-        $tongueTwisterHistory = [];
-        if ($exercise !== null && $exercise['exercise_type_codigo'] === 'AUDIO_RESPONSE') {
-            foreach ($referenceAudios as $ra) {
-                $audioSlotAttempts[(int)$ra['id']] = $this->repo->findAttemptForReferenceAudio(
-                    $empresaId,
-                    $exerciseId,
-                    (int)$ra['id'],
-                    $usuarioId
-                );
-            }
-        } elseif ($exercise !== null && $exercise['exercise_type_codigo'] === 'TONGUE_TWISTER') {
-            // A diferencia de AUDIO_RESPONSE (una toma, bloqueada), aquí se
-            // trae el HISTORIAL completo por audio de referencia para poder
-            // mostrar la progresión de duración entre tomas.
-            foreach ($referenceAudios as $ra) {
-                $tongueTwisterHistory[(int)$ra['id']] = $this->repo->findAttemptsHistoryForReferenceAudio(
-                    $empresaId,
-                    $exerciseId,
-                    (int)$ra['id'],
-                    $usuarioId
-                );
-            }
-        }
-
-        $dialogueRole = 1;
-        $dialogueTurns = [];
-        if ($exercise !== null && $exercise['exercise_type_codigo'] === 'DIALOGUE') {
-            $dialogueRole = (int)($_GET['role'] ?? 1) === 2 ? 2 : 1;
-            $dialogueTurns = $this->buildDialogueTurns($empresaId, $exerciseId, $usuarioId, $options, $referenceAudios, $dialogueRole);
-        }
+        $data = $this->practiceViewService->buildViewData($empresaId, $usuarioId, $exerciseId, $_GET);
+        $exercise = $data['exercise'];
+        $options = $data['options'];
+        $lastAttempt = $data['lastAttempt'];
+        $displayPrompt = $data['displayPrompt'];
+        $scaffoldColumns = $data['scaffoldColumns'];
+        $referenceAudios = $data['referenceAudios'];
+        $audioSlotAttempts = $data['audioSlotAttempts'];
+        $tongueTwisterHistory = $data['tongueTwisterHistory'];
+        $dialogueRole = $data['dialogueRole'];
+        $dialogueTurns = $data['dialogueTurns'];
 
         $breadcrumb = $this->moduleService->buildBreadcrumbForRuta('acad/practice');
 
         $view = BASE_PATH . '/app/views/acad/practice.php';
         require BASE_PATH . '/app/views/layouts/main.php';
-    }
-
-    /**
-     * Arma la lista de turnos para la vista de un ejercicio DIALOGUE: cada
-     * turno (opción) se empareja con su audio TTS (mismo `orden` en ambas
-     * tablas) y, si el turno es del rol que el estudiante eligió practicar,
-     * con su propio intento grabado (si ya lo confirmó).
-     *
-     * @param list<array<string, mixed>> $turns opciones del ejercicio, ya ordenadas por `orden`
-     * @param list<array<string, mixed>> $referenceAudios audios del ejercicio, ya ordenados por `orden`
-     * @return list<array<string, mixed>>
-     */
-    private function buildDialogueTurns(int $empresaId, int $exerciseId, int $usuarioId, array $turns, array $referenceAudios, int $myRole): array
-    {
-        $audioByOrden = [];
-        foreach ($referenceAudios as $ra) {
-            $audioByOrden[(int)$ra['orden']] = $ra;
-        }
-
-        $result = [];
-        foreach ($turns as $turn) {
-            $role = (int)$turn['blank_index'];
-            $audio = $audioByOrden[(int)$turn['orden']] ?? null;
-            $isMine = $role === $myRole;
-
-            $result[] = [
-                'turn' => (int)$turn['orden'],
-                'role' => $role,
-                'texto_en' => (string)$turn['texto_en'],
-                'audio' => $audio,
-                'isMine' => $isMine,
-                'attempt' => ($isMine && $audio !== null)
-                    ? $this->repo->findAttemptForReferenceAudio($empresaId, $exerciseId, (int)$audio['id'], $usuarioId)
-                    : null,
-            ];
-        }
-
-        return $result;
-    }
-
-    /**
-     * @return array{0: string, 1: list<string>}
-     */
-    private function extractScaffoldColumns(string $promptEn): array
-    {
-        $lines = explode("\n", $promptEn);
-        $columns = [];
-        $kept = [];
-        foreach ($lines as $line) {
-            if (preg_match('/^\s*columns\s*:\s*(.+)$/i', $line, $m)) {
-                $columns = array_values(array_filter(array_map('trim', explode('|', $m[1]))));
-                continue;
-            }
-            $kept[] = $line;
-        }
-
-        return [trim(implode("\n", $kept)), $columns];
     }
 
     private function handlePracticePost(): void
@@ -409,7 +305,7 @@ class AcadController
         }
 
         $empresaId = (int)($_SESSION['empresa_id'] ?? 0);
-        $pending = $empresaId > 0 ? $this->repo->findPendingAttempts($empresaId) : [];
+        $pending = $this->attemptService->listPending($empresaId);
 
         $breadcrumb = $this->moduleService->buildBreadcrumbForRuta('acad/grading');
 

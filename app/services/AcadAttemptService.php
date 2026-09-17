@@ -16,6 +16,14 @@ class AcadAttemptService
     }
 
     /**
+     * @return list<array<string, mixed>>
+     */
+    public function listPending(int $empresaId): array
+    {
+        return $empresaId > 0 ? $this->repo->findPendingAttempts($empresaId) : [];
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function submit(array $post, array $query, int $usuarioId): array
