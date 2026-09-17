@@ -156,7 +156,7 @@ $crudRestoreDraft = ($crudContextTable === 'usuario')
 <form method="POST" data-crud-context="<?= htmlspecialchars($crudContextTable, ENT_QUOTES, 'UTF-8') ?>"<?= !empty($crudZonaUbicacionToggle) ? ' data-crud-zona-ubicacion-toggle="1"' : '' ?><?= $crudRestoreDraft ? ' data-crud-restore-draft="1"' : '' ?>>
 
 <input type="hidden" name="csrf_token" value="<?= CsrfService::token() ?>">
-<input type="hidden" name="id" id="crud_id" value="<?= $old['id'] ?? '' ?>">
+<input type="hidden" name="id" id="crud_id" value="<?= htmlspecialchars((string)($old['id'] ?? $_GET['id'] ?? ''), ENT_QUOTES, 'UTF-8') ?>">
 <?php if ($crudContextTable === 'usuario'): ?>
 <input type="hidden" name="usuario_email_overwrite_ok" id="usuario_email_overwrite_ok" value="0">
 <input type="hidden" name="usuario_identificacion_accion" id="usuario_identificacion_accion" value="update_principal">

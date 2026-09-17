@@ -309,4 +309,9 @@ class ModuleService
     {
         return $this->crudService->save($tabla, $postData);
     }
+
+    public function getLastSavedId(): ?int
+    {
+        return $this->crudService->getLastSavedId();
+    }
 }

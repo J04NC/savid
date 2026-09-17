@@ -174,7 +174,9 @@ class ModuleController
                 }
 
                 $modQ = !empty($currentItem['modulo_id']) ? '&modulo=' . (int)$currentItem['modulo_id'] : '';
-                header('Location: ?url=' . $ruta . $modQ . '&success=1');
+                $savedId = $this->moduleService->getLastSavedId();
+                $idQ = $savedId ? '&id=' . $savedId : '';
+                header('Location: ?url=' . $ruta . $modQ . $idQ . '&success=1');
                 exit;
 
             }catch(Throwable $e){

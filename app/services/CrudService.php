@@ -5,10 +5,18 @@ class CrudService
 
     private $pdo;
 
+    /** Id de la fila guardada en la última llamada exitosa a save(). */
+    private ?int $lastSavedId = null;
+
     public function __construct()
     {
         $database = new Database();
         $this->pdo = $database->connect();
+    }
+
+    public function getLastSavedId(): ?int
+    {
+        return $this->lastSavedId;
     }
 
     public function getTableData($tabla)
@@ -1345,6 +1353,10 @@ class CrudService
                 } elseif ($this->pdo->inTransaction()) {
                     $this->pdo->rollBack();
                 }
+            }
+
+            if ($ok) {
+                $this->lastSavedId = $id ? (int)$id : (int)$this->pdo->lastInsertId();
             }
 
             return $ok;
