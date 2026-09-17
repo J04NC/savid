@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+#
+# Pre-commit local de SAVID: dos chequeos automáticos que no dependen de que
+# nadie se acuerde de correrlos a mano.
+#
+#   1) Tamaño del commit: avisa/bloquea si se acumulan demasiadas líneas de
+#      cambio en un solo commit (micro-commits en vez de uno gigante al
+#      final, para que cada commit sea revisable de un vistazo).
+#   2) Linter de arquitectura: bloquea SQL nuevo (->prepare/->query/new PDO)
+#      o instanciación directa de un *Repository dentro de app/controllers.
+#      Solo revisa las LÍNEAS NUEVAS que agrega este commit (el diff), no el
+#      archivo completo — el proyecto ya tiene SQL viejo en varios
+#      controllers (deuda anterior a este hook) y no queremos bloquear
+#      trabajo futuro por eso; solo evitamos que se agregue MÁS.
+#
+# Ver README.md, sección "Chequeos automáticos antes de cada commit".
+
+set -euo pipefail
+
+LIMITE_LINEAS="${SAVID_LIMITE_LINEAS_COMMIT:-200}"
+FALLO=0
+
+# ---------------------------------------------------------------------------
+# 1) Tamaño del commit
+# ---------------------------------------------------------------------------
+TOTAL_LINEAS=$(git diff --cached --numstat -- . ':!database/migrations' ':!vendor' \
+    | awk '{ if ($1 != "-") add+=$1; if ($2 != "-") del+=$2 } END { print add+del }')
+TOTAL_LINEAS="${TOTAL_LINEAS:-0}"
+
+if [ "$TOTAL_LINEAS" -gt "$LIMITE_LINEAS" ]; then
+    if [ "${SAVID_PERMITIR_COMMIT_GRANDE:-0}" = "1" ]; then
+        echo "⚠️  Commit de ${TOTAL_LINEAS} líneas (límite sugerido: ${LIMITE_LINEAS}) — permitido explícitamente vía SAVID_PERMITIR_COMMIT_GRANDE=1."
+    else
+        echo "❌ Este commit cambia ${TOTAL_LINEAS} líneas (límite: ${LIMITE_LINEAS}, sin contar database/migrations ni vendor)."
+        echo "   Divídelo en commits más pequeños y enfocados en un solo cambio lógico."
+        echo "   Si es un caso legítimo de un solo cambio grande e indivisible, repite el commit con:"
+        echo "     SAVID_PERMITIR_COMMIT_GRANDE=1 git commit ..."
+        FALLO=1
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# 2) Linter de arquitectura: SQL o Repository nuevos en app/controllers
+# ---------------------------------------------------------------------------
+ARCHIVOS_CONTROLLER=$(git diff --cached --name-only --diff-filter=ACM -- 'app/controllers/*.php' || true)
+
+if [ -n "$ARCHIVOS_CONTROLLER" ]; then
+    while IFS= read -r archivo; do
+        [ -z "$archivo" ] && continue
+
+        # awk en vez de "grep" encadenado: dentro de sesiones de Claude Code,
+        # "grep" puede estar redefinido como función de shell hacia ugrep con
+        # flags que rompen este patrón (-G fuerza regex básico) y fallan en
+        # silencio — awk no sufre ese problema y su ERE es consistente.
+        LINEAS_MALAS=$(git diff --cached -- "$archivo" | awk '
+            /^\+\+\+/ { next }
+            /^\+/ && /(->prepare\(|->query\(|new PDO\(|new [A-Za-z_]+Repository\()/ { print }
+        ')
+
+        if [ -n "$LINEAS_MALAS" ]; then
+            echo "❌ $archivo agrega SQL o uso directo de Repository — eso va en un Service, no en el Controller (ver CLAUDE.md):"
+            echo "$LINEAS_MALAS" | sed 's/^/     /'
+            FALLO=1
+        fi
+    done <<< "$ARCHIVOS_CONTROLLER"
+fi
+
+if [ "$FALLO" -eq 1 ]; then
+    echo ""
+    echo "Commit bloqueado por el pre-commit de SAVID (.githooks/pre-commit)."
+    exit 1
+fi
+
+exit 0

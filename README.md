@@ -512,6 +512,15 @@ rg "data-accion|btn-accion|accion_codigo" public/js app/views
 
 **Humo rapido CRUD:** nuevo, editar fila, select `*_id`, eliminar, boton especial si aplica. Si el item es **tercero** con `zona_id`, comprobar que al cambiar de zona urbana a rural (y viceversa) las etiquetas de `comuna_id`/`barrio_id` pasan de Comuna/Barrio a Corregimiento/Vereda sin perder el valor seleccionado.
 
+### Chequeos automáticos antes de cada commit
+
+El repo trae un hook de git en `.githooks/pre-commit` (activado con `git config core.hooksPath .githooks` — ya configurado en este servidor; si alguna vez se clona el repo en otro lugar, hay que volver a correr ese comando una vez) que corre solo, sin que nadie tenga que acordarse:
+
+1. **Tamaño del commit**: bloquea si el commit cambia más de 200 líneas (sin contar `database/migrations` ni `vendor`), para forzar commits pequeños y revisables en vez de uno gigante al final de una sesión larga. Escape para un caso legítimo de cambio grande e indivisible: `SAVID_PERMITIR_COMMIT_GRANDE=1 git commit ...`.
+2. **Linter de arquitectura**: bloquea si el commit **agrega** (no revisa el archivo completo, solo las líneas nuevas del diff) SQL directo (`->prepare(`, `->query(`, `new PDO(`) o instanciación directa de un `*Repository` dentro de `app/controllers` — esa lógica va en un Service. Nota: varios controllers ya tenían SQL directo *antes* de este hook (`TerceroController`, `EmpresaController`, `ItemController`, `SgdController`) — es deuda técnica previa, el hook no la bloquea retroactivamente, solo evita que se agregue más.
+
+Si el hook bloquea un commit, el mensaje explica por qué y qué hacer — no hace falta entender bash para leerlo.
+
 ---
 
 ## Auditoría y archivo histórico
