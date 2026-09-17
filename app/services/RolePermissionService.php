@@ -6,6 +6,7 @@ class RolePermissionService
     private BranchRepository $branchRepository;
     private RolePermissionRepository $rolePermissionRepository;
     private EmpresaItemRepository $empresaItemRepository;
+    private EmpresaRolRepository $empresaRolRepository;
 
     public function __construct()
     {
@@ -16,6 +17,24 @@ class RolePermissionService
         $this->branchRepository = new BranchRepository($pdo);
         $this->rolePermissionRepository = new RolePermissionRepository($pdo);
         $this->empresaItemRepository = new EmpresaItemRepository($pdo);
+        $this->empresaRolRepository = new EmpresaRolRepository($pdo);
+    }
+
+    /**
+     * Un admin de empresa solo puede ver/editar permisos de roles que su empresa
+     * tiene habilitados vía empresa_rol — evita que "adopte" un rol global ajeno
+     * simplemente escribiendo su id en la URL. Superadmin nunca se restringe.
+     */
+    public function rolAllowedForEmpresa(int $rolId, ?int $empresaId, bool $esSuperAdmin): bool
+    {
+        if ($esSuperAdmin) {
+            return true;
+        }
+        if ($empresaId === null || $empresaId <= 0) {
+            return false;
+        }
+
+        return $this->empresaRolRepository->isRolAllowed($empresaId, $rolId);
     }
 
     public function normalizeScope($empresaId, $sedeId, $esSuperAdmin, $sessionEmpresaId)
