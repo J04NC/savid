@@ -43,6 +43,28 @@ class TwoFactorService
     }
 
     /**
+     * Reenvía el código para un usuario resolviendo su email/nombre aquí —
+     * el llamador (LoginController::verificar2faReenviar) solo necesita el
+     * id de la sesión pendiente, sin tocar UserRepository directamente.
+     *
+     * @return array{success: bool, error?: string, wait_seconds?: int}
+     */
+    public function reenviarCodigoParaUsuario(int $usuarioId, ?string $ip): array
+    {
+        $user = (new UserRepository($this->pdo))->findActiveById($usuarioId);
+        if (!$user) {
+            return ['success' => false, 'error' => 'No se pudo reenviar el código.'];
+        }
+
+        return $this->sendCode(
+            $usuarioId,
+            (string)($user['email'] ?? ''),
+            (string)($user['nombre'] ?? $user['username']),
+            $ip
+        );
+    }
+
+    /**
      * Genera y envía un código nuevo. Respeta un tiempo mínimo entre reenvíos.
      *
      * @return array{success: bool, error?: string, wait_seconds?: int}

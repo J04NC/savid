@@ -236,22 +236,12 @@ class LoginController
         $userId = (int)$_SESSION['tfa_pending_user_id'];
 
         try {
-            $userRepository = new UserRepository((new Database())->connect());
-            $user = $userRepository->findActiveById($userId);
-            if ($user) {
-                $service = new TwoFactorService();
-                $result = $service->sendCode(
-                    $userId,
-                    (string)($user['email'] ?? ''),
-                    (string)($user['nombre'] ?? $user['username']),
-                    RequestIpService::current()
-                );
-                $_SESSION['tfa_error'] = $result['success']
-                    ? 'Enviamos un nuevo código a tu correo.'
-                    : ($result['error'] ?? 'No se pudo reenviar el código.');
-            }
+            $result = (new TwoFactorService())->reenviarCodigoParaUsuario($userId, RequestIpService::current());
+            $_SESSION['tfa_error'] = $result['success']
+                ? 'Enviamos un nuevo código a tu correo.'
+                : ($result['error'] ?? 'No se pudo reenviar el código.');
         } catch (Throwable $e) {
-            error_log('TwoFactorService::sendCode (reenviar): ' . $e->getMessage());
+            error_log('TwoFactorService::reenviarCodigoParaUsuario: ' . $e->getMessage());
             $_SESSION['tfa_error'] = 'No se pudo reenviar el código.';
         }
 
