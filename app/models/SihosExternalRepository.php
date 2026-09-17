@@ -1231,8 +1231,12 @@ class SihosExternalRepository
     }
 
     /**
-     * ¿Está cerrado el módulo de Contabilidad (Modulo=22 — catálogo fijo del
-     * software, confirmado con los Cierres reales de 2026 de empresa 18)
+     * ¿Está cerrado el módulo de Contabilidad (Modulo=26 — catálogo fijo del
+     * software, confirmado contra el código fuente real de SIHOS,
+     * sihos/modulos/procesos/cierramesdia.php:37: `22=>'Facturación y
+     * Cartera', 26=>'Contabilidad'`. Modulo=22 NO es Contabilidad — bug real
+     * corregido tras verificarlo con datos reales: para julio/2026 ambos
+     * módulos discrepan, Facturación ya cerrado y Contabilidad aún abierto)
      * para ese año/mes? Mismo criterio que isPresupuestoCerrado() pero para
      * comprobantes contables genéricos (Nota Contabilidad), no presupuesto.
      */
@@ -1240,7 +1244,7 @@ class SihosExternalRepository
     {
         $stmt = $this->connect()->prepare(
             "SELECT COUNT(*) FROM Cierres
-             WHERE CodiInst = ? AND Modulo = 22 AND CodiDia = 0 AND TipoMovi = 2
+             WHERE CodiInst = ? AND Modulo = 26 AND CodiDia = 0 AND TipoMovi = 2
                AND CodiAno = ? AND CodiMes = ?"
         );
         $stmt->execute([$this->codiInst(), $codiAno, $codiMes]);
@@ -1362,6 +1366,73 @@ class SihosExternalRepository
         $claves = [];
         while ($fila = $stmt->fetch()) {
             $claves[$fila['FacturaCodiDocu'] . '-' . $fila['FacturaNumeDocu'] . '-' . $fila['CodiCont']] = true;
+        }
+
+        return $claves;
+    }
+
+    /**
+     * Hermano de fetchClavesConAjustePrevio() para las notas de vigencia
+     * anterior (sección 5b): a diferencia de ese caso (donde la corrección
+     * referencia directamente al documento flageado), aquí la nota de
+     * ajuste referencia la FACTURA, no la nota que corrige — así que
+     * `(FacturaCodiDocu, FacturaNumeDocu, CodiCont)` sola no basta para
+     * saber CUÁL nota quedó corregida (dos notas distintas pueden compartir
+     * factura y cuenta mal). Se agrega el mismo discriminador que
+     * fetchAjustePrevioNota(): `EncaCont.Concepto` de la nota de ajuste
+     * siempre termina en `"- nota {CodiDocu}-{NumeDocu}"`.
+     *
+     * @param list<array{CodiDocu:string,NumeDocu:string,CodiCont:string,FacturaCodiDocu:string,FacturaNumeDocu:string}> $filas
+     * @return array<string, true> indexado por "{CodiDocu}-{NumeDocu}-{CodiCont}" (la nota, no la factura — mismo formato que ya espera el llamador)
+     */
+    public function fetchClavesConAjustePrevioNotasVigenciaAnterior(array $filas): array
+    {
+        if ($filas === []) {
+            return [];
+        }
+
+        $triplasUnicas = [];
+        foreach ($filas as $f) {
+            $clave = $f['FacturaCodiDocu'] . '|' . $f['FacturaNumeDocu'] . '|' . $f['CodiCont'];
+            $triplasUnicas[$clave] = [$f['FacturaCodiDocu'], $f['FacturaNumeDocu'], $f['CodiCont']];
+        }
+        $triplasUnicas = array_values($triplasUnicas);
+
+        // Mismos OR-es explícitos que fetchClavesConAjustePrevio() (no
+        // tupla-IN — MySQL 5.6 no usa el índice, ver docblock de ese método).
+        $condiciones = implode(' OR ', array_fill(0, count($triplasUnicas), '(dc.TiDoRefe = ? AND dc.NuDoRefe = ? AND dc.CodiCont = ?)'));
+        $params = [$this->codiInst()];
+        foreach ($triplasUnicas as [$cd, $nd, $cc]) {
+            $params[] = $cd;
+            $params[] = $nd;
+            $params[] = $cc;
+        }
+
+        $stmt = $this->connect()->prepare(
+            "SELECT DISTINCT dc.TiDoRefe AS FacturaCodiDocu, dc.NuDoRefe AS FacturaNumeDocu, dc.CodiCont, ec.Concepto
+             FROM DetaCont dc
+             INNER JOIN EncaCont ec ON ec.CodiInst = dc.CodiInst AND ec.CodiDocu = dc.CodiDocu AND ec.NumeDocu = dc.NumeDocu
+             WHERE dc.CodiInst = ?
+               AND ({$condiciones})
+               AND ec.Anulado = 0
+               AND ec.Concepto LIKE '%- nota %'"
+        );
+        $stmt->execute($params);
+        $filasCorregidas = $stmt->fetchAll();
+
+        $claves = [];
+        foreach ($filas as $f) {
+            $sufijo = '- nota ' . $f['CodiDocu'] . '-' . $f['NumeDocu'];
+            foreach ($filasCorregidas as $fc) {
+                if ($fc['FacturaCodiDocu'] === $f['FacturaCodiDocu']
+                    && $fc['FacturaNumeDocu'] === $f['FacturaNumeDocu']
+                    && $fc['CodiCont'] === $f['CodiCont']
+                    && str_ends_with((string)$fc['Concepto'], $sufijo)
+                ) {
+                    $claves[$f['CodiDocu'] . '-' . $f['NumeDocu'] . '-' . $f['CodiCont']] = true;
+                    break;
+                }
+            }
         }
 
         return $claves;
@@ -1545,28 +1616,43 @@ class SihosExternalRepository
 
     /**
      * Análogo a fetchAjustePrevio() pero para la reclasificación de cuenta
-     * de notas de vigencia anterior (sección 5b): la clave de búsqueda es
-     * la propia NOTA que se corrige (no la factura), porque la nota de
-     * ajuste en la rama de mes cerrado referencia la nota origen, no la
-     * factura. Solo aplica a la rama de mes cerrado — la rama de mes
-     * abierto edita en sitio, no deja rastro de "documento referenciando",
-     * por eso esa rama re-verifica directamente el CodiCont de la línea en
-     * vez de buscar un ajuste previo.
+     * de notas de vigencia anterior (sección 5b): la nota de ajuste (rama de
+     * mes cerrado) referencia la FACTURA (igual que la nota que corrige,
+     * confirmado contra datos reales — no la nota origen), así que la clave
+     * de búsqueda principal es `TiDoRefe/NuDoRefe = la factura`. Como varias
+     * notas distintas pueden referenciar la misma factura y necesitar
+     * corrección independiente, se agrega un discriminador por nota:
+     * `EncaCont.Concepto` de la nota de ajuste siempre termina en
+     * `"- nota {codiDocuNota}-{numeDocuNota}"` (ver
+     * SihosExternalWriteRepository::crearNotaAjusteVigenciaAnteriorBloqueado())
+     * — ese formato es significativo aquí, no solo descriptivo. Solo aplica
+     * a la rama de mes cerrado — la rama de mes abierto edita en sitio, no
+     * deja rastro de "documento referenciando", por eso esa rama
+     * re-verifica directamente el CodiCont de la línea en vez de buscar un
+     * ajuste previo.
      *
      * @return array{CodiDocu:string,NumeDocu:string}|null
      */
-    public function fetchAjustePrevioNota(string $codiDocuNota, string $numeDocuNota, string $cuentaCorregida): ?array
-    {
+    public function fetchAjustePrevioNota(
+        string $codiDocuFactura,
+        string $numeDocuFactura,
+        string $codiDocuNota,
+        string $numeDocuNota,
+        string $cuentaCorregida
+    ): ?array {
         $stmt = $this->connect()->prepare(
             'SELECT dc.CodiDocu, dc.NumeDocu
              FROM DetaCont dc
              INNER JOIN EncaCont ec ON ec.CodiInst = dc.CodiInst AND ec.CodiDocu = dc.CodiDocu AND ec.NumeDocu = dc.NumeDocu
              WHERE dc.CodiInst = ? AND dc.TiDoRefe = ? AND dc.NuDoRefe = ? AND dc.CodiCont = ?
-               AND dc.CodiDocu <> ? AND ec.Anulado = 0
+               AND ec.Concepto LIKE ? AND ec.Anulado = 0
              ORDER BY ec.FechDigi DESC, ec.HoraDigi DESC
              LIMIT 1'
         );
-        $stmt->execute([$this->codiInst(), $codiDocuNota, $numeDocuNota, $cuentaCorregida, $codiDocuNota]);
+        $stmt->execute([
+            $this->codiInst(), $codiDocuFactura, $numeDocuFactura, $cuentaCorregida,
+            '%- nota ' . $codiDocuNota . '-' . $numeDocuNota,
+        ]);
         $fila = $stmt->fetch();
 
         return $fila === false ? null : $fila;
@@ -1605,7 +1691,7 @@ class SihosExternalRepository
         // 4312 por la cantidad de líneas con referencia del documento — acá
         // habría duplicado la reclasificación.
         $stmt = $this->connect()->prepare(
-            "SELECT dc.ConsDeta, dc.CodiCont, dc.CentCost, dc.TiDoTerc, dc.NuDoTerc, dc.Valor
+            "SELECT dc.ConsDeta, dc.CodiCont, dc.CentCost, dc.TiDoTerc, dc.NuDoTerc, dc.Valor, dc.TiDoRefe, dc.NuDoRefe
              FROM DetaCont dc
              INNER JOIN EncaCont fact
                  ON fact.CodiInst = dc.CodiInst AND fact.CodiDocu = dc.TiDoRefe AND fact.NumeDocu = dc.NuDoRefe
@@ -1616,6 +1702,7 @@ class SihosExternalRepository
              ORDER BY dc.ConsDeta"
         );
         $stmt->execute([$codiInst, $codiDocuNota, $numeDocuNota, $nota['FechDocu']]);
+        $filasLineas = $stmt->fetchAll();
         $lineas4312 = array_map(
             static fn (array $fila): array => [
                 'ConsDeta' => (int)$fila['ConsDeta'],
@@ -1625,14 +1712,23 @@ class SihosExternalRepository
                 'NuDoTerc' => $fila['NuDoTerc'],
                 'Valor' => (float)$fila['Valor'],
             ],
-            $stmt->fetchAll()
+            $filasLineas
         );
+
+        // Siempre 1 factura por nota (confirmado con datos reales) — se toma
+        // de la primera línea. Se usa como documento de referencia real de
+        // la nota de ajuste que corrige esta nota (ver
+        // SihosExternalWriteRepository::crearNotaAjusteVigenciaAnteriorBloqueado()).
+        $facturaCodiDocu = $filasLineas !== [] ? $filasLineas[0]['TiDoRefe'] : null;
+        $facturaNumeDocu = $filasLineas !== [] ? $filasLineas[0]['NuDoRefe'] : null;
 
         return [
             'Anulado' => (int)$nota['Anulado'],
             'FechDocu' => (string)$nota['FechDocu'],
             'TiDoTerc' => $nota['TiDoTerc'],
             'NuDoTerc' => $nota['NuDoTerc'],
+            'FacturaCodiDocu' => $facturaCodiDocu,
+            'FacturaNumeDocu' => $facturaNumeDocu,
             'CodiCent' => $nota['CodiCent'],
             'Lineas4312' => $lineas4312,
         ];

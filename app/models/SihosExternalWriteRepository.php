@@ -807,7 +807,7 @@ class SihosExternalWriteRepository
             }
 
             $stmt = $pdo->prepare(
-                "SELECT dc.ConsDeta, dc.CodiCont, dc.CentCost, dc.Valor
+                "SELECT dc.ConsDeta, dc.CodiCont, dc.CentCost, dc.Valor, dc.TiDoRefe, dc.NuDoRefe
                  FROM DetaCont dc
                  INNER JOIN EncaCont fact ON fact.CodiInst = dc.CodiInst AND fact.CodiDocu = dc.TiDoRefe AND fact.NumeDocu = dc.NuDoRefe
                  INNER JOIN EncaCont nc ON nc.CodiInst = dc.CodiInst AND nc.CodiDocu = dc.CodiDocu AND nc.NumeDocu = dc.NumeDocu
@@ -825,17 +825,34 @@ class SihosExternalWriteRepository
                 return ['ok' => false, 'motivo' => 'La nota ya no tiene líneas 4312 de vigencia anterior por corregir — puede que ya se haya corregido.'];
             }
 
+            // Siempre 1 factura por nota (confirmado con datos reales) — la
+            // nota de ajuste y sus líneas referencian esa factura (TiDoRefe/
+            // NuDoRefe), igual que la nota original, NO la nota que se
+            // corrige — confirmado contra datos reales que así es como
+            // queda la nota original y como se espera que quede la de
+            // ajuste, para que "documentos relacionados" de la factura en
+            // SIHOS muestre ambos documentos.
+            $facturaCodiDocu = $lineas4312[0]['TiDoRefe'];
+            $facturaNumeDocu = $lineas4312[0]['NuDoRefe'];
+
             // Idempotencia dentro de la transacción — igual patrón que
             // fetchAjustePrevioNota(), pero contra la conexión de escritura.
+            // Busca por la FACTURA (no por la nota) más el discriminador de
+            // Concepto (ver más abajo) porque varias notas pueden compartir
+            // la misma factura y cuenta mal, y necesitan corrección
+            // independiente.
             $stmt = $pdo->prepare(
                 'SELECT dc.CodiDocu, dc.NumeDocu
                  FROM DetaCont dc
                  INNER JOIN EncaCont ec ON ec.CodiInst = dc.CodiInst AND ec.CodiDocu = dc.CodiDocu AND ec.NumeDocu = dc.NumeDocu
                  WHERE dc.CodiInst = ? AND dc.TiDoRefe = ? AND dc.NuDoRefe = ? AND dc.CodiCont = ?
-                   AND dc.CodiDocu <> ? AND ec.Anulado = 0
+                   AND ec.Concepto LIKE ? AND ec.Anulado = 0
                  LIMIT 1'
             );
-            $stmt->execute([$codiInst, $codiDocuNotaOrigen, $numeDocuNotaOrigen, $cuentaDestino, $codiDocuNotaOrigen]);
+            $stmt->execute([
+                $codiInst, $facturaCodiDocu, $facturaNumeDocu, $cuentaDestino,
+                '%- nota ' . $codiDocuNotaOrigen . '-' . $numeDocuNotaOrigen,
+            ]);
             $ajustePrevio = $stmt->fetch();
 
             if ($ajustePrevio !== false) {
@@ -852,6 +869,12 @@ class SihosExternalWriteRepository
             $numeDocuNota = (string)((int)$stmt->fetchColumn() + 1);
 
             $valorTotal = round(array_sum(array_map(static fn (array $l): float => abs((float)$l['Valor']), $lineas4312)), 2);
+            // El formato de este texto es significativo, no solo
+            // descriptivo: fetchAjustePrevioNota() y
+            // fetchClavesConAjustePrevioNotasVigenciaAnterior() dependen de
+            // que termine exactamente en "- nota {CodiDocu}-{NumeDocu}" para
+            // saber qué nota quedó corregida (TiDoRefe/NuDoRefe ya no lo
+            // dicen, ahora apuntan a la factura).
             $concepto = "Reclasificacion vigencia anterior contra cuenta {$cuentaDestino} - nota {$codiDocuNotaOrigen}-{$numeDocuNotaOrigen}";
 
             $stmt = $pdo->prepare(
@@ -862,7 +885,7 @@ class SihosExternalWriteRepository
             );
             $stmt->execute([
                 $codiInst, $codiAno, $codiDocuNota, $numeDocuNota, $notaOrigen['CodiCent'], $fecha, $concepto,
-                $notaOrigen['TiDoTerc'], $notaOrigen['NuDoTerc'], $codiDocuNotaOrigen, $numeDocuNotaOrigen, $valorTotal,
+                $notaOrigen['TiDoTerc'], $notaOrigen['NuDoTerc'], $facturaCodiDocu, $facturaNumeDocu, $valorTotal,
                 $usuaDigi,
             ]);
 
@@ -874,6 +897,8 @@ class SihosExternalWriteRepository
                 $cuentaOrigen = $linea['CodiCont'];
                 $valor = (float)$linea['Valor'];
                 $centCost = $linea['CentCost'] !== '' ? $linea['CentCost'] : null;
+                $tiDoRefeLinea = $linea['TiDoRefe'];
+                $nuDoRefeLinea = $linea['NuDoRefe'];
 
                 $configOrigen = $this->obtenerConfigCuenta($pdo, $codiInst, $cuentaOrigen, $codiAno);
                 if ($configOrigen === null) {
@@ -900,7 +925,7 @@ class SihosExternalWriteRepository
                 $valorCancelacion = -$valor;
                 $this->insertarLineaDetaCont(
                     $pdo, $codiDocuNota, $numeDocuNota, $consDeta, $codiAno, $cuentaOrigen, $notaOrigen['CodiCent'],
-                    $centCostOrigen, $tiDoTercOrigen, $nuDoTercOrigen, $codiDocuNotaOrigen, $numeDocuNotaOrigen, $valorCancelacion, $usuaDigi
+                    $centCostOrigen, $tiDoTercOrigen, $nuDoTercOrigen, $tiDoRefeLinea, $nuDoRefeLinea, $valorCancelacion, $usuaDigi
                 );
                 $this->actualizarSaldoCuenta($pdo, $cuentaOrigen, $valorCancelacion, $codiMes, $codiAno, $tiDoTercOrigen, $nuDoTercOrigen, $centCostOrigen, $configOrigen, $usuaDigi);
 
@@ -917,7 +942,7 @@ class SihosExternalWriteRepository
 
                     $this->insertarLineaDetaNIIF(
                         $pdo, $codiDocuNota, $numeDocuNota, $consDeta, $codiAno, (string)$idPartOrigen, $notaOrigen['CodiCent'],
-                        $centCostOrigen, $tiDoTercOrigen, $nuDoTercOrigen, $codiDocuNotaOrigen, $numeDocuNotaOrigen, $valorCancelacion, $usuaDigi
+                        $centCostOrigen, $tiDoTercOrigen, $nuDoTercOrigen, $tiDoRefeLinea, $nuDoRefeLinea, $valorCancelacion, $usuaDigi
                     );
                     $this->actualizarSaldoNIIF($pdo, (string)$idPartOrigen, $valorCancelacion, $codiMes, $codiAno, $tiDoTercOrigen, $nuDoTercOrigen, $usuaDigi);
                 }
@@ -933,7 +958,7 @@ class SihosExternalWriteRepository
 
                 $this->insertarLineaDetaCont(
                     $pdo, $codiDocuNota, $numeDocuNota, $consDeta, $codiAno, $cuentaDestino, $notaOrigen['CodiCent'],
-                    $centCostDestino, $tiDoTercDestino, $nuDoTercDestino, $codiDocuNotaOrigen, $numeDocuNotaOrigen, $valor, $usuaDigi
+                    $centCostDestino, $tiDoTercDestino, $nuDoTercDestino, $tiDoRefeLinea, $nuDoRefeLinea, $valor, $usuaDigi
                 );
                 $this->actualizarSaldoCuenta($pdo, $cuentaDestino, $valor, $codiMes, $codiAno, $tiDoTercDestino, $nuDoTercDestino, $centCostDestino, $configDestino, $usuaDigi);
 
@@ -950,7 +975,7 @@ class SihosExternalWriteRepository
 
                     $this->insertarLineaDetaNIIF(
                         $pdo, $codiDocuNota, $numeDocuNota, $consDeta, $codiAno, (string)$idPartDestino, $notaOrigen['CodiCent'],
-                        $centCostDestino, $tiDoTercDestino, $nuDoTercDestino, $codiDocuNotaOrigen, $numeDocuNotaOrigen, $valor, $usuaDigi
+                        $centCostDestino, $tiDoTercDestino, $nuDoTercDestino, $tiDoRefeLinea, $nuDoRefeLinea, $valor, $usuaDigi
                     );
                     $this->actualizarSaldoNIIF($pdo, (string)$idPartDestino, $valor, $codiMes, $codiAno, $tiDoTercDestino, $nuDoTercDestino, $usuaDigi);
                 }

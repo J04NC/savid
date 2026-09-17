@@ -237,7 +237,7 @@ class SihosCruceReconocimientoService
                 '',
                 $prefijoVigenciaAnterior
             );
-            $clavesConAjusteNotas = $repository->fetchClavesConAjustePrevio($cuentasInesperadasNotasAnterior);
+            $clavesConAjusteNotas = $repository->fetchClavesConAjustePrevioNotasVigenciaAnterior($cuentasInesperadasNotasAnterior);
             $cuentasInesperadasNotasAnterior = array_values(array_map(
                 static function (array $f): array {
                     $f['EsVigenciaAnterior'] = true;

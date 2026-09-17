@@ -201,7 +201,10 @@ class SihosCancelacionCuentaService
      * "Conciliación Vigencias Anteriores" respectivamente, confirmado
      * contra el código fuente de SIHOS; `CuenGlosAct`/`CuenCast` son de
      * vigencia ACTUAL y no aplican aquí); el sistema decide la rama según
-     * `isContabilidadCerrada(Modulo=22)` sobre el mes de la propia nota.
+     * `isContabilidadCerrada(Modulo=26)` sobre el mes de la propia nota. En
+     * la rama de mes cerrado, la nota de ajuste creada referencia la
+     * FACTURA (igual que la nota original), no la nota que corrige —
+     * confirmado contra datos reales.
      */
     public function reclasificarCuentaVigenciaAnterior(int $empresaId, string $codiDocuNota, string $numeDocuNota, string $cuentaDestino): array
     {
@@ -273,7 +276,13 @@ class SihosCancelacionCuentaService
 
         foreach ($cuentasACorregir as $cuenta) {
             try {
-                $ajustePrevio = $repositorioLectura->fetchAjustePrevioNota($codiDocuNota, $numeDocuNota, $cuenta);
+                $ajustePrevio = $repositorioLectura->fetchAjustePrevioNota(
+                    (string)$estado['FacturaCodiDocu'],
+                    (string)$estado['FacturaNumeDocu'],
+                    $codiDocuNota,
+                    $numeDocuNota,
+                    $cuenta
+                );
             } catch (PDOException $e) {
                 return ['ok' => false, 'message' => 'No se pudo verificar si ya existe un ajuste previo: ' . $e->getMessage()];
             }
