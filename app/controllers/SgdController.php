@@ -53,26 +53,7 @@ class SgdController
 
     private function resolveHubItemId(): int
     {
-        $database = new Database();
-        $pdo = $database->connect();
-        $nd = SoftDeleteService::sqlAndNotDeleted($pdo, 'item', 'i');
-        $modNd = SoftDeleteService::sqlAndNotDeleted($pdo, 'modulo', 'm');
-
-        $stmt = $pdo->query("
-            SELECT i.id
-            FROM item i
-            INNER JOIN modulo m ON m.id = i.modulo_id
-            WHERE (i.item_padre_id IS NULL OR i.item_padre_id = 0)
-              AND (i.ruta IS NULL OR TRIM(i.ruta) = '')
-              AND LOWER(TRIM(m.nombre)) IN ('gestión documental', 'gestion documental')
-              {$nd}
-              {$modNd}
-            ORDER BY i.id
-            LIMIT 1
-        ");
-        $id = $stmt ? $stmt->fetchColumn() : false;
-
-        return $id !== false ? (int)$id : 0;
+        return $this->moduleService->findHubItemIdByNombresModulo(['gestión documental', 'gestion documental']);
     }
 
     public function config(): void

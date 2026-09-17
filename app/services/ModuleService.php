@@ -21,6 +21,14 @@ class ModuleService
         return $this->moduleRepository->findItemByRuta($ruta);
     }
 
+    /**
+     * @param list<string> $nombresModuloPosibles ya en minúsculas, sin espacios extra
+     */
+    public function findHubItemIdByNombresModulo(array $nombresModuloPosibles): int
+    {
+        return $this->moduleRepository->findHubItemIdByNombresModulo($nombresModuloPosibles);
+    }
+
     public function buildBreadcrumb($currentItem)
     {
         $breadcrumb = '<a href="?url=dashboard">INICIO</a>';

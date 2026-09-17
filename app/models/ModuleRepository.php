@@ -9,6 +9,43 @@ class ModuleRepository
         $this->pdo = $pdo;
     }
 
+    /**
+     * Ítem "hub" de un módulo sin ruta propia (ítem raíz, sin item_padre_id,
+     * con ruta vacía/nula) cuyo módulo coincide por nombre (case-insensitive,
+     * sin acentos vs con acentos según variantes conocidas) — usado por
+     * SgdController::resolveHubItemId() (el hub de SGD no tiene ruta propia)
+     * y por cualquier otro módulo con el mismo patrón.
+     *
+     * @param list<string> $nombresModuloPosibles ya en minúsculas, sin espacios extra
+     */
+    public function findHubItemIdByNombresModulo(array $nombresModuloPosibles): int
+    {
+        if ($nombresModuloPosibles === []) {
+            return 0;
+        }
+
+        $nd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'item', 'i');
+        $modNd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'modulo', 'm');
+        $placeholders = implode(',', array_fill(0, count($nombresModuloPosibles), '?'));
+
+        $stmt = $this->pdo->prepare("
+            SELECT i.id
+            FROM item i
+            INNER JOIN modulo m ON m.id = i.modulo_id
+            WHERE (i.item_padre_id IS NULL OR i.item_padre_id = 0)
+              AND (i.ruta IS NULL OR TRIM(i.ruta) = '')
+              AND LOWER(TRIM(m.nombre)) IN ({$placeholders})
+              {$nd}
+              {$modNd}
+            ORDER BY i.id
+            LIMIT 1
+        ");
+        $stmt->execute($nombresModuloPosibles);
+        $id = $stmt->fetchColumn();
+
+        return $id !== false ? (int)$id : 0;
+    }
+
     public function findItemByRuta($ruta)
     {
         $notDeleted = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'item');
