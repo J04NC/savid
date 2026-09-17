@@ -82,6 +82,23 @@ $sihosJsV = is_readable($assetSihos) ? (int)filemtime($assetSihos) : time();
                         </div>
                     </div>
                 </details>
+
+                <details style="margin-bottom:20px;">
+                    <summary style="cursor:pointer; color:#c0392b; font-weight:bold;">⚠️ Credenciales de escritura — Interfaz Laboratorio (opcional — escribe resultados de laboratorio en SIHOS)</summary>
+                    <p class="field-note" style="margin-top:8px;">
+                        Distintas de las de solo lectura y de las de correcciones contables de arriba. Se usan <strong>únicamente</strong> por el botón "Procesar" de SIHOS &gt; Procesos &gt; Interfaz Laboratorio, para crear/actualizar <code class="auditoria-code">HojaProc</code>/<code class="auditoria-code">DetaPrue</code> y las tablas de interfaz Roche. Sin esto configurado, esa pantalla queda en modo solo consulta. El usuario de BD debe tener permiso de escritura solo sobre estas tablas, nunca sobre el resto de la historia clínica.
+                    </p>
+                    <div class="crud-form auditoria-filters-grid">
+                        <div class="form-group">
+                            <label for="sihosUsuarioInterlab">Usuario de escritura (Interfaz Laboratorio)</label>
+                            <input type="text" id="sihosUsuarioInterlab" name="usuario_interlab" class="form-input" value="<?= htmlspecialchars($config['usuario_interlab']) ?>">
+                        </div>
+                        <div class="form-group">
+                            <label for="sihosPasswordInterlab">Contraseña de escritura (Interfaz Laboratorio)</label>
+                            <input type="password" id="sihosPasswordInterlab" name="password_interlab" class="form-input" placeholder="<?= $config['password_interlab_configurada'] ? 'Dejar en blanco para no cambiarla' : 'Sin configurar' ?>" autocomplete="new-password">
+                        </div>
+                    </div>
+                </details>
             <?php endif; ?>
 
             <?php if (!$config['configurado']): ?>

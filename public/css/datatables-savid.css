@@ -267,6 +267,22 @@
     color:#0f172a;
 }
 
+/* Encabezado fijo dentro de un wrapper con scroll interno acotado (ver
+   data-dt-scroll-wrap-class en datatables-savid.js buildDom() y app.css
+   .sihos-auditoria-glosa-scroll). Tiene que vivir EN ESTE ARCHIVO, no en
+   app.css: la regla de arriba (position:relative, misma especificidad,
+   0,2,3) gana el empate porque este archivo se carga después en
+   app/views/layouts/main.php — confirmado con captura real que la versión
+   en app.css no tenía efecto. Solo la fila de nombres de columna, no la
+   de filtros por columna (.savid-dt-filters) que agrega
+   addColumnFilters(): apilar ambas requeriría un `top` fijo dependiente
+   de una altura de fila que no es constante entre temas. */
+.sihos-auditoria-glosa-scroll table.dataTable thead > tr:not(.savid-dt-filters) th{
+    position:sticky;
+    top:0;
+    z-index:2;
+}
+
 .savid-dt-shell table.dataTable tbody td{
     padding:9px 12px;
     border-bottom:1px solid rgba(255,255,255,.06);

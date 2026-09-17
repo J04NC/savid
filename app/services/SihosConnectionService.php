@@ -41,6 +41,8 @@ class SihosConnectionService
             'password_configurada' => !empty($row['password_cifrado'] ?? null),
             'usuario_escritura' => $row['usuario_escritura'] ?? '',
             'password_escritura_configurada' => !empty($row['password_escritura_cifrado'] ?? null),
+            'usuario_interlab' => $row['usuario_interlab'] ?? '',
+            'password_interlab_configurada' => !empty($row['password_interlab_cifrado'] ?? null),
             'configurado' => $row !== null,
         ];
     }
@@ -56,6 +58,8 @@ class SihosConnectionService
         $charset = trim((string)($post['charset'] ?? '')) ?: 'utf8mb4';
         $usuarioEscritura = trim((string)($post['usuario_escritura'] ?? ''));
         $passwordEscritura = (string)($post['password_escritura'] ?? '');
+        $usuarioInterlab = trim((string)($post['usuario_interlab'] ?? ''));
+        $passwordInterlab = (string)($post['password_interlab'] ?? '');
 
         if ($host === '' || $baseDatos === '' || $usuario === '' || $codiInst === '') {
             return ['success' => false, 'message' => 'Host, base de datos, usuario y CodiInst son obligatorios.'];
@@ -63,6 +67,7 @@ class SihosConnectionService
 
         $passwordCifrado = $password !== '' ? SihosCredentialCipher::encrypt($password) : null;
         $passwordEscrituraCifrado = $passwordEscritura !== '' ? SihosCredentialCipher::encrypt($passwordEscritura) : null;
+        $passwordInterlabCifrado = $passwordInterlab !== '' ? SihosCredentialCipher::encrypt($passwordInterlab) : null;
 
         $this->configRepository->upsert($empresaId, [
             'host' => $host,
@@ -74,6 +79,8 @@ class SihosConnectionService
             'charset' => $charset,
             'usuario_escritura' => $usuarioEscritura,
             'password_escritura_cifrado' => $passwordEscrituraCifrado,
+            'usuario_interlab' => $usuarioInterlab,
+            'password_interlab_cifrado' => $passwordInterlabCifrado,
         ]);
 
         return ['success' => true, 'message' => 'Conexión de SIHOS guardada.'];

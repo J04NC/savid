@@ -131,6 +131,110 @@ class SihosExternalRepository
     }
 
     /**
+     * MAPA DE ESQUEMA — desglose por ítem de una glosa (cargo/medicamento/
+     * insumo puntual), investigado en vivo el 2026-09-16 porque no existe
+     * documentación ni código fuente confiable de esto (el mirror local en
+     * sihos/ está desactualizado — el endpoint real que lo expone,
+     * modulos/glosas/detaglos_ajax.php, NI SIQUIERA EXISTE en ese mirror).
+     * Se confirmó capturando tráfico de red real del navegador contra una
+     * instalación productiva (Hospital San Antonio, Roldanillo, GLO-85987):
+     *
+     *   POST modulos/glosas/detaglos_ajax.php
+     *   Body: Accion=CargDeta&NumeGlos=85987&CodiGlos=GLO&ConsDeta=1
+     *   → JSON con un registro por cada ítem de DetaFact glosado, incluyendo
+     *     el monto exacto de esa glosa para ese ítem puntual (campo ValoGlos
+     *     en el JSON) — NO es un cálculo hecho en el navegador ni un reparto
+     *     proporcional del agregado: es un dato real devuelto por el
+     *     servidor, uno por uno.
+     *
+     * La tabla detrás de eso es **DetaCarg** (no aparece en ninguna búsqueda
+     * por nombre obvio — "Cargo"/"Glosa"/"Tarifa" — porque el nombre no las
+     * combina; se identificó por indicación directa, no por descubrimiento
+     * propio). Verificada con `DESCRIBE` y cruzada valor por valor contra
+     * pantalla real:
+     *
+     *   DetaCarg.CodiInEn/CodiAnEn/CodiDoEn/NumeDoEn  → EncaCont de la glosa (CodiInst/CodiAno/CodiDocu/NumeDocu)
+     *   DetaCarg.DetaGlos_Id                          → DetaGlos.ConsDeta (a qué "concepto" agregado pertenece este ítem)
+     *   DetaCarg.CodiInLi/CodiDoLi/NumeDoLi/ConsDeFaLi → DetaFact (CodiInst/CodiDocu='LIQ'/NumeFact/ConsDeFa) — el ítem exacto
+     *   DetaCarg.ValoCarg                             → monto de glosa de ESE ítem puntual
+     *
+     * SUM(DetaCarg.ValoCarg) para un (CodiDoEn,NumeDoEn,DetaGlos_Id) dado
+     * siempre cuadra exacto con DetaGlos.Valor de esa misma fila — verificado
+     * en 3 casos reales (GLO-85987: 11 filas sumando 22.075; GLO-87883: 4
+     * filas sumando 30.600; GLO-79913: 9 filas, una por cada DetaGlos_Id
+     * distinto ahí porque esa glosa se generó automáticamente con un
+     * concepto por ítem en vez de uno consolidado).
+     *
+     * OJO — cobertura parcial: en esta institución, DetaGlos tiene 88.732
+     * glosas históricas pero DetaCarg solo cubre 4.000 (~4.5%) — es una
+     * funcionalidad que SIHOS agregó en algún momento posterior y NO se
+     * "retro-llenó" para glosas viejas. No asumir que toda glosa antigua
+     * tiene desglose en DetaCarg; consultarla siempre con LEFT JOIN /
+     * verificación de existencia, nunca como fuente obligatoria.
+     *
+     * No se agregó ningún método fetch* para DetaCarg todavía — esto es
+     * solo el mapa de esquema para cuando haga falta (p. ej. si el reporte
+     * de Auditoría Glosa necesita mostrar el desglose por ítem, o si la
+     * generación del CSV de conclusión llegara a necesitarlo).
+     */
+
+    /**
+     * Código(s) de documento que REALMENTE tienen detalle en DetaGlos para
+     * esta institución — a diferencia de resolveCodigosDocumentoPorAplicacion(),
+     * aquí NO se asume que el "rol" de negocio (DocuApli) coincide con dónde
+     * vive el detalle valorizado de la glosa. Verificado con datos reales
+     * (Hospital San Antonio, Roldanillo): DocuApli=68 ("GLOSA ACEPTADA O
+     * CONCLUIDA", CodiDocu='GLC') es el documento que SihosCruceReconocimientoService
+     * usa para el cruce con presupuesto/contabilidad, pero el detalle en
+     * DetaGlos (100.310 líneas) está TODO sobre CodiDocu='GLO' ("GLOSA EN
+     * TRÁNSITO", DocuApli=48) — 'GLC' no tiene ninguna fila en DetaGlos en
+     * esa instalación. Fijar un DocuApli de antemano habría dejado el
+     * reporte de Auditoría Glosa sin resultados en esa empresa.
+     *
+     * @return string[]
+     */
+    public function resolveCodigosGlosaConDetalle(): array
+    {
+        $stmt = $this->connect()->prepare('SELECT DISTINCT CodiDocu FROM DetaGlos WHERE CodiInst = ?');
+        $stmt->execute([$this->codiInst()]);
+
+        return array_column($stmt->fetchAll(), 'CodiDocu');
+    }
+
+    /**
+     * Prefijo(s) de 2 dígitos de la familia de cuenta de cartera de esta
+     * institución, derivados de `TipoUsua.CodiCont` — NO el código exacto.
+     * Hospital San Antonio (Roldanillo) usa la familia 14 (140901,
+     * 140903...), Hospital Gonzalo Contreras (La Unión) usa la familia 13
+     * (13190101, 13190301...).
+     *
+     * Por qué prefijo y no código exacto (corrección 2026-09-11, caso real
+     * FE-508020 de Roldanillo, verificado contra el "Auditor de
+     * Referencias" nativo de SIHOS): la cartera de una factura puede
+     * RECLASIFICARSE, con el tiempo, a subcuentas de la misma familia que
+     * NO están en TipoUsua.CodiCont — ese catálogo solo lista las cuentas
+     * de asignación INICIAL por tipo de pagador (p. ej. 140903), no las de
+     * reclasificación posterior (140921, 147511, vistas en ese caso real).
+     * Usar el código exacto dejaba el saldo en $0 (la cuenta original ya
+     * está en $0, el saldo real quedó en la cuenta reclasificada) — un
+     * primer intento de "cero hardcode" que terminó siendo demasiado
+     * estricto. El prefijo de 2 dígitos (familia contable, clase 14/13 de
+     * Deudores) es lo que la consulta original del usuario ya usaba
+     * (`LIKE '14%'`) y coincide con cómo el propio SIHOS calcula el saldo.
+     *
+     * @return string[] prefijos de 2 caracteres, sin '%'
+     */
+    public function resolvePrefijosCuentaCarteraPorTipoUsuario(): array
+    {
+        $stmt = $this->connect()->prepare(
+            "SELECT DISTINCT LEFT(CodiCont, 2) AS prefijo FROM TipoUsua WHERE CodiInst = ? AND CodiCont IS NOT NULL AND CodiCont <> ''"
+        );
+        $stmt->execute([$this->codiInst()]);
+
+        return array_column($stmt->fetchAll(), 'prefijo');
+    }
+
+    /**
      * Nombre del tipo de usuario/pagador (Contributivo, Subsidiado POS,
      * Particular...) de la institución conectada, para mostrar en vez del
      * código crudo de EncaCont.TipoUsua.
@@ -148,6 +252,37 @@ class SihosExternalRepository
         }
 
         return $nombres;
+    }
+
+    /**
+     * Busca administradoras (EPS/aseguradoras/entidades pagadoras) en el
+     * catálogo CodiAdmi por código, NIT o nombre — para el autocompletado
+     * del filtro de administradora del reporte de Auditoría Glosa. CodiAdmi
+     * es un catálogo sin columna CodiInst (global a la conexión, no hay
+     * multi-institución que discriminar aquí).
+     *
+     * @return list<array{CodiAdmi:string,NitAdmin:?string,NombAdmi:?string}>
+     */
+    public function buscarAdministradoras(string $termino, int $limite = 20): array
+    {
+        $termino = trim($termino);
+        if ($termino === '') {
+            return [];
+        }
+
+        $limite = max(1, min($limite, 50));
+        $stmt = $this->connect()->prepare(
+            "SELECT CodiAdmi, NitAdmin, NombAdmi
+             FROM CodiAdmi
+             WHERE CodiAdmi LIKE ? OR NitAdmin LIKE ? OR NombAdmi LIKE ?
+             ORDER BY NombAdmi
+             LIMIT {$limite}"
+        );
+        $comienza = $termino . '%';
+        $contiene = '%' . $termino . '%';
+        $stmt->execute([$comienza, $comienza, $contiene]);
+
+        return $stmt->fetchAll();
     }
 
     /**
@@ -1298,6 +1433,117 @@ class SihosExternalRepository
     }
 
     /**
+     * Estado necesario para concluir por aceptación EPS/EAPB una glosa "en
+     * curso" con factura ya en saldo $0 (hallazgo del reporte de Auditoría
+     * Glosa) — ver SihosGlosaConclusionService::concluirAceptacionEps().
+     *
+     * Devuelve null si el documento no existe, si `DetaGlos` no tiene
+     * EXACTAMENTE una fila (alcance v1: glosas con un solo concepto — ver
+     * docblock de DetaCarg más arriba en este archivo), si `DetaCont` no
+     * tiene exactamente las 2 líneas esperadas (cuenta de orden + su
+     * contra-cuenta), o si ya existe una anotación `TipoDeta=2` con
+     * documento asociado (ya se concluyó antes — idempotencia).
+     *
+     * Verificado contra 5 casos reales de "EPS levanta glosa" (Hospital San
+     * Antonio, Roldanillo, 2026-09-16): siempre `TipoDeta=2, TipoCond=2`
+     * (NO TipoCond=3 — ese código, combinado con TipoDeta=1, significa algo
+     * distinto: respuesta de la IPS, no aceptación de la EPS), y siempre un
+     * documento GLC de exactamente 2 líneas (la cuenta de orden positiva +
+     * su contra-cuenta 8915.17 en negativo, sin cartera ni cuenta de
+     * ingreso real — esas solo se tocan con aceptación IPS, confirmado por
+     * el usuario 2026-09-16).
+     */
+    public function fetchEstadoParaConcluirGlosaAceptacionEps(string $codiDocuGlosa, string $numeGlosa): ?array
+    {
+        $codiInst = $this->codiInst();
+
+        $stmt = $this->connect()->prepare(
+            'SELECT Anulado, FechDocu, TiDoTerc, NuDoTerc, CodiCent FROM EncaCont
+             WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?'
+        );
+        $stmt->execute([$codiInst, $codiDocuGlosa, $numeGlosa]);
+        $glosa = $stmt->fetch();
+        if ($glosa === false) {
+            return null;
+        }
+
+        $stmt = $this->connect()->prepare(
+            'SELECT ConsDeta, Valor FROM DetaGlos WHERE CodiInst = ? AND CodiDocu = ? AND NumeGlos = ?'
+        );
+        $stmt->execute([$codiInst, $codiDocuGlosa, $numeGlosa]);
+        $detaGlosFilas = $stmt->fetchAll();
+        if (count($detaGlosFilas) !== 1) {
+            return null;
+        }
+        $detaGlos = $detaGlosFilas[0];
+
+        $stmt = $this->connect()->prepare(
+            'SELECT CodiCont, TiDoRefe, NuDoRefe, Valor FROM DetaCont
+             WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?'
+        );
+        $stmt->execute([$codiInst, $codiDocuGlosa, $numeGlosa]);
+        $detaContFilas = $stmt->fetchAll();
+        if (count($detaContFilas) !== 2) {
+            return null;
+        }
+
+        $cuentaOrden = null;
+        $cuentaContra = null;
+        $tiDoRefe = null;
+        $nuDoRefe = null;
+        foreach ($detaContFilas as $linea) {
+            $tiDoRefe = $linea['TiDoRefe'];
+            $nuDoRefe = (int)$linea['NuDoRefe'];
+            if ((float)$linea['Valor'] > 0) {
+                $cuentaOrden = $linea['CodiCont'];
+            } else {
+                $cuentaContra = $linea['CodiCont'];
+            }
+        }
+        if ($cuentaOrden === null || $cuentaContra === null) {
+            return null;
+        }
+
+        $stmt = $this->connect()->prepare(
+            'SELECT ConsDeta FROM AnotGlos
+             WHERE CodiInst = ? AND CodiDocu = ? AND NumeGlos = ? AND TipoDeta = 2 AND CoDoCont <> \'\''
+        );
+        $stmt->execute([$codiInst, $codiDocuGlosa, $numeGlosa]);
+        if ($stmt->fetch() !== false) {
+            return null;
+        }
+
+        $stmt = $this->connect()->prepare(
+            "SELECT CodiAno, CentCost, GlosCurs FROM DetaFaCr
+             WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ? AND GlosCurs > 0"
+        );
+        $stmt->execute([$codiInst, $tiDoRefe, $nuDoRefe]);
+        $centrosCosto = array_map(
+            static fn (array $f): array => [
+                'CodiAno' => $f['CodiAno'],
+                'CentCost' => $f['CentCost'],
+                'GlosCurs' => (float)$f['GlosCurs'],
+            ],
+            $stmt->fetchAll()
+        );
+
+        return [
+            'Anulado' => (int)$glosa['Anulado'],
+            'FechDocu' => (string)$glosa['FechDocu'],
+            'TiDoTerc' => $glosa['TiDoTerc'],
+            'NuDoTerc' => $glosa['NuDoTerc'],
+            'CodiCent' => $glosa['CodiCent'],
+            'ConsDetaGlos' => (int)$detaGlos['ConsDeta'],
+            'ValorGlosa' => (float)$detaGlos['Valor'],
+            'CuentaOrden' => $cuentaOrden,
+            'CuentaContra' => $cuentaContra,
+            'TiDoRefe' => $tiDoRefe,
+            'NuDoRefe' => $nuDoRefe,
+            'CentrosCosto' => $centrosCosto,
+        ];
+    }
+
+    /**
      * Análogo a fetchAjustePrevio() pero para la reclasificación de cuenta
      * de notas de vigencia anterior (sección 5b): la clave de búsqueda es
      * la propia NOTA que se corrige (no la factura), porque la nota de
@@ -1390,6 +1636,309 @@ class SihosExternalRepository
             'CodiCent' => $nota['CodiCent'],
             'Lineas4312' => $lineas4312,
         ];
+    }
+
+    /**
+     * Reporte "Auditoría Glosa": universo base de glosas (EncaCont con
+     * detalle en DetaGlos) con la factura que referencian (vía
+     * TiDoRefe/NuDoRefe), su tercero, su administradora/EPS y su tipo de
+     * usuario/pagador. Filtra por administradora (código exacto, elegido
+     * vía autocompletado sobre CodiAdmi — ver buscarAdministradoras()) y
+     * tipo de usuario en SQL, no en PHP.
+     *
+     * `fv.CodiAdmi` (no CodiTerc) es la relación real factura→EPS: `c`
+     * (CodiTerc, vía TiDoTerc/NuDoTerc) es el TERCERO de la factura — en la
+     * práctica el paciente atendido, no el pagador — verificado con datos
+     * reales que cruzar por NIT contra CodiAdmi.NitAdmin solo pegaba en
+     * ~0.5% de las facturas.
+     *
+     * @param string[] $codigosGlosa
+     * @return list<array{CodiDocu:string,NumeDocu:string,FechDocu:string,TiDoRefe:string,NuDoRefe:string,TipoUsua:?string,NombTipo:?string,NuDoTerc:?string,NombTerc:?string,CodiAdmi:?string,NombAdmi:?string,Valor:float}>
+     */
+    public function fetchGlosasBase(
+        array $codigosGlosa,
+        ?string $fechaIni,
+        string $fechaFin,
+        string $codigoAdministradora = '',
+        string $tipoUsuario = ''
+    ): array {
+        if ($codigosGlosa === []) {
+            return [];
+        }
+
+        $ph = implode(',', array_fill(0, count($codigosGlosa), '?'));
+        $condicionesExtra = '';
+        $paramsExtra = [];
+
+        if ($fechaIni !== null && $fechaIni !== '') {
+            $condicionesExtra .= ' AND e.FechDocu >= ?';
+            $paramsExtra[] = $fechaIni;
+        }
+
+        if ($codigoAdministradora !== '') {
+            $condicionesExtra .= ' AND fv.CodiAdmi = ?';
+            $paramsExtra[] = $codigoAdministradora;
+        }
+
+        if ($tipoUsuario !== '') {
+            $condicionesExtra .= ' AND fv.TipoUsua = ?';
+            $paramsExtra[] = $tipoUsuario;
+        }
+
+        $sql = "
+            SELECT e.CodiDocu, e.NumeDocu, e.FechDocu, e.TiDoRefe, e.NuDoRefe,
+                   fv.TipoUsua, tu.NombTipo, fv.NuDoTerc, c.NombTerc, fv.CodiAdmi, ca.NombAdmi,
+                   d.Valor
+            FROM EncaCont e
+            INNER JOIN (
+                SELECT CodiInst, CodiDocu, NumeGlos, SUM(Valor) AS Valor
+                FROM DetaGlos
+                WHERE CodiInst = ?
+                GROUP BY CodiInst, CodiDocu, NumeGlos
+            ) d ON e.CodiInst = d.CodiInst AND e.CodiDocu = d.CodiDocu AND e.NumeDocu = d.NumeGlos
+            INNER JOIN EncaCont fv ON fv.CodiInst = e.CodiInst AND fv.CodiDocu = e.TiDoRefe AND fv.NumeDocu = e.NuDoRefe
+            INNER JOIN CodiTerc c ON c.TipoDocu = fv.TiDoTerc AND c.NumeTerc = fv.NuDoTerc
+            LEFT JOIN TipoUsua tu ON tu.CodiInst = fv.CodiInst AND tu.CodiTipo = fv.TipoUsua
+            LEFT JOIN CodiAdmi ca ON ca.CodiAdmi = fv.CodiAdmi
+            WHERE e.CodiInst = ?
+              AND e.CodiDocu IN ({$ph})
+              AND e.Causado = '1' AND e.Anulado <> '1'
+              AND e.FechDocu <= ?
+              {$condicionesExtra}
+            ORDER BY fv.TipoUsua, fv.NuDoTerc DESC
+        ";
+        $stmt = $this->connect()->prepare($sql);
+        $stmt->execute([
+            $this->codiInst(),
+            $this->codiInst(), ...$codigosGlosa, $fechaFin,
+            ...$paramsExtra,
+        ]);
+
+        return $stmt->fetchAll();
+    }
+
+    /**
+     * Anotaciones de glosa (AnotGlos) agregadas por TODO documento de glosa
+     * de la institución (sin acotar a un lote de claves) — reemplaza en UNA
+     * sola pasada las 4 subconsultas de aceptación/conciliación (IPS/EPS)
+     * más la fecha de la última anotación de la consulta original del
+     * usuario (esa combinaba MAX implícito vía "GROUP BY + ORDER BY", que
+     * MySQL no garantiza sin ONLY_FULL_GROUP_BY — aquí se usa MAX(FechAnot)
+     * real).
+     *
+     * Deliberadamente NO se acota por lote de NumeGlos (a diferencia de un
+     * primer diseño con chunking): con instalaciones grandes (~86.000
+     * glosas) trocear en cientos de consultas multiplicó los round-trips de
+     * red hacia SIHOS y la petición pasó de ~49s (la consulta original,
+     * monolítica, en una sola conexión) a ~4 minutos. Una sola consulta
+     * agregada por CodiDocu (1-2 valores) es más barata que cientos de
+     * round-trips, incluso si trae de más filas que las que se van a usar.
+     *
+     * Solo se filtra `FechAnot <= fechaCorte` (sin cota inferior): la
+     * pregunta es el estado de la glosa AL CORTE, no si la anotación cayó
+     * dentro del rango fecha_inicio/fecha_fin de captura de la glosa —
+     * una glosa abierta dentro del rango puede resolverse mucho después.
+     *
+     * @param string[] $codigosGlosa
+     * @return array<string, array{AcepIPS:float,AcepEPS:float,UltimaFechaAnot:?string}> indexado por "CodiDocu-NumeGlos"
+     */
+    public function fetchAnotacionesGlosaAgregadas(array $codigosGlosa, string $fechaCorte): array
+    {
+        if ($codigosGlosa === []) {
+            return [];
+        }
+
+        $phCodigos = implode(',', array_fill(0, count($codigosGlosa), '?'));
+
+        $sql = "
+            SELECT ag.CodiDocu, ag.NumeGlos,
+                   SUM(CASE WHEN ag.TipoDeta = '1' AND ag.TipoCond = 2 THEN ag.ValoAcep ELSE 0 END)
+                     + SUM(CASE WHEN ag.TipoDeta = '2' AND ag.TipoCond = 1 THEN ag.ValoAcep ELSE 0 END)
+                     + SUM(CASE WHEN ag.TipoDeta = '1' AND ag.TipoCond = 1 THEN ag.ValoAcep ELSE 0 END) AS AcepIPS,
+                   SUM(CASE WHEN ag.TipoDeta = '2' AND ag.TipoCond = 2 THEN ag.ValoAcep ELSE 0 END)
+                     + SUM(CASE WHEN ag.TipoDeta = '2' AND ag.TipoCond = 1 THEN ag.ValoRech ELSE 0 END)
+                     + SUM(CASE WHEN ag.TipoDeta = '1' AND ag.TipoCond = 1 THEN ag.ValoRech ELSE 0 END) AS AcepEPS,
+                   MAX(ag.FechAnot) AS UltimaFechaAnot
+            FROM AnotGlos ag
+            WHERE ag.CodiInst = ?
+              AND ag.CodiDocu IN ({$phCodigos})
+              AND ag.Causado = 1 AND ag.Anulado != 1
+              AND ag.FechAnot <= ?
+            GROUP BY ag.CodiDocu, ag.NumeGlos
+        ";
+        $stmt = $this->connect()->prepare($sql);
+        $stmt->execute([$this->codiInst(), ...$codigosGlosa, $fechaCorte]);
+
+        $porGlosa = [];
+        while ($fila = $stmt->fetch()) {
+            $porGlosa[$fila['CodiDocu'] . '-' . $fila['NumeGlos']] = [
+                'AcepIPS' => (float)$fila['AcepIPS'],
+                'AcepEPS' => (float)$fila['AcepEPS'],
+                'UltimaFechaAnot' => $fila['UltimaFechaAnot'],
+            ];
+        }
+
+        return $porGlosa;
+    }
+
+    /**
+     * Saldo agregado de una familia de cuentas (`DetaCont.CodiCont LIKE
+     * $prefijoCuenta`) por FACTURA referenciada (no por la glosa), para TODA
+     * la institución — usado para la cuenta de orden de glosas en trámite
+     * (prefijo '8333%'). NO usar para cartera: ver
+     * fetchSaldoCarteraPorFactura(), que resuelve el/los prefijo(s) por
+     * TipoUsua en vez de asumir uno fijo — el prefijo de cartera varía por
+     * institución (verificado: 14% en unas, 13% en otras), mientras que
+     * 8333 (cuenta de orden, memorando) sí se confirmó estable en las
+     * instalaciones revisadas.
+     *
+     * Sin `HAVING <> 0`: a diferencia de la consulta original del usuario,
+     * aquí SÍ interesa distinguir "saldo exactamente $0" de "sin ninguna
+     * línea contable en esa cuenta" — es justo el caso que dispara la
+     * alerta "glosa en curso con factura saldada" (ver
+     * SihosAuditoriaGlosaService).
+     *
+     * Deliberadamente SIN acotar a un lote de facturas (a diferencia de un
+     * primer diseño con condiciones OR por lote): con ~86.000 facturas
+     * referenciadas, trocear en cientos de consultas multiplicó los
+     * round-trips de red hacia SIHOS y la petición completa pasó de ~49s
+     * (la consulta original, monolítica) a ~4 minutos. Mismo criterio ya
+     * usado en fetchContabilidad4312PorDocumento(): una sola consulta
+     * agregada por CodiCont/Causado/Anulado es más barata que cientos de
+     * round-trips, aunque traiga de más filas que las que se van a usar.
+     *
+     * @return array<string, float> indexado por "TiDoRefe-NuDoRefe"
+     */
+    public function fetchSaldoCuentaPorFactura(string $prefijoCuenta): array
+    {
+        $sql = "
+            SELECT d.TiDoRefe, d.NuDoRefe, SUM(d.Valor) AS V
+            FROM EncaCont e
+            INNER JOIN DetaCont d ON e.CodiInst = d.CodiInst AND e.CodiDocu = d.CodiDocu AND e.NumeDocu = d.NumeDocu
+            WHERE e.CodiInst = ?
+              AND e.Causado = '1' AND e.Anulado <> '1'
+              AND d.CodiCont LIKE ?
+              AND d.TiDoRefe IS NOT NULL AND d.TiDoRefe <> ''
+            GROUP BY d.TiDoRefe, d.NuDoRefe
+        ";
+        $stmt = $this->connect()->prepare($sql);
+        $stmt->execute([$this->codiInst(), $prefijoCuenta]);
+
+        $porFactura = [];
+        while ($fila = $stmt->fetch()) {
+            $porFactura[$fila['TiDoRefe'] . '-' . $fila['NuDoRefe']] = (float)$fila['V'];
+        }
+
+        return $porFactura;
+    }
+
+    /**
+     * Saldo de cartera real por FACTURA referenciada, para TODA la
+     * institución — igual espíritu que fetchSaldoCuentaPorFactura() (sin
+     * acotar a un lote, sin HAVING <> 0), pero filtrando por el/los
+     * PREFIJO(S) de $prefijosCartera (ver
+     * resolvePrefijosCuentaCarteraPorTipoUsuario()) en vez de un prefijo
+     * LIKE fijo tipo '14%'.
+     *
+     * NO usar códigos exactos de cuenta aquí (ver docblock de
+     * resolvePrefijosCuentaCarteraPorTipoUsuario() — caso real FE-508020):
+     * la cartera de una factura puede reclasificarse a subcuentas de la
+     * misma familia que no están en el catálogo de asignación inicial por
+     * tipo de usuario.
+     *
+     * @param string[] $prefijosCartera prefijos de 2 caracteres, sin '%'
+     * @return array<string, float> indexado por "TiDoRefe-NuDoRefe"
+     */
+    public function fetchSaldoCarteraPorFactura(array $prefijosCartera): array
+    {
+        if ($prefijosCartera === []) {
+            return [];
+        }
+
+        $condiciones = implode(' OR ', array_fill(0, count($prefijosCartera), 'd.CodiCont LIKE ?'));
+        $paramsPrefijos = array_map(static fn (string $p): string => $p . '%', $prefijosCartera);
+
+        $sql = "
+            SELECT d.TiDoRefe, d.NuDoRefe, SUM(d.Valor) AS V
+            FROM EncaCont e
+            INNER JOIN DetaCont d ON e.CodiInst = d.CodiInst AND e.CodiDocu = d.CodiDocu AND e.NumeDocu = d.NumeDocu
+            WHERE e.CodiInst = ?
+              AND e.Causado = '1' AND e.Anulado <> '1'
+              AND ({$condiciones})
+              AND d.TiDoRefe IS NOT NULL AND d.TiDoRefe <> ''
+            GROUP BY d.TiDoRefe, d.NuDoRefe
+        ";
+        $stmt = $this->connect()->prepare($sql);
+        $stmt->execute([$this->codiInst(), ...$paramsPrefijos]);
+
+        $porFactura = [];
+        while ($fila = $stmt->fetch()) {
+            $porFactura[$fila['TiDoRefe'] . '-' . $fila['NuDoRefe']] = (float)$fila['V'];
+        }
+
+        return $porFactura;
+    }
+
+    /**
+     * Igual que fetchSaldoCuentaPorFactura() pero contra DetaNIIF
+     * (`idPartNIIF` en vez de `CodiCont`) — saldo NIIF de la familia de
+     * cuentas de orden de glosa (prefijo '8333%'). Mismo criterio "sin
+     * acotar a un lote" documentado ahí.
+     *
+     * @return array<string, float> indexado por "TiDoRefe-NuDoRefe"
+     */
+    public function fetchSaldoNiifPorFactura(string $prefijoCuenta): array
+    {
+        $sql = "
+            SELECT d.TiDoRefe, d.NuDoRefe, SUM(d.Valor) AS V
+            FROM EncaCont e
+            INNER JOIN DetaNIIF d ON e.CodiInst = d.CodiInst AND e.CodiDocu = d.CodiDocu AND e.NumeDocu = d.NumeDocu
+            WHERE e.CodiInst = ?
+              AND e.Causado = '1' AND e.Anulado <> '1'
+              AND d.idPartNIIF LIKE ?
+              AND d.TiDoRefe IS NOT NULL AND d.TiDoRefe <> ''
+            GROUP BY d.TiDoRefe, d.NuDoRefe
+        ";
+        $stmt = $this->connect()->prepare($sql);
+        $stmt->execute([$this->codiInst(), $prefijoCuenta]);
+
+        $porFactura = [];
+        while ($fila = $stmt->fetch()) {
+            $porFactura[$fila['TiDoRefe'] . '-' . $fila['NuDoRefe']] = (float)$fila['V'];
+        }
+
+        return $porFactura;
+    }
+
+    /**
+     * Glosa en curso "oficial" tal como la mantiene SIHOS de forma nativa
+     * en la cuenta abierta de la factura (`DetaFaCr.GlosCurs`), para TODA
+     * la institución — para compararla contra el `EnCurso` recalculado a
+     * partir de AnotGlos; las dos fuentes deberían coincidir, si divergen
+     * es una señal de auditoría propia. Mismo criterio "sin acotar a un
+     * lote" documentado en fetchSaldoCuentaPorFactura().
+     *
+     * @return array<string, float> indexado por "CodiDocu-NumeDocu" de la factura
+     */
+    public function fetchGlosaEnCursoOficial(): array
+    {
+        $sql = "
+            SELECT d.CodiDocu, d.NumeDocu, SUM(d.GlosCurs) AS VGC
+            FROM EncaCont e
+            INNER JOIN DetaFaCr d ON e.CodiInst = d.CodiInst AND e.CodiDocu = d.CodiDocu AND e.NumeDocu = d.NumeDocu
+            WHERE e.CodiInst = ?
+              AND e.Causado = '1' AND e.Anulado <> '1'
+            GROUP BY d.CodiDocu, d.NumeDocu
+        ";
+        $stmt = $this->connect()->prepare($sql);
+        $stmt->execute([$this->codiInst()]);
+
+        $porFactura = [];
+        while ($fila = $stmt->fetch()) {
+            $porFactura[$fila['CodiDocu'] . '-' . $fila['NumeDocu']] = (float)$fila['VGC'];
+        }
+
+        return $porFactura;
     }
 
     /**
@@ -1621,6 +2170,17 @@ class SihosExternalRepository
      *     primera versión, a pedido del usuario: solo el caso de retroactivo
      *     de vacaciones SIN vacación real).
      *
+     * SE INTENTÓ un ajuste puntual (2026-09-02, caso empleado CC 38892903):
+     * que la fila normal de `I.B.C. ARL` restara el valor CRUDO del
+     * retroactivo de vacaciones en vez del valor con piso (para que
+     * coincidiera con `ValoBase` real de la línea "RIESGOS PROFESIONALES
+     * A.R.L." de SIHOS, que excluye el retroactivo de vacaciones a
+     * cualquier valor). Se REVIRTIÓ a pedido del usuario — queda tal cual
+     * estaba: `I.B.C. ARL` de la fila normal usa la MISMA resta con piso
+     * que `I.B.C. PENSION`/`EPS`/`CCF` (ver `PISO DE 1 DÍA DE SALARIO
+     * MÍNIMO` arriba), así que las 4 quedan siempre iguales entre sí en la
+     * fila normal, con o sin retroactivo de vacaciones.
+     *
      * `I.B.C. ARL` de la fila de VACACIONES (real fusionada; en la
      * sintética ya era el caso) SÍ suma el retroactivo (`d.ValoEmpe+retro.ValoEmpe`,
      * igual que PENSION/EPS/CCF/Otros Parafiscales de esa misma fila) — a
@@ -1696,6 +2256,76 @@ class SihosExternalRepository
      * documentada arriba (cotización incompleta si se genera el archivo
      * antes de que SIHOS recalcule su propia línea) hasta definir una
      * fórmula robusta que no dependa de si SIHOS ya recalculó o no.
+     *
+     * DISTRIBUCIÓN EXACTA fila normal ↔ filas de novedad (2026-09-02, a
+     * pedido explícito del usuario, "el reporte debe ser fiel a lo que hay
+     * en SIHOS, los valores deben coincidir con SIHOS"): la fórmula de
+     * arriba (`(AFP.ValoEmpe+AFP.ValoPatr)` menos lo que corresponde a cada
+     * novedad) YA es "total real de SIHOS menos novedad" — el defecto real
+     * era que lo que se restaba no coincidía EXACTO con lo que cada fila de
+     * novedad realmente muestra: la resta usaba una tarifa condicionada a
+     * clase de riesgo (`if(arp.CodiClas in ('3','5'),26,16)`) que las filas
+     * de vacaciones/incapacidad/licencia maternidad/retroactivo NUNCA usan
+     * (todas calculan con tarifa fija — 16% pensión, 12.5% salud, 4%/2%/3%
+     * CCF/SENA/ICBF — sin mirar `ClasiARP`; verificado, a pedido del
+     * usuario NO se toca esa tarifa fija de las novedades). Caso real
+     * confirmado (empleado alto riesgo, `ClasiARP=3`, tarifa pensión real
+     * 26%): total SIHOS $1.085.400, fila vacaciones (16% fijo) $22.147 —
+     * la resta vieja (a 26%) quitaba $36.000 en vez de $22.147, dejando la
+     * fila normal en $1.049.400 en lugar de los $1.063.253 reales.
+     *
+     * Arreglo: la resta de vacaciones/retroactivo-vacaciones (`vac`/`retro`/
+     * `retroSolo`) ahora es UN solo término `CASE` — si hay vacación real
+     * (`vac.ValoEmpe IS NOT NULL`) suma vacación+retroactivo ANTES de
+     * multiplicar por la tarifa y redondear (igual que ya hace esa fila
+     * fusionada, `d.ValoEmpe+IFNULL(retro.ValoEmpe,0)`, en vez de restar dos
+     * piezas redondeadas por separado); si no hay vacación real pero sí
+     * retroactivo (`retroSolo.ValoEmpe IS NOT NULL`), usa
+     * `GREATEST(retroSolo.ValoEmpe,:smlvDiario)` — el piso de 1 día de
+     * salario mínimo sigue aplicando exactamente igual, porque es el MISMO
+     * valor (ya con el piso) que muestra la fila sintética. Las restas de
+     * incapacidad/licencia de maternidad pasan de tarifa condicionada a
+     * riesgo a tarifa fija (16%), igual que sus propias filas; la de
+     * licencia no remunerada ya estaba correcta (12% fijo, sin cambios).
+     * Mismo criterio aplicado a los 5 conceptos corregibles (pensión, salud,
+     * CCF, SENA, ICBF) — CCF/SENA/ICBF no restan incapacidad ni licencia no
+     * remunerada porque esas dos novedades tampoco generan esos aportes
+     * (verificado: sus propias filas los dejan en blanco).
+     *
+     * `COTIZACION ARL` NO se tocó — verificado con datos reales (8 meses,
+     * las 2 empresas) que NINGUNA fila de novedad muestra jamás un valor de
+     * ARL (siempre en blanco, coherente con que vacaciones/incapacidad/
+     * licencia no generan riesgo laboral nuevo) — así que "total real menos
+     * novedad(0)" ya se cumplía sin cambios; `(ARL.ValoPatr)` sigue siendo
+     * el valor que ya calculó SIHOS.
+     *
+     * Verificado con datos reales: reconciliación EXACTA (0 diferencias) en
+     * los 5 conceptos, para todos los empleados de Roldanillo y La Unión en
+     * los meses de febrero y agosto de 2026 (incluye el caso del empleado
+     * de alto riesgo). Sin cambios en las columnas de base (I.B.C.), ya
+     * verificadas antes; `Total_AFP` hereda el arreglo automáticamente por
+     * repetir la misma fórmula de `COTIZACION AFP`.
+     *
+     * `Total_AFP` (columna "Total", BI en la plantilla) de la fila NORMAL
+     * (2026-09-02, a pedido del usuario, "la columna BI debe ser igual a la
+     * suma del valor cotización y fondo de solidaridad"): tenía su PROPIA
+     * fórmula, `(AFP.ValoEmpe+AFP.ValoPatr)+FSolidaridad` — el valor CRUDO
+     * de SIHOS más el fondo, sin ninguna de las restas de vacaciones/
+     * incapacidad/licencia no remunerada/licencia de maternidad/retroactivo-
+     * vacaciones/piso de salario mínimo que sí aplica `COTIZACION AFP`. Verificado
+     * con datos reales: 195 de 1.013 filas en Roldanillo (~19%) y 18 de 148
+     * en La Unión (~12%) tenían `Total` ≠ `Valor Cotización + Fondo
+     * Solidaridad`, con diferencias de hasta $994.100 en un caso real. Se
+     * corrigió repitiendo la fórmula completa de `COTIZACION AFP` (mismas
+     * restas) y sumándole `FSolidaridad` — así `Total_AFP` queda
+     * garantizado, por construcción, igual a `COTIZACION AFP + FSolidaridad`
+     * en la fila normal. Las otras 5 ramas (vacaciones/incapacidad/licencia
+     * no remunerada/licencia de maternidad/retroactivo sintético) NO
+     * tenían este problema — ya calculaban `Total_AFP` repitiendo su propia
+     * fórmula de `COTIZACION AFP` (verificado, sin cambios ahí); tampoco
+     * cargan `FSolidaridad` (siempre `''` en esas 5 filas), consistente con
+     * que el Fondo de Solidaridad Pensional es un valor del período
+     * completo, no de una porción/novedad puntual.
      *
      * INCAPACIDAD PRÓRROGA (2026-09-01, a pedido del usuario): existe un
      * cuarto flag de incapacidad en `Concepto`, `EsIncaPr='1'` (incapacidad
@@ -1823,14 +2453,14 @@ select e.TipoDocu,e.NumePers,e.Ape1Pers,e.Ape2Pers,e.Nom1Pers,e.Nom2Pers,'VALLE'
 'NO' as 'IGE','' AS 'Inicio IGE','' AS 'Fin IGE','NO' as 'LMA','' AS 'Inicio LMA','' AS 'Fin LMA',
 'NO' as 'VAC', '' as 'INICIO VAC-LR','' as 'FIN VAC-LR','NO' AS AVP,'NO' AS VCT,'' AS 'Inicio VCT','' AS 'Fin VCT','' AS IRL,'' AS 'Inicio IRL','' AS 'Fin IRL','NO' AS 'Correcciones',
 e.Salario as Salario,'NO' AS 'Salario Integral','NO' AS 'Salario Variable',ctafp.NombTerc AS AFP,(d.Cantidad - if(retroSolo.ValoEmpe is null,0,1)) AS 'D_AFP',
-IBC.ValoEmpe-if(vac.ValoEmpe IS NULL,0,vac.ValoEmpe)-if(inca.ValoEmpe IS NULL,0,inca.ValoEmpe)-if(LM.ValoEmpe IS NULL,0,LM.ValoEmpe)-if(retroSolo.ValoEmpe is null,if(retro.ValoEmpe IS NULL,0,retro.ValoEmpe),GREATEST(retroSolo.ValoEmpe,:smlvDiario)) as 'I.B.C. PENSION',if(arp.CodiClas in ('3','5'),'26%','16%') AS Tarifa_AFP,(AFP.ValoEmpe+AFP.ValoPatr)-round((if(vac.ValoEmpe IS NULL,0,vac.ValoEmpe)*if(arp.CodiClas in ('3','5'),26,16))/100,-2)-round((if(inca.ValoEmpe IS NULL,0,inca.ValoEmpe)*if(arp.CodiClas in ('3','5'),26,16))/100,-2)-round((if(LNR.ValoEmpe IS NULL,0,LNR.ValoEmpe)*12)/100,-2)-round((if(LM.ValoEmpe IS NULL,0,LM.ValoEmpe)*if(arp.CodiClas in ('3','5'),26,16))/100,-2)-round((if(retroSolo.ValoEmpe is null,if(retro.ValoEmpe IS NULL,0,retro.ValoEmpe),GREATEST(retroSolo.ValoEmpe,:smlvDiario))*if(arp.CodiClas in ('3','5'),26,16))/100,-2) as 'COTIZACION AFP',
+IBC.ValoEmpe-if(vac.ValoEmpe IS NULL,0,vac.ValoEmpe)-if(inca.ValoEmpe IS NULL,0,inca.ValoEmpe)-if(LM.ValoEmpe IS NULL,0,LM.ValoEmpe)-if(retroSolo.ValoEmpe is null,if(retro.ValoEmpe IS NULL,0,retro.ValoEmpe),GREATEST(retroSolo.ValoEmpe,:smlvDiario)) as 'I.B.C. PENSION',if(arp.CodiClas in ('3','5'),'26%','16%') AS Tarifa_AFP,(AFP.ValoEmpe+AFP.ValoPatr)-(CASE WHEN vac.ValoEmpe IS NOT NULL THEN ROUND((vac.ValoEmpe+IFNULL(retro.ValoEmpe,0))*16/100,0) WHEN retroSolo.ValoEmpe IS NOT NULL THEN ROUND(GREATEST(retroSolo.ValoEmpe,:smlvDiario)*16/100,0) ELSE 0 END)-round((if(inca.ValoEmpe IS NULL,0,inca.ValoEmpe)*16)/100,-2)-round((if(LNR.ValoEmpe IS NULL,0,LNR.ValoEmpe)*12)/100,-2)-round((if(LM.ValoEmpe IS NULL,0,LM.ValoEmpe)*16)/100,-2) as 'COTIZACION AFP',
 if(arp.CodiClas in ('3','5'),'1. Actividades de alto riesgo','Sin Riesgo') as 'In_altoR','' AS 'Cotización Voluntaria Afiliado','' AS 'Cotización Voluntaria Empleador',
-fond.ValoEmpe as 'FSolidaridad','' AS 'Fondo Subsistencia','' AS 'Valor no Retenido',(AFP.ValoEmpe+AFP.ValoPatr)+if(fond.ValoEmpe is null,'',fond.ValoEmpe) as 'Total_AFP','NINGUNA' AS 'AFP Destino',
-cteps.NombTerc AS EPS,(d.Cantidad - if(retroSolo.ValoEmpe is null,0,1)) AS 'D_EPS',IBC.ValoEmpe-if(vac.ValoEmpe IS NULL,0,vac.ValoEmpe)-if(inca.ValoEmpe IS NULL,0,inca.ValoEmpe)-if(LM.ValoEmpe IS NULL,0,LM.ValoEmpe)-if(retroSolo.ValoEmpe is null,if(retro.ValoEmpe IS NULL,0,retro.ValoEmpe),GREATEST(retroSolo.ValoEmpe,:smlvDiario)) as 'I.B.C. EPS','12.50%' AS Tarifa,(EPS.ValoEmpe+EPS.ValoPatr)-round((if(vac.ValoEmpe IS NULL,0,vac.ValoEmpe)*12.5)/100,-2)-round((if(inca.ValoEmpe IS NULL,0,inca.ValoEmpe)*12.5)/100,-2)-round((if(LNR.ValoEmpe IS NULL,0,LNR.ValoEmpe)*8.5)/100,-2)-round((if(LM.ValoEmpe IS NULL,0,LM.ValoEmpe)*12.5)/100,-2)-round((if(retroSolo.ValoEmpe is null,if(retro.ValoEmpe IS NULL,0,retro.ValoEmpe),GREATEST(retroSolo.ValoEmpe,:smlvDiario))*12.5)/100,-2) as 'COTIZACION EPS',
+fond.ValoEmpe as 'FSolidaridad','' AS 'Fondo Subsistencia','' AS 'Valor no Retenido',(AFP.ValoEmpe+AFP.ValoPatr)-(CASE WHEN vac.ValoEmpe IS NOT NULL THEN ROUND((vac.ValoEmpe+IFNULL(retro.ValoEmpe,0))*16/100,0) WHEN retroSolo.ValoEmpe IS NOT NULL THEN ROUND(GREATEST(retroSolo.ValoEmpe,:smlvDiario)*16/100,0) ELSE 0 END)-round((if(inca.ValoEmpe IS NULL,0,inca.ValoEmpe)*16)/100,-2)-round((if(LNR.ValoEmpe IS NULL,0,LNR.ValoEmpe)*12)/100,-2)-round((if(LM.ValoEmpe IS NULL,0,LM.ValoEmpe)*16)/100,-2)+if(fond.ValoEmpe is null,0,fond.ValoEmpe) as 'Total_AFP','NINGUNA' AS 'AFP Destino',
+cteps.NombTerc AS EPS,(d.Cantidad - if(retroSolo.ValoEmpe is null,0,1)) AS 'D_EPS',IBC.ValoEmpe-if(vac.ValoEmpe IS NULL,0,vac.ValoEmpe)-if(inca.ValoEmpe IS NULL,0,inca.ValoEmpe)-if(LM.ValoEmpe IS NULL,0,LM.ValoEmpe)-if(retroSolo.ValoEmpe is null,if(retro.ValoEmpe IS NULL,0,retro.ValoEmpe),GREATEST(retroSolo.ValoEmpe,:smlvDiario)) as 'I.B.C. EPS','12.50%' AS Tarifa,(EPS.ValoEmpe+EPS.ValoPatr)-(CASE WHEN vac.ValoEmpe IS NOT NULL THEN ROUND((vac.ValoEmpe+IFNULL(retro.ValoEmpe,0))*12.5/100,0) WHEN retroSolo.ValoEmpe IS NOT NULL THEN ROUND(GREATEST(retroSolo.ValoEmpe,:smlvDiario)*12.5/100,0) ELSE 0 END)-round((if(inca.ValoEmpe IS NULL,0,inca.ValoEmpe)*12.5)/100,-2)-round((if(LNR.ValoEmpe IS NULL,0,LNR.ValoEmpe)*8.5)/100,-2)-round((if(LM.ValoEmpe IS NULL,0,LM.ValoEmpe)*12.5)/100,-2) as 'COTIZACION EPS',
 '0' AS 'Valor UPC','' AS 'No Autorización Incapacidad EG',inca.ValoEmpe as VInca,'' AS 'No Autorización LMA',LM.ValoEmpe as VLMA,'NINGUNA' AS 'EPS Destino',
 ctarl.NombTerc AS ARL,(d.Cantidad - if(retroSolo.ValoEmpe is null,0,1)) AS 'D_ARL',IBC.ValoEmpe-if(vac.ValoEmpe IS NULL,0,vac.ValoEmpe)-if(inca.ValoEmpe IS NULL,0,inca.ValoEmpe)-if(LM.ValoEmpe IS NULL,0,LM.ValoEmpe)-if(retroSolo.ValoEmpe is null,if(retro.ValoEmpe IS NULL,0,retro.ValoEmpe),GREATEST(retroSolo.ValoEmpe,:smlvDiario)) as 'I.B.C. ARL',ROUND(arp.PorcClAr,3) as 'TARIFA ARL','NINGUNA' AS Clase,'RIESGO 3' AS 'Centro de Trabajo','3861001' AS 'Actividad Económica',
 (ARL.ValoPatr) as 'COTIZACION ARL',(d.Cantidad - if(retroSolo.ValoEmpe is null,0,1)) AS 'D_PARA',caja.NombTerc AS CCF,BPara.ValoEmpe-if(vac.ValoEmpe IS NULL,0,vac.ValoEmpe)-if(LM.ValoEmpe IS NULL,0,LM.ValoEmpe)-if(retroSolo.ValoEmpe is null,if(retro.ValoEmpe IS NULL,0,retro.ValoEmpe),GREATEST(retroSolo.ValoEmpe,:smlvDiario)) as 'I.B.C. CCF','4.00%' AS 'Tarifa CCF',
-Para.ValoPatr-round((if(vac.ValoEmpe IS NULL,0,vac.ValoEmpe)*4)/100,-2)-round((if(LM.ValoEmpe IS NULL,0,LM.ValoEmpe)*4)/100,-2)-round((if(retroSolo.ValoEmpe is null,if(retro.ValoEmpe IS NULL,0,retro.ValoEmpe),GREATEST(retroSolo.ValoEmpe,:smlvDiario))*4)/100,-2) as 'COTIZACION CCF',BPara.ValoEmpe-if(vac.ValoEmpe IS NULL,0,vac.ValoEmpe)-if(LM.ValoEmpe IS NULL,0,LM.ValoEmpe)-if(retroSolo.ValoEmpe is null,if(retro.ValoEmpe IS NULL,0,retro.ValoEmpe),GREATEST(retroSolo.ValoEmpe,:smlvDiario)) AS 'IBC Otros Parafiscales','2.00%' AS 'Tarifa SENA',sena.ValoPatr-round((if(vac.ValoEmpe IS NULL,0,vac.ValoEmpe)*2)/100,-2)-round((if(LM.ValoEmpe IS NULL,0,LM.ValoEmpe)*2)/100,-2)-round((if(retroSolo.ValoEmpe is null,if(retro.ValoEmpe IS NULL,0,retro.ValoEmpe),GREATEST(retroSolo.ValoEmpe,:smlvDiario))*2)/100,-2) as 'COTIZACION SENA','3.00%' AS 'Tarifa ICBF',icbf.ValoPatr-round((if(vac.ValoEmpe IS NULL,0,vac.ValoEmpe)*3)/100,-2)-round((if(LM.ValoEmpe IS NULL,0,LM.ValoEmpe)*3)/100,-2)-round((if(retroSolo.ValoEmpe is null,if(retro.ValoEmpe IS NULL,0,retro.ValoEmpe),GREATEST(retroSolo.ValoEmpe,:smlvDiario))*3)/100,-2) as 'COTIZACION ICBF',ctafp.NumeTerc AS AFP_NIT,cteps.NumeTerc AS EPS_NIT,ctarl.NumeTerc AS ARL_NIT,caja.NumeTerc AS CCF_NIT
+Para.ValoPatr-(CASE WHEN vac.ValoEmpe IS NOT NULL THEN ROUND((vac.ValoEmpe+IFNULL(retro.ValoEmpe,0))*4/100,-2) WHEN retroSolo.ValoEmpe IS NOT NULL THEN ROUND(GREATEST(retroSolo.ValoEmpe,:smlvDiario)*4/100,-2) ELSE 0 END)-round((if(LM.ValoEmpe IS NULL,0,LM.ValoEmpe)*4)/100,-2) as 'COTIZACION CCF',BPara.ValoEmpe-if(vac.ValoEmpe IS NULL,0,vac.ValoEmpe)-if(LM.ValoEmpe IS NULL,0,LM.ValoEmpe)-if(retroSolo.ValoEmpe is null,if(retro.ValoEmpe IS NULL,0,retro.ValoEmpe),GREATEST(retroSolo.ValoEmpe,:smlvDiario)) AS 'IBC Otros Parafiscales','2.00%' AS 'Tarifa SENA',sena.ValoPatr-(CASE WHEN vac.ValoEmpe IS NOT NULL THEN ROUND((vac.ValoEmpe+IFNULL(retro.ValoEmpe,0))*2/100,-2) WHEN retroSolo.ValoEmpe IS NOT NULL THEN ROUND(GREATEST(retroSolo.ValoEmpe,:smlvDiario)*2/100,-2) ELSE 0 END)-round((if(LM.ValoEmpe IS NULL,0,LM.ValoEmpe)*2)/100,-2) as 'COTIZACION SENA','3.00%' AS 'Tarifa ICBF',icbf.ValoPatr-(CASE WHEN vac.ValoEmpe IS NOT NULL THEN ROUND((vac.ValoEmpe+IFNULL(retro.ValoEmpe,0))*3/100,-2) WHEN retroSolo.ValoEmpe IS NOT NULL THEN ROUND(GREATEST(retroSolo.ValoEmpe,:smlvDiario)*3/100,-2) ELSE 0 END)-round((if(LM.ValoEmpe IS NULL,0,LM.ValoEmpe)*3)/100,-2) as 'COTIZACION ICBF',ctafp.NumeTerc AS AFP_NIT,cteps.NumeTerc AS EPS_NIT,ctarl.NumeTerc AS ARL_NIT,caja.NumeTerc AS CCF_NIT
 from Empleado e
 inner join (
     select TipoDocu, NumePers, CodiAno, CAST(CodiMes AS SIGNED) as CodiMes,
@@ -2556,5 +3186,135 @@ where e.CodiInst=:codiInst";
         }
 
         return $resultado;
+    }
+
+    /**
+     * Catálogo de manuales tarifarios (`CodiManu`) para el selector de
+     * SIHOS/PROCESOS/TARIFA PROCEDIMIENTOS. `CodiManu` no tiene columna
+     * `CodiInst` en este esquema (no se filtra por institución — mismo caso
+     * que `CentCost`/`CodiAdmi`).
+     *
+     * @return array<string, string> CodiManu => NombManu, ordenado por nombre
+     */
+    public function fetchManuales(): array
+    {
+        $stmt = $this->connect()->query('SELECT CodiManu, NombManu FROM CodiManu ORDER BY NombManu');
+
+        $manuales = [];
+        while ($fila = $stmt->fetch()) {
+            $manuales[$fila['CodiManu']] = $fila['NombManu'];
+        }
+
+        return $manuales;
+    }
+
+    /**
+     * Catálogo de planes (`CodiPlan`) para el selector de la pantalla — en la
+     * práctica siempre son solo 2 (01=POS, 02=NO POS) y el 100% de los datos
+     * reales usan '01', pero se muestran ambos porque el usuario pidió que
+     * el plan quede seleccionable, no fijo. Sin columna `CodiInst` en este
+     * esquema.
+     *
+     * @return array<string, string> CodiPlan => NombPlan
+     */
+    public function fetchPlanes(): array
+    {
+        $stmt = $this->connect()->query('SELECT CodiPlan, NombPlan FROM CodiPlan ORDER BY CodiPlan');
+
+        $planes = [];
+        while ($fila = $stmt->fetch()) {
+            $planes[$fila['CodiPlan']] = $fila['NombPlan'];
+        }
+
+        return $planes;
+    }
+
+    /**
+     * Códigos de grupo quirúrgico (`GrupQuir.CodiGrup`) ya configurados para
+     * un manual concreto — usado para validar la columna `GrupQuir` de la
+     * plantilla de carga. A diferencia del importador legado de SIHOS
+     * (`modulos/procesos/tarifas/importartarifa.class.php`), que valida
+     * contra TODOS los grupos sin filtrar por manual, aquí sí se filtra por
+     * `CodiManu` — el PK real de `GrupQuir` es (CodiGrup, CodiManu).
+     *
+     * @return string[]
+     */
+    public function fetchGruposQuirurgicosPorManual(string $codiManu): array
+    {
+        $stmt = $this->connect()->prepare('SELECT CodiGrup FROM GrupQuir WHERE CodiManu = ?');
+        $stmt->execute([$codiManu]);
+
+        return array_column($stmt->fetchAll(), 'CodiGrup');
+    }
+
+    /**
+     * Nombre y códigos CUPS/SOAT del catálogo `CodiProc` para los códigos
+     * pedidos — usado para (a) validar que cada `CodiProc` de la plantilla
+     * exista en el catálogo de la institución y (b) mostrar el nombre del
+     * procedimiento en la vista previa/rejilla, sin traer la tabla completa.
+     *
+     * @param string[] $codigos
+     * @return array<string, array{NombProc:string,CodiCups:string,CodiSoat:string}> indexado por CodiProc
+     */
+    public function fetchProcedimientosPorCodigo(array $codigos): array
+    {
+        if ($codigos === []) {
+            return [];
+        }
+
+        $resultado = [];
+        foreach (array_chunk(array_unique($codigos), 500) as $lote) {
+            $ph = implode(',', array_fill(0, count($lote), '?'));
+            $stmt = $this->connect()->prepare(
+                "SELECT CodiProc, NombProc, CodiCups, CodiSoat FROM CodiProc WHERE CodiProc IN ({$ph})"
+            );
+            $stmt->execute($lote);
+            while ($fila = $stmt->fetch()) {
+                $resultado[$fila['CodiProc']] = [
+                    'NombProc' => $fila['NombProc'],
+                    'CodiCups' => $fila['CodiCups'],
+                    'CodiSoat' => $fila['CodiSoat'],
+                ];
+            }
+        }
+
+        return $resultado;
+    }
+
+    /**
+     * Tarifas actuales de `TariProc` para un manual+plan concreto, cruzadas
+     * con `CodiProc` para mostrar el nombre — fuente tanto de la rejilla de
+     * "tarifas actuales" de la pantalla como del "valor actual" que se
+     * compara contra cada fila del archivo cargado en la vista previa.
+     *
+     * @return array<string, array{NombProc:string,ValoUnit:?int,GrupQuir:?string,UVR:?float,UVRMax:?float,TipoTari:int,IndiUVB:?float,FechModi:string,UsuaModi:string}> indexado por CodiProc
+     */
+    public function fetchTarifasPorManual(string $codiManu, string $codiPlan): array
+    {
+        $stmt = $this->connect()->prepare(
+            'SELECT t.CodiProc, c.NombProc, t.ValoUnit, t.GrupQuir, t.UVR, t.UVRMax, t.TipoTari, t.IndiUVB, t.FechModi, t.UsuaModi
+             FROM TariProc t
+             INNER JOIN CodiProc c ON c.CodiProc = t.CodiProc
+             WHERE t.CodiManu = ? AND t.CodiPlan = ?
+             ORDER BY c.NombProc'
+        );
+        $stmt->execute([$codiManu, $codiPlan]);
+
+        $tarifas = [];
+        while ($fila = $stmt->fetch()) {
+            $tarifas[$fila['CodiProc']] = [
+                'NombProc' => $fila['NombProc'],
+                'ValoUnit' => $fila['ValoUnit'] !== null ? (int)$fila['ValoUnit'] : null,
+                'GrupQuir' => $fila['GrupQuir'] !== null && $fila['GrupQuir'] !== '' ? $fila['GrupQuir'] : null,
+                'UVR' => $fila['UVR'] !== null ? (float)$fila['UVR'] : null,
+                'UVRMax' => $fila['UVRMax'] !== null ? (float)$fila['UVRMax'] : null,
+                'TipoTari' => (int)$fila['TipoTari'],
+                'IndiUVB' => $fila['IndiUVB'] !== null ? (float)$fila['IndiUVB'] : null,
+                'FechModi' => $fila['FechModi'],
+                'UsuaModi' => $fila['UsuaModi'],
+            ];
+        }
+
+        return $tarifas;
     }
 }

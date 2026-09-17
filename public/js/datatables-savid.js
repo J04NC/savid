@@ -121,15 +121,23 @@
 
     /**
      * dom: B=botones, l=mostrar N, f=búsqueda global, t=tabla, i=info, p=paginación
+     *
+     * scrollWrapClass envuelve SOLO el token 't' (la tabla) en su propio
+     * div — necesario para un scroll vertical acotado con header sticky
+     * real (ver .sihos-auditoria-glosa-scroll en app.css): acotar la
+     * altura del .savid-dt-shell completo comprime también los controles
+     * (Botones/Mostrar/Buscar) y la paginación, que deben quedar siempre
+     * visibles fuera del área de scroll.
      */
-    function buildDom(paging, withButtons) {
+    function buildDom(paging, withButtons, scrollWrapClass) {
+        var t = scrollWrapClass ? ('<"' + scrollWrapClass + '"t>') : 't';
         if (!paging) {
-            return withButtons ? 'Bft' : 'ft';
+            return withButtons ? ('Bf' + t) : ('f' + t);
         }
         if (withButtons) {
-            return '<"savid-dt-bar-top"B><"savid-dt-bar-top2"lf>rt<"savid-dt-bar-bottom"ip>';
+            return '<"savid-dt-bar-top"B><"savid-dt-bar-top2"lf>r' + t + '<"savid-dt-bar-bottom"ip>';
         }
-        return '<"savid-dt-bar-top2"lf>rt<"savid-dt-bar-bottom"ip>';
+        return '<"savid-dt-bar-top2"lf>r' + t + '<"savid-dt-bar-bottom"ip>';
     }
 
     /** Sin scroll vertical interno: toda la tabla se muestra; la página hace scroll si hace falta. */
@@ -178,6 +186,8 @@
             ? tableEl.getAttribute('data-dt-server-url')
             : null;
 
+        var scrollWrapClass = tableEl.getAttribute('data-dt-scroll-wrap-class') || '';
+
         var opts = {
             language: SPANISH,
             pageLength: pageLength,
@@ -189,13 +199,27 @@
             lengthChange: paging,
             autoWidth: false,
             order: order,
-            dom: buildDom(paging, withButtons),
+            dom: buildDom(paging, withButtons, scrollWrapClass),
             columnDefs: [
                 { targets: 'no-dt-order', orderable: false },
                 { targets: '.crud-table-actions', orderable: false, searchable: false },
                 { targets: '.auditoria-th-actions', orderable: false, searchable: false }
             ]
         };
+
+        // Opt-in por tabla: la extensión FixedHeader ya está cargada en el
+        // layout (fixedHeader.min.js/css) pero ninguna tabla la activaba
+        // todavía. A diferencia de position:sticky puro, funciona con el
+        // scroll normal de la página (no exige un contenedor con altura
+        // acotada) y sincroniza el header también con el scroll
+        // horizontal — resuelve de raíz el problema real: el wrapper
+        // compartido .savid-dt-shell (overflow-x:auto) obliga a que
+        // overflow-y compute como 'auto' aunque se pida 'visible' (regla
+        // de la spec CSS), lo que ataba el sticky a ese div en vez de al
+        // viewport.
+        if (tableEl.getAttribute('data-dt-fixed-header') === '1') {
+            opts.fixedHeader = true;
+        }
 
         if (serverUrl) {
             opts.serverSide = true;
@@ -349,7 +373,14 @@
         }
 
         markReady(tableEl);
-        if (!isServerSide) {
+        // En modo servidor, los filtros por columna solo se agregan si el
+        // endpoint declara soporte explícito (data-dt-column-search="1"):
+        // el filtro dispara columns[i][search][value] en la petición AJAX,
+        // y no todo endpoint server-side existente lo lee (p. ej.
+        // auditoria/datos solo usa la búsqueda global) — sin este opt-in,
+        // el usuario vería un input que no filtra nada.
+        var columnSearchEnabled = !isServerSide || tableEl.getAttribute('data-dt-column-search') === '1';
+        if (columnSearchEnabled) {
             addColumnFilters(api, tableEl);
         }
         updateShellScroll(tableEl, api);

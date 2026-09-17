@@ -23,8 +23,15 @@ class S3StorageDriver implements StorageDriverInterface
     /** @var array<string, string> key => temp path */
     private array $tempFiles = [];
 
-    public function __construct()
+    /** Prefijos de key públicos — ver StorageService::publicPathPrefixes(). */
+    private array $publicPrefixes;
+
+    public function __construct(?array $publicPrefixes = null)
     {
+        // Fallback si se instancia fuera de StorageService::createFromEnv()
+        // (p. ej. un test que construya el driver directo): debe coincidir
+        // con StorageService::zoneDefinitions() al momento de escribir esto.
+        $this->publicPrefixes = $publicPrefixes ?? ['sgd/', 'empresas/', 'usuarios/', 'acad/'];
         $this->bucket = trim((string)(getenv('S3_BUCKET') ?: ''));
         $this->region = trim((string)(getenv('S3_REGION') ?: 'us-east-1'));
         $this->accessKey = trim((string)(getenv('S3_ACCESS_KEY') ?: ''));
@@ -170,19 +177,21 @@ class S3StorageDriver implements StorageDriverInterface
         return $keys;
     }
 
+    /**
+     * Privado por defecto (deny-by-default): solo devuelve URL pública para
+     * las zonas 'public' de StorageService::registerZones() (ver
+     * $this->publicPrefixes) — cualquier zona nueva/olvidada allí queda
+     * privada automáticamente.
+     */
     public function publicUrl(string $key): ?string
     {
-        if (str_starts_with($key, 'sgd_imports/')) {
-            return null;
+        foreach ($this->publicPrefixes as $prefix) {
+            if (str_starts_with($key, $prefix)) {
+                return $this->publicBaseUrl . '/' . $key;
+            }
         }
 
-        if (!str_starts_with($key, 'sgd/')
-            && !str_starts_with($key, 'empresas/')
-            && !str_starts_with($key, 'usuarios/')) {
-            return null;
-        }
-
-        return $this->publicBaseUrl . '/' . $key;
+        return null;
     }
 
     public function localDirectory(string $keyPrefix): string

@@ -209,6 +209,19 @@ class Router
         $sihosNominaPilaAccionMethods = ['nominaPilaExportar'];
 
         /*
+         * Misma razón: sihos/auditoriaGlosaBuscarAdministradora (autocompletado
+         * AJAX del filtro de administradora) no tiene ítem de menú propio — su
+         * pantalla es sihos/auditoriaGlosa.
+         */
+        $sihosAuditoriaGlosaAccionMethods = [
+            'auditoriaGlosaBuscarAdministradora',
+            'auditoriaGlosaDatos',
+            'auditoriaGlosaExportar',
+            'auditoriaGlosaExportarConcluirCsv',
+            'auditoriaGlosaConcluirDirecto',
+        ];
+
+        /*
          * Misma razón: sihos/nominaPilaCorreccionAplicar (la escritura AJAX
          * de la pantalla de corrección) no tiene ítem de menú propio — su
          * pantalla es sihos/nominaPilaCorreccion. El permiso fino ('guardar')
@@ -216,6 +229,36 @@ class Router
          * caiga al fallback genérico sobre el segmento raíz "sihos".
          */
         $sihosNominaPilaCorreccionAccionMethods = ['nominaPilaCorreccionAplicar'];
+
+        /*
+         * Misma razón: estas acciones AJAX de sihos/interfazLaboratorio no
+         * coinciden con la ruta exacta del ítem de menú ('sihos/interfazLaboratorio'),
+         * así que sin este caso especial caerían al fallback genérico sobre
+         * el segmento raíz "sihos" (Conexión SIHOS). El permiso fino
+         * ('procesar'/'guardar'/'eliminar', según la acción) se re-valida
+         * dentro del propio controller — aquí solo se exige 'ver' sobre el
+         * ítem real de la pantalla.
+         */
+        $sihosInterlabAccionMethods = [
+            'interfazLaboratorioProcesarResultado',
+            'interfazLaboratorioProcesarSolicitud',
+            'interfazLaboratorioHomologacionGuardar',
+            'interfazLaboratorioHomologacionEliminar',
+        ];
+
+        /*
+         * Misma razón: estas acciones de sihos/tarifaProcedimiento (descarga
+         * de plantilla, confirmar la carga) no coinciden con la ruta exacta
+         * del ítem de menú, así que sin este caso especial caerían al
+         * fallback genérico sobre el segmento raíz "sihos"
+         * (Conexión SIHOS). El permiso fino ('confirmar') se re-valida dentro
+         * del propio controller para tarifaProcedimientoConfirmar — aquí solo
+         * se exige 'ver' sobre el ítem real de la pantalla.
+         */
+        $sihosTarifaProcedimientoAccionMethods = [
+            'tarifaProcedimientoPlantilla',
+            'tarifaProcedimientoConfirmar',
+        ];
 
         if (SessionManager::userLogged()
             && $controllerName === 'UsuarioController'
@@ -256,8 +299,17 @@ class Router
                 && in_array($method, $sihosNominaPilaAccionMethods, true)
                 && PermisoService::can('sihos/nominaPila', 'ver'))
             && !($controllerName === 'SihosController'
+                && in_array($method, $sihosAuditoriaGlosaAccionMethods, true)
+                && PermisoService::can('sihos/auditoriaGlosa', 'ver'))
+            && !($controllerName === 'SihosController'
                 && in_array($method, $sihosNominaPilaCorreccionAccionMethods, true)
                 && PermisoService::can('sihos/nominaPilaCorreccion', 'ver'))
+            && !($controllerName === 'SihosController'
+                && in_array($method, $sihosInterlabAccionMethods, true)
+                && PermisoService::can('sihos/interfazLaboratorio', 'ver'))
+            && !($controllerName === 'SihosController'
+                && in_array($method, $sihosTarifaProcedimientoAccionMethods, true)
+                && PermisoService::can('sihos/tarifaProcedimiento', 'ver'))
             && !PermisoService::can($rutaCompleta, 'ver')) {
             http_response_code(403);
             exit('Acceso denegado.');

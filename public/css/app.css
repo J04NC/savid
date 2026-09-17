@@ -815,6 +815,10 @@ button:hover{
     overflow:visible;
 }
 
+.crud-form .crud-form-field-full{
+    grid-column:1 / -1;
+}
+
 /* Usuario CRUD: opción B — campos a la izquierda, foto/firma en columna lateral */
 .crud-form-usuario{
     display:block;
@@ -8196,7 +8200,285 @@ label.sgd-word-tool.sgd-word-import-trigger{
     font-weight:700;
 }
 
+/* Encabezado fijo — historial de intentos (2026-09-11), para no repetir
+   el mismo camino sin salida en el futuro:
+   1) position:sticky directo en .module-container .savid-dt-shell: NO
+      funciona — ese div tiene overflow-x:auto, y la especificación CSS
+      obliga a que overflow-y compute como 'auto' también (aunque se pida
+      'visible'), sin altura acotada real — el sticky queda atado a un
+      contenedor que nunca desplaza de verdad, así que no se fija.
+   2) Extensión oficial FixedHeader de DataTables: tampoco funciona aquí
+      — solo sincroniza el scroll horizontal cuando este ocurre en la
+      ventana o vía el scrollX nativo de DataTables; no sabe nada del
+      overflow-x:auto de nuestro .savid-dt-shell, así que el header clonado
+      queda desalineado de las columnas reales en cuanto se hace scroll
+      lateral (confirmado con captura real).
+   3) position:sticky + altura acotada en TODO .savid-dt-shell (vía
+      data-dt-shell-extra-class): tampoco sirve tal cual — ese div envuelve
+      además los controles de DataTables (Botones/Mostrar/Buscar) y la
+      paginación, así que acotar su altura los mete dentro del área de
+      scroll también — se pierden de vista junto con el header en vez de
+      quedar siempre visibles (confirmado con captura real).
+   4) Acotar la altura solo del DIV que envuelve la tabla en sí (token 't'
+      del `dom` de DataTables envuelto aparte, ver data-dt-scroll-wrap-class
+      → buildDom() en datatables-savid.js), no todo el shell: correcto para
+      el eje horizontal y para que los controles/paginación no se pierdan,
+      PERO el position:sticky puesto aquí (en app.css) seguía sin
+      funcionar — datatables-savid.css define
+      ".savid-dt-shell table.dataTable thead th{position:relative;...}"
+      con la MISMA especificidad (0,2,3) que cualquier selector razonable
+      de este archivo, y datatables-savid.css se carga DESPUÉS de app.css
+      en el layout (ver main.php) — en el empate, gana el que carga
+      después, así que "relative" pisaba "sticky" en silencio. Confirmado
+      con captura real: el wrapper sí acotaba correctamente (controles y
+      paginación quedaban fuera), pero el header igual se perdía en el
+      scroll.
+   5) SOLUCIÓN FINAL: la regla de position:sticky vive en
+      datatables-savid.css (no aquí), calificada con la clase del wrapper
+      de scroll (.sihos-auditoria-glosa-scroll table.dataTable thead th) —
+      misma especificidad que la regla que compite, pero en el MISMO
+      archivo y después de ella, así que gana por orden de cascada. */
+.sihos-auditoria-glosa-scroll{
+    max-height:70vh;
+    overflow-y:auto;
+    overflow-x:auto;
+}
+
 .seguridad-nunca{
     opacity:.6;
     font-style:italic;
+}
+
+/* Academic: ejercicio "Fill in the blanks" (toca-palabra / toca-hueco) */
+.acad-fillblanks-text{
+    line-height:2.2;
+    font-size:16px;
+}
+
+.acad-blank{
+    display:inline-block;
+    min-width:70px;
+    padding:2px 8px;
+    margin:0 3px;
+    border-bottom:2px solid #1dd1a1;
+    border-radius:4px 4px 0 0;
+    text-align:center;
+    cursor:pointer;
+    vertical-align:bottom;
+}
+
+.acad-blank.acad-blank-filled{
+    background:rgba(29,209,161,.15);
+}
+
+.acad-wordbank{
+    margin-top:14px;
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+}
+
+.acad-word-chip.acad-word-chip-selected{
+    outline:2px solid #1dd1a1;
+    outline-offset:2px;
+}
+
+.acad-word-chip.acad-word-chip-used{
+    display:none;
+}
+
+/* Academic: ejercicio "Sentence order" (toca-palabra / toca-hueco, huecos agrupados por oración) */
+.acad-order-scaffold{
+    display:flex;
+    gap:4px;
+    margin-bottom:10px;
+}
+
+.acad-order-scaffold-col{
+    flex:1;
+    text-align:center;
+    font-size:11px;
+    text-transform:uppercase;
+    opacity:.65;
+    font-weight:700;
+    border-bottom:1px dashed rgba(127,127,127,.4);
+    padding-bottom:4px;
+}
+
+.acad-order-row{
+    line-height:2.4;
+    margin:10px 0;
+    padding:6px 0;
+    border-bottom:1px solid rgba(127,127,127,.15);
+}
+
+.acad-order-slot{
+    display:inline-block;
+    min-width:70px;
+    padding:2px 8px;
+    margin:0 3px 6px;
+    border-bottom:2px solid #1dd1a1;
+    border-radius:4px 4px 0 0;
+    text-align:center;
+    cursor:pointer;
+    vertical-align:bottom;
+}
+
+.acad-order-slot.acad-order-slot-filled{
+    background:rgba(29,209,161,.15);
+}
+
+/* Academic: ejercicio "Tongue twister" (trabalenguas cronometrado) */
+.acad-tt-disclaimer{
+    background:rgba(255,193,7,.12);
+    border:1px solid rgba(255,193,7,.35);
+    border-radius:6px;
+    padding:8px 10px;
+    font-size:12.5px;
+}
+
+.acad-tt-history{
+    margin:10px 0;
+    padding:8px 10px;
+    background:rgba(127,127,127,.08);
+    border-radius:6px;
+}
+
+.acad-tt-history div{
+    margin:4px 0;
+}
+
+/* Academic: ejercicio "Dialogue" (role-play contra la máquina) */
+.acad-dlg-controls{
+    margin-bottom:14px;
+}
+
+.acad-dlg-turn{
+    max-width:85%;
+    margin:10px 0;
+    padding:10px 12px;
+    border-radius:12px;
+    background:rgba(127,127,127,.08);
+}
+
+.acad-dlg-turn-role1{
+    margin-right:auto;
+    border-bottom-left-radius:2px;
+}
+
+.acad-dlg-turn-role2{
+    margin-left:auto;
+    border-bottom-right-radius:2px;
+    background:rgba(52,152,219,.12);
+}
+
+.acad-dlg-turn-mine{
+    outline:2px solid #1dd1a1;
+    outline-offset:1px;
+}
+
+.acad-dlg-turn-header{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex-wrap:wrap;
+    margin-bottom:4px;
+}
+
+.acad-dlg-speaker{
+    font-size:11px;
+    text-transform:uppercase;
+    opacity:.65;
+    font-weight:700;
+}
+
+.acad-dlg-line{
+    margin:4px 0;
+    font-size:15px;
+}
+
+.acad-dlg-line.acad-dlg-line-hidden::before{
+    content:"🔒 Hidden — listen and recall";
+    opacity:.5;
+    font-style:italic;
+}
+
+/* SIHOS — Interfaz Laboratorio: pestañas Homologación/Solicitudes/Resultados */
+.sihos-interlab-tabs{
+    display:flex;
+    gap:8px;
+    margin:16px 0;
+    flex-wrap:wrap;
+}
+
+.sihos-interlab-tab-btn{
+    background:var(--surface-2,#2a2a2a);
+    border-color:var(--border-subtle,#444);
+    color:inherit;
+    opacity:.75;
+}
+
+.light-mode .sihos-interlab-tab-btn{
+    background:#eee;
+    border-color:#ccc;
+    color:#222;
+}
+
+.sihos-interlab-tab-btn.sihos-interlab-tab-activa{
+    background:#1abc9c;
+    border-color:#1abc9c;
+    color:#fff;
+    opacity:1;
+}
+
+.sihos-interlab-modal{
+    position:fixed;
+    inset:0;
+    z-index:1000;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:rgba(0,0,0,.5);
+}
+
+/* El atributo [hidden] tiene la MISMA especificidad que la clase de arriba;
+   sin esta regla, "display:flex" de .sihos-interlab-modal gana la cascada
+   (viene después) y el modal queda visible pese a [hidden] — bug real
+   detectado en pantalla: el modal de Homologación aparecía abierto al
+   entrar al ítem, sin que nadie hiciera clic en "Nueva homologación". */
+.sihos-interlab-modal[hidden]{
+    display:none;
+}
+
+.sihos-interlab-modal-caja{
+    background:var(--surface-1,#1e1e1e);
+    border:1px solid var(--border-subtle,#444);
+    border-radius:10px;
+    padding:20px;
+    width:100%;
+    max-width:420px;
+}
+
+.light-mode .sihos-interlab-modal-caja{
+    background:#fff;
+    border-color:#ccc;
+}
+
+.sihos-interlab-progreso{
+    margin-top:12px;
+    padding:10px 14px;
+    border-radius:8px;
+    background:var(--surface-2,#2a2a2a);
+    font-size:13px;
+}
+
+.light-mode .sihos-interlab-progreso{
+    background:#eee;
+}
+
+.sihos-interlab-progreso ul{
+    margin:8px 0 0;
+    padding-left:18px;
+    max-height:160px;
+    overflow-y:auto;
 }

@@ -18,6 +18,9 @@ class StorageService
 
     public const ZONE_ACAD_MEDIA = 'acad_media';
 
+    /** Cache efímero (TTL corto, ver SihosAuditoriaGlosaCache) de reportes SIHOS pesados — nunca público. */
+    public const ZONE_SIHOS_REPORTES = 'sihos_reportes';
+
     private static ?self $instance = null;
 
     private StorageDriverInterface $driver;
@@ -48,16 +51,17 @@ class StorageService
     public static function createFromEnv(): self
     {
         $driverName = strtolower(trim((string)(getenv('STORAGE_DRIVER') ?: 'local')));
+        $publicPrefixes = self::publicPathPrefixes();
 
         try {
             $driver = match ($driverName) {
-                's3' => new S3StorageDriver(),
-                'local' => new LocalStorageDriver(),
-                default => new LocalStorageDriver(),
+                's3' => new S3StorageDriver($publicPrefixes),
+                'local' => new LocalStorageDriver(null, null, $publicPrefixes),
+                default => new LocalStorageDriver(null, null, $publicPrefixes),
             };
         } catch (RuntimeException $e) {
             error_log('StorageService: ' . $e->getMessage() . ' — usando driver local.');
-            $driver = new LocalStorageDriver();
+            $driver = new LocalStorageDriver(null, null, $publicPrefixes);
         }
 
         return new self($driver);
@@ -253,18 +257,66 @@ class StorageService
         return $this->zones[$zone];
     }
 
+    /**
+     * Única fuente de verdad de qué zona es pública/privada y bajo qué
+     * segmento raíz de key vive — de aquí derivan registerZones() (los
+     * `path` callables completos), isPrivateKey() de esta clase, y los
+     * prefijos públicos que reciben ambos drivers (ver
+     * publicPathPrefixes() y createFromEnv()). Antes de esto había 3
+     * copias sueltas y desincronizadas de este mismo criterio (corregido
+     * 2026-09-11: una zona nueva marcada 'private' aquí podía terminar
+     * sirviéndose como pública porque los drivers tenían su propia lista
+     * aparte) — cualquier zona nueva se agrega SOLO aquí.
+     *
+     * @return array<string, array{visibility: string, root: string}>
+     */
+    private static function zoneDefinitions(): array
+    {
+        return [
+            self::ZONE_SGD => ['visibility' => 'public', 'root' => 'sgd'],
+            self::ZONE_SGD_MEDIA => ['visibility' => 'public', 'root' => 'sgd'],
+            self::ZONE_EMPRESAS => ['visibility' => 'public', 'root' => 'empresas'],
+            self::ZONE_USUARIOS => ['visibility' => 'public', 'root' => 'usuarios'],
+            self::ZONE_SGD_IMPORTS => ['visibility' => 'private', 'root' => 'sgd_imports'],
+            self::ZONE_ACAD_MEDIA => ['visibility' => 'public', 'root' => 'acad'],
+            self::ZONE_SIHOS_REPORTES => ['visibility' => 'private', 'root' => 'sihos_reportes'],
+        ];
+    }
+
+    /**
+     * Prefijos de key ("root/") de las zonas públicas — para los drivers,
+     * que no tienen acceso a esta clase (evita duplicar la lista ahí).
+     * Privado por defecto: cualquier zona que no aparezca aquí debe
+     * tratarse como privada.
+     *
+     * @return list<string>
+     */
+    public static function publicPathPrefixes(): array
+    {
+        $raices = [];
+        foreach (self::zoneDefinitions() as $def) {
+            if ($def['visibility'] === 'public') {
+                $raices[$def['root']] = true;
+            }
+        }
+
+        return array_map(static fn (string $root): string => $root . '/', array_keys($raices));
+    }
+
     private function registerZones(): void
     {
+        $definiciones = self::zoneDefinitions();
+
         $this->zones = [
             self::ZONE_SGD => [
-                'visibility' => 'public',
+                'visibility' => $definiciones[self::ZONE_SGD]['visibility'],
                 'path' => static fn (array $segments): array => array_merge(
                     ['sgd'],
                     array_map(static fn ($s) => (string)$s, $segments)
                 ),
             ],
             self::ZONE_SGD_MEDIA => [
-                'visibility' => 'public',
+                'visibility' => $definiciones[self::ZONE_SGD_MEDIA]['visibility'],
                 'path' => static fn (array $segments): array => array_merge(
                     ['sgd'],
                     array_map(static fn ($s) => (string)$s, $segments),
@@ -272,26 +324,33 @@ class StorageService
                 ),
             ],
             self::ZONE_EMPRESAS => [
-                'visibility' => 'public',
+                'visibility' => $definiciones[self::ZONE_EMPRESAS]['visibility'],
                 'path' => static fn (array $segments): array => ['empresas'],
             ],
             self::ZONE_USUARIOS => [
-                'visibility' => 'public',
+                'visibility' => $definiciones[self::ZONE_USUARIOS]['visibility'],
                 'path' => static fn (array $segments): array => ['usuarios'],
             ],
             self::ZONE_SGD_IMPORTS => [
-                'visibility' => 'private',
+                'visibility' => $definiciones[self::ZONE_SGD_IMPORTS]['visibility'],
                 'path' => static fn (array $segments): array => array_merge(
                     ['sgd_imports'],
                     array_map(static fn ($s) => (string)$s, $segments)
                 ),
             ],
             self::ZONE_ACAD_MEDIA => [
-                'visibility' => 'public',
+                'visibility' => $definiciones[self::ZONE_ACAD_MEDIA]['visibility'],
                 'path' => static fn (array $segments): array => array_merge(
                     ['acad'],
                     array_map(static fn ($s) => (string)$s, $segments),
                     ['media']
+                ),
+            ],
+            self::ZONE_SIHOS_REPORTES => [
+                'visibility' => $definiciones[self::ZONE_SIHOS_REPORTES]['visibility'],
+                'path' => static fn (array $segments): array => array_merge(
+                    ['sihos_reportes'],
+                    array_map(static fn ($s) => (string)$s, $segments)
                 ),
             ],
         ];
@@ -358,6 +417,12 @@ class StorageService
 
     private function isPrivateKey(string $key): bool
     {
-        return str_starts_with($key, 'sgd_imports/');
+        foreach (self::publicPathPrefixes() as $prefix) {
+            if (str_starts_with($key, $prefix)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

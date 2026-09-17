@@ -22,7 +22,7 @@ class SihosEmpresaConfigRepository
 
         $stmt = $this->pdo->prepare("
             SELECT id, empresa_id, host, puerto, base_datos, usuario, codi_inst, password_cifrado, charset,
-                   usuario_escritura, password_escritura_cifrado
+                   usuario_escritura, password_escritura_cifrado, usuario_interlab, password_interlab_cifrado
             FROM sihos_empresa_config
             WHERE empresa_id = ? {$nd}
             LIMIT 1
@@ -99,17 +99,17 @@ class SihosEmpresaConfigRepository
     }
 
     /**
-     * @param array{host:string,puerto:int,base_datos:string,usuario:string,codi_inst:string,password_cifrado:?string,charset:string,usuario_escritura:?string,password_escritura_cifrado:?string} $data
+     * @param array{host:string,puerto:int,base_datos:string,usuario:string,codi_inst:string,password_cifrado:?string,charset:string,usuario_escritura:?string,password_escritura_cifrado:?string,usuario_interlab:?string,password_interlab_cifrado:?string} $data
      */
     public function upsert(int $empresaId, array $data): void
     {
         $existing = $this->findByEmpresaId($empresaId);
 
         if ($existing !== null) {
-            $sql = 'UPDATE sihos_empresa_config SET host = ?, puerto = ?, base_datos = ?, usuario = ?, codi_inst = ?, charset = ?, usuario_escritura = ?';
+            $sql = 'UPDATE sihos_empresa_config SET host = ?, puerto = ?, base_datos = ?, usuario = ?, codi_inst = ?, charset = ?, usuario_escritura = ?, usuario_interlab = ?';
             $params = [
                 $data['host'], $data['puerto'], $data['base_datos'], $data['usuario'],
-                $data['codi_inst'], $data['charset'], $data['usuario_escritura'],
+                $data['codi_inst'], $data['charset'], $data['usuario_escritura'], $data['usuario_interlab'],
             ];
 
             if ($data['password_cifrado'] !== null) {
@@ -122,6 +122,11 @@ class SihosEmpresaConfigRepository
                 $params[] = $data['password_escritura_cifrado'];
             }
 
+            if ($data['password_interlab_cifrado'] !== null) {
+                $sql .= ', password_interlab_cifrado = ?';
+                $params[] = $data['password_interlab_cifrado'];
+            }
+
             $sql .= ' WHERE empresa_id = ?';
             $params[] = $empresaId;
 
@@ -132,8 +137,8 @@ class SihosEmpresaConfigRepository
         }
 
         $stmt = $this->pdo->prepare('
-            INSERT INTO sihos_empresa_config (empresa_id, host, puerto, base_datos, usuario, codi_inst, password_cifrado, charset, usuario_escritura, password_escritura_cifrado, estado_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            INSERT INTO sihos_empresa_config (empresa_id, host, puerto, base_datos, usuario, codi_inst, password_cifrado, charset, usuario_escritura, password_escritura_cifrado, usuario_interlab, password_interlab_cifrado, estado_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
         ');
         $stmt->execute([
             $empresaId,
@@ -146,6 +151,8 @@ class SihosEmpresaConfigRepository
             $data['charset'],
             $data['usuario_escritura'],
             $data['password_escritura_cifrado'],
+            $data['usuario_interlab'],
+            $data['password_interlab_cifrado'],
         ]);
     }
 }

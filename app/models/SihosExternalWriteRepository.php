@@ -979,6 +979,281 @@ class SihosExternalWriteRepository
     }
 
     /**
+     * Concluye por aceptación EPS/EAPB una glosa "en curso" cuya factura
+     * referenciada ya está en saldo $0 (hallazgo del reporte de Auditoría
+     * Glosa) — ver SihosGlosaConclusionService::concluirAceptacionEps() y
+     * el docblock de fetchEstadoParaConcluirGlosaAceptacionEps() en
+     * SihosExternalRepository para el porqué de `TipoDeta=2, TipoCond=2`
+     * (no 3) y por qué la cuenta de orden SÍ se revierte aquí aunque SIHOS
+     * no lo haga solo, mientras que cartera/ingreso real NUNCA se tocan
+     * (decisión explícita del usuario 2026-09-16/17).
+     *
+     * Escribe, en una sola transacción:
+     * 1. `AnotGlos`: anotación TipoDeta=2/TipoCond=2, ValoAcep=monto de la
+     *    glosa, referenciando el documento GLC del punto 2.
+     * 2. Documento `GLC` nuevo (`EncaCont`+`DetaCont`+`DetaNIIF` si aplica):
+     *    2 líneas — reversa exacta de la cuenta de orden usada en el `GLO`
+     *    original + su contra-cuenta — sin cartera ni cuenta de ingreso.
+     * 3. `AnotCeCo`: una fila por cada centro de costo de la factura con
+     *    `GlosCurs>0`.
+     * 4. `DetaFaCr`: para esos mismos centros de costo, `GlosCurs=0` y
+     *    `GlosAcep += GlosCurs` (su propio valor antes de limpiarlo).
+     */
+    public function concluirGlosaAceptacionEps(
+        string $codiDocuGlosa,
+        string $numeGlosa,
+        string $codiDocuGlc,
+        string $fecha,
+        string $codiAno,
+        string $codiMes,
+        bool $maneNIIF,
+        string $obseGlos,
+        string $numeOfic,
+        string $fechOfic,
+        string $usuaDigi
+    ): array {
+        return $this->conBloqueo(
+            'concluirglosa:' . $codiDocuGlosa . ':' . $numeGlosa,
+            function () use (
+                $codiDocuGlosa, $numeGlosa, $codiDocuGlc, $fecha, $codiAno, $codiMes,
+                $maneNIIF, $obseGlos, $numeOfic, $fechOfic, $usuaDigi
+            ): array {
+                return $this->concluirGlosaAceptacionEpsBloqueado(
+                    $codiDocuGlosa, $numeGlosa, $codiDocuGlc, $fecha, $codiAno, $codiMes,
+                    $maneNIIF, $obseGlos, $numeOfic, $fechOfic, $usuaDigi
+                );
+            }
+        );
+    }
+
+    /** @see concluirGlosaAceptacionEps (ya con el bloqueo tomado) */
+    private function concluirGlosaAceptacionEpsBloqueado(
+        string $codiDocuGlosa,
+        string $numeGlosa,
+        string $codiDocuGlc,
+        string $fecha,
+        string $codiAno,
+        string $codiMes,
+        bool $maneNIIF,
+        string $obseGlos,
+        string $numeOfic,
+        string $fechOfic,
+        string $usuaDigi
+    ): array {
+        set_time_limit(120);
+
+        $pdo = $this->connect();
+        $codiInst = $this->codiInst();
+
+        $pdo->beginTransaction();
+
+        try {
+            // Re-verificación en fresco dentro de la transacción — mismas
+            // reglas que fetchEstadoParaConcluirGlosaAceptacionEps() (capa
+            // de lectura), pero contra la conexión de escritura: el estado
+            // pudo cambiar entre la vista previa y este clic.
+            $stmt = $pdo->prepare(
+                'SELECT CodiAno, Anulado, TiDoTerc, NuDoTerc, CodiCent FROM EncaCont
+                 WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?'
+            );
+            $stmt->execute([$codiInst, $codiDocuGlosa, $numeGlosa]);
+            $glosa = $stmt->fetch();
+
+            if ($glosa === false) {
+                $pdo->rollBack();
+
+                return ['ok' => false, 'motivo' => "La glosa {$codiDocuGlosa}-{$numeGlosa} ya no existe."];
+            }
+
+            if ((int)$glosa['Anulado'] === 1) {
+                $pdo->rollBack();
+
+                return ['ok' => false, 'motivo' => 'La glosa está anulada, no se concluye.'];
+            }
+
+            $stmt = $pdo->prepare('SELECT ConsDeta, Valor FROM DetaGlos WHERE CodiInst = ? AND CodiDocu = ? AND NumeGlos = ?');
+            $stmt->execute([$codiInst, $codiDocuGlosa, $numeGlosa]);
+            $detaGlosFilas = $stmt->fetchAll();
+
+            if (count($detaGlosFilas) !== 1) {
+                $pdo->rollBack();
+
+                return ['ok' => false, 'motivo' => 'La glosa ya no tiene exactamente un concepto en DetaGlos — puede que haya cambiado. No se continúa.'];
+            }
+            $consDetaGlos = (int)$detaGlosFilas[0]['ConsDeta'];
+            $valorGlosa = round((float)$detaGlosFilas[0]['Valor'], 2);
+
+            $stmt = $pdo->prepare('SELECT CodiCont, TiDoRefe, NuDoRefe, Valor FROM DetaCont WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?');
+            $stmt->execute([$codiInst, $codiDocuGlosa, $numeGlosa]);
+            $detaContFilas = $stmt->fetchAll();
+
+            if (count($detaContFilas) !== 2) {
+                $pdo->rollBack();
+
+                return ['ok' => false, 'motivo' => 'La contabilización original de la glosa ya no tiene exactamente 2 líneas — puede que ya se haya modificado. No se continúa.'];
+            }
+
+            $cuentaOrden = null;
+            $cuentaContra = null;
+            $tiDoRefe = null;
+            $nuDoRefe = null;
+            foreach ($detaContFilas as $linea) {
+                $tiDoRefe = $linea['TiDoRefe'];
+                $nuDoRefe = (string)$linea['NuDoRefe'];
+                if ((float)$linea['Valor'] > 0) {
+                    $cuentaOrden = $linea['CodiCont'];
+                } else {
+                    $cuentaContra = $linea['CodiCont'];
+                }
+            }
+            if ($cuentaOrden === null || $cuentaContra === null) {
+                $pdo->rollBack();
+
+                return ['ok' => false, 'motivo' => 'No se identificó la cuenta de orden de la glosa original. No se continúa.'];
+            }
+
+            $stmt = $pdo->prepare(
+                "SELECT 1 FROM AnotGlos WHERE CodiInst = ? AND CodiDocu = ? AND NumeGlos = ? AND TipoDeta = 2 AND CoDoCont <> ''"
+            );
+            $stmt->execute([$codiInst, $codiDocuGlosa, $numeGlosa]);
+            if ($stmt->fetch() !== false) {
+                $pdo->rollBack();
+
+                return ['ok' => false, 'motivo' => 'Esta glosa ya fue concluida antes — no se crea una segunda anotación.'];
+            }
+
+            $stmt = $pdo->prepare(
+                'SELECT CodiAno, CentCost, GlosCurs FROM DetaFaCr WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ? AND GlosCurs > 0'
+            );
+            $stmt->execute([$codiInst, $tiDoRefe, $nuDoRefe]);
+            $centrosCosto = $stmt->fetchAll();
+
+            if ($centrosCosto === []) {
+                $pdo->rollBack();
+
+                return ['ok' => false, 'motivo' => 'La factura referenciada ya no tiene ningún centro de costo con glosa en curso (GlosCurs=0) — puede que ya se haya resuelto.'];
+            }
+
+            // 1) Documento GLC nuevo: encabezado.
+            $stmt = $pdo->prepare('SELECT MAX(CAST(NumeDocu AS UNSIGNED)) FROM EncaCont WHERE CodiInst = ? AND CodiDocu = ?');
+            $stmt->execute([$codiInst, $codiDocuGlc]);
+            $numeDocuGlc = (string)((int)$stmt->fetchColumn() + 1);
+
+            $stmt = $pdo->prepare(
+                'INSERT INTO EncaCont
+                    (CodiInst,CodiAno,CodiDocu,NumeDocu,TipoComp,CodiCent,FechDocu,HoraDocu,Concepto,
+                     TiDoTerc,NuDoTerc,TiDoRefe,NuDoRefe,ValoTota,Causado,FechDigi,HoraDigi,UsuaDigi)
+                 VALUES (?,?,?,?,0,?,?,CURTIME(),?,?,?,?,?,?,1,CURDATE(),CURTIME(),?)'
+            );
+            $stmt->execute([
+                $codiInst, $codiAno, $codiDocuGlc, $numeDocuGlc, $glosa['CodiCent'], $fecha, $obseGlos,
+                $glosa['TiDoTerc'], $glosa['NuDoTerc'], $tiDoRefe, $nuDoRefe, $valorGlosa, $usuaDigi,
+            ]);
+
+            // 2) Documento GLC: las 2 líneas de reversa (misma cuenta que la
+            // glosa original, signo contrario).
+            $configOrden = $this->obtenerConfigCuenta($pdo, $codiInst, $cuentaOrden, $codiAno);
+            $configContra = $this->obtenerConfigCuenta($pdo, $codiInst, $cuentaContra, $codiAno);
+            if ($configOrden === null || $configContra === null) {
+                $pdo->rollBack();
+
+                return ['ok' => false, 'motivo' => "Falta la cuenta {$cuentaOrden} o {$cuentaContra} en el plan de cuentas de SIHOS para el año {$codiAno}."];
+            }
+
+            $tiDoTercGlosa = (int)$configOrden['OpciTerc'] === 1 ? $glosa['TiDoTerc'] : null;
+            $nuDoTercGlosa = (int)$configOrden['OpciTerc'] === 1 ? $glosa['NuDoTerc'] : null;
+
+            $lineas = [
+                ['cuenta' => $cuentaOrden, 'config' => $configOrden, 'valor' => -$valorGlosa],
+                ['cuenta' => $cuentaContra, 'config' => $configContra, 'valor' => $valorGlosa],
+            ];
+
+            $consDeta = 1;
+            foreach ($lineas as $linea) {
+                $tiDoTercLinea = (int)$linea['config']['OpciTerc'] === 1 ? $tiDoTercGlosa : null;
+                $nuDoTercLinea = (int)$linea['config']['OpciTerc'] === 1 ? $nuDoTercGlosa : null;
+
+                $this->insertarLineaDetaCont(
+                    $pdo, $codiDocuGlc, $numeDocuGlc, $consDeta, $codiAno, $linea['cuenta'], $glosa['CodiCent'],
+                    null, $tiDoTercLinea, $nuDoTercLinea, $tiDoRefe, $nuDoRefe, $linea['valor'], $usuaDigi
+                );
+                $this->actualizarSaldoCuenta($pdo, $linea['cuenta'], $linea['valor'], $codiMes, $codiAno, $tiDoTercLinea, $nuDoTercLinea, null, $linea['config'], $usuaDigi);
+
+                if ($maneNIIF) {
+                    $stmt = $pdo->prepare('SELECT idPartNIIF FROM HomoNIIF WHERE CodiCont = ?');
+                    $stmt->execute([$linea['cuenta']]);
+                    $idPart = $stmt->fetchColumn();
+
+                    if ($idPart === false || $idPart === '') {
+                        $pdo->rollBack();
+
+                        return ['ok' => false, 'motivo' => "Falta homologación NIIF (HomoNIIF) para la cuenta {$linea['cuenta']}."];
+                    }
+
+                    $this->insertarLineaDetaNIIF(
+                        $pdo, $codiDocuGlc, $numeDocuGlc, $consDeta, $codiAno, (string)$idPart, $glosa['CodiCent'],
+                        null, $tiDoTercLinea, $nuDoTercLinea, $tiDoRefe, $nuDoRefe, $linea['valor'], $usuaDigi
+                    );
+                    $this->actualizarSaldoNIIF($pdo, (string)$idPart, $linea['valor'], $codiMes, $codiAno, $tiDoTercLinea, $nuDoTercLinea, $usuaDigi);
+                }
+
+                $consDeta++;
+            }
+
+            // 3) AnotCeCo — un renglón por cada centro de costo que queda resuelto.
+            $consCeCo = 1;
+            foreach ($centrosCosto as $cc) {
+                $stmt = $pdo->prepare(
+                    'INSERT INTO AnotCeCo (CodiInst,CodiAno,CodiDocu,NumeGlos,ConsDeta,ConsCeCo,CentCost,Valor,FechDigi,HoraDigi,UsuaDigi,FechModi,HoraModi,UsuaModi)
+                     VALUES (?,?,?,?,?,?,?,0,CURDATE(),CURTIME(),?,CURDATE(),CURTIME(),?)'
+                );
+                $stmt->execute([$codiInst, $codiAno, $codiDocuGlc, $numeDocuGlc, 1, $consCeCo, $cc['CentCost'], $usuaDigi, $usuaDigi]);
+                $consCeCo++;
+
+                // 4) DetaFaCr — limpia el pendiente de ESTE centro de costo.
+                $stmt = $pdo->prepare(
+                    'UPDATE DetaFaCr
+                     SET GlosCurs = 0, GlosAcep = GlosAcep + ?, FechModi = CURDATE(), HoraModi = CURTIME(), UsuaModi = ?
+                     WHERE CodiInst = ? AND CodiAno = ? AND CodiDocu = ? AND NumeDocu = ? AND CentCost = ?'
+                );
+                $stmt->execute([$cc['GlosCurs'], $usuaDigi, $codiInst, $cc['CodiAno'], $tiDoRefe, $nuDoRefe, $cc['CentCost']]);
+            }
+
+            // 5) AnotGlos — la anotación de aceptación EPS propiamente dicha.
+            $stmt = $pdo->prepare('SELECT MAX(ConsDeta) FROM AnotGlos WHERE CodiInst = ? AND CodiDocu = ? AND NumeGlos = ?');
+            $stmt->execute([$codiInst, $codiDocuGlosa, $numeGlosa]);
+            $consDetaAnot = (int)$stmt->fetchColumn() + 1;
+
+            $stmt = $pdo->prepare(
+                'INSERT INTO AnotGlos
+                    (CodiInst,CodiAno,CodiDocu,NumeGlos,ConsDeta,ConsDetaGlos,CoDoCont,NuDoCont,FechAnot,NumeOfic,FechOfic,
+                     TipoDeta,TipoCond,ObseGlos,ValoAcep,ValoRech,Causado,Anulado,FechDigi,HoraDigi,UsuaDigi)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,2,2,?,?,0,1,0,CURDATE(),CURTIME(),?)'
+            );
+            $stmt->execute([
+                $codiInst, $glosa['CodiAno'], $codiDocuGlosa, $numeGlosa, $consDetaAnot, $consDetaGlos, $codiDocuGlc, $numeDocuGlc,
+                $fecha, $numeOfic, $fechOfic, $obseGlos, $valorGlosa, $usuaDigi,
+            ]);
+
+            $pdo->commit();
+
+            return [
+                'ok' => true,
+                'codiDocuGlc' => $codiDocuGlc,
+                'numeDocuGlc' => $numeDocuGlc,
+                'valorGlosa' => $valorGlosa,
+                'centrosCosto' => array_map(static fn (array $cc): array => ['CentCost' => $cc['CentCost'], 'GlosCurs' => (float)$cc['GlosCurs']], $centrosCosto),
+            ];
+        } catch (PDOException $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+
+            throw $e;
+        }
+    }
+
+    /**
      * Config de una cuenta contable (jerarquía de cuenta padre + exige
      * tercero/centro de costo/documento de referencia), tal como la usa
      * `funciones.php` (CodiCont, clave CodiInst+Periodo+CodiCont).
@@ -1608,5 +1883,121 @@ class SihosExternalWriteRepository
 
             throw $e;
         }
+    }
+
+    /**
+     * Carga masiva de tarifas de `TariProc` (SIHOS/PROCESOS/TARIFA
+     * PROCEDIMIENTOS) — reemplaza al importador CSV legado y obsoleto de
+     * SIHOS (`modulos/procesos/tarifas/importartarifa.class.php`, sin ítem de
+     * menú activo, sin transacción real por fila, sin bloqueo). Todo el lote
+     * corre en UNA transacción con bloqueo nombrado por manual
+     * (`tarifaproc:<codiManu>`), y cada fila se re-verifica en fresco dentro
+     * de esa transacción antes de escribir — nunca confía en una vista previa
+     * calculada antes.
+     *
+     * `$modo` es 'insertar', 'actualizar' o 'ambos': en 'insertar' se rechaza
+     * cualquier fila cuya clave (CodiProc, CodiManu, CodiPlan) ya exista; en
+     * 'actualizar' se rechaza cualquier fila cuya clave NO exista; en 'ambos'
+     * no se rechaza ninguna fila por existencia — cada una se inserta o
+     * actualiza según corresponda (la vista previa ya le mostró a la persona
+     * cuál es cuál antes de confirmar, así que no hace falta el criterio más
+     * estricto de `TipoImpo` del importador legado de SIHOS aquí).
+     *
+     * @param list<array{codiProc:string,tipoTari:int,valoUnit:?int,grupQuir:?string,uvr:?float,uvrMax:?float,indiUVB:?float}> $filas
+     * @return array{ok:bool,insertados:int,actualizados:int,rechazados:list<array{codiProc:string,motivo:string}>,detalle:list<array<string,mixed>>}
+     * @throws PDOException en errores reales de BD
+     */
+    public function upsertTarifasProcedimiento(array $filas, string $codiManu, string $codiPlan, string $modo, string $usuaDigi): array
+    {
+        return $this->conBloqueo('tarifaproc:' . $codiManu, function () use ($filas, $codiManu, $codiPlan, $modo, $usuaDigi): array {
+            return $this->upsertTarifasProcedimientoBloqueado($filas, $codiManu, $codiPlan, $modo, $usuaDigi);
+        });
+    }
+
+    /** @see upsertTarifasProcedimiento (ya con el bloqueo tomado) */
+    private function upsertTarifasProcedimientoBloqueado(array $filas, string $codiManu, string $codiPlan, string $modo, string $usuaDigi): array
+    {
+        set_time_limit(180);
+
+        $pdo = $this->connect();
+        $pdo->beginTransaction();
+
+        $insertados = 0;
+        $actualizados = 0;
+        $rechazados = [];
+        $detalle = [];
+
+        try {
+            $stmtExiste = $pdo->prepare(
+                'SELECT ValoUnit, GrupQuir, UVR, UVRMax, TipoTari, IndiUVB FROM TariProc
+                 WHERE CodiProc = ? AND CodiManu = ? AND CodiPlan = ? FOR UPDATE'
+            );
+            $stmtInsert = $pdo->prepare(
+                'INSERT INTO TariProc (CodiProc, CodiManu, CodiPlan, TipoTari, ValoUnit, GrupQuir, UVR, UVRMax, IndiUVB,
+                                       FechDigi, HoraDigi, UsuaDigi, FechModi, HoraModi, UsuaModi)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURDATE(), CURTIME(), ?, CURDATE(), CURTIME(), ?)'
+            );
+            $stmtUpdate = $pdo->prepare(
+                'UPDATE TariProc
+                    SET TipoTari = ?, ValoUnit = ?, GrupQuir = ?, UVR = ?, UVRMax = ?, IndiUVB = ?,
+                        FechModi = CURDATE(), HoraModi = CURTIME(), UsuaModi = ?
+                  WHERE CodiProc = ? AND CodiManu = ? AND CodiPlan = ?'
+            );
+
+            foreach ($filas as $fila) {
+                $codiProc = (string)$fila['codiProc'];
+
+                $stmtExiste->execute([$codiProc, $codiManu, $codiPlan]);
+                $actual = $stmtExiste->fetch();
+
+                // 'insertar'/'actualizar' rechazan según exista o no la clave;
+                // 'ambos' (insertar y actualizar en el mismo lote) nunca
+                // rechaza por existencia — decide INSERT/UPDATE según
+                // corresponda, fila por fila.
+                if ($modo === 'insertar' && $actual !== false) {
+                    $rechazados[] = ['codiProc' => $codiProc, 'motivo' => 'Ya existe una tarifa para este procedimiento en este manual — no se inserta de nuevo.'];
+                    continue;
+                }
+                if ($modo === 'actualizar' && $actual === false) {
+                    $rechazados[] = ['codiProc' => $codiProc, 'motivo' => 'No existe todavía una tarifa para este procedimiento en este manual — no se actualiza.'];
+                    continue;
+                }
+
+                if ($actual === false) {
+                    $stmtInsert->execute([
+                        $codiProc, $codiManu, $codiPlan, $fila['tipoTari'], $fila['valoUnit'],
+                        $fila['grupQuir'], $fila['uvr'], $fila['uvrMax'], $fila['indiUVB'], $usuaDigi, $usuaDigi,
+                    ]);
+
+                    $insertados++;
+                    $detalle[] = ['codiProc' => $codiProc, 'accion' => 'INSERT', 'antes' => null, 'despues' => $fila];
+                    continue;
+                }
+
+                $stmtUpdate->execute([
+                    $fila['tipoTari'], $fila['valoUnit'], $fila['grupQuir'], $fila['uvr'], $fila['uvrMax'], $fila['indiUVB'],
+                    $usuaDigi, $codiProc, $codiManu, $codiPlan,
+                ]);
+
+                $actualizados++;
+                $detalle[] = ['codiProc' => $codiProc, 'accion' => 'UPDATE', 'antes' => $actual, 'despues' => $fila];
+            }
+
+            $pdo->commit();
+        } catch (PDOException $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+
+            throw $e;
+        }
+
+        return [
+            'ok' => true,
+            'insertados' => $insertados,
+            'actualizados' => $actualizados,
+            'rechazados' => $rechazados,
+            'detalle' => $detalle,
+        ];
     }
 }

@@ -6,14 +6,31 @@ class LocalStorageDriver implements StorageDriverInterface
 
     private string $privateRoot;
 
-    /** @var list<string> */
-    private array $privatePrefixes = ['sgd_imports/'];
+    /**
+     * Prefijos de key que SÍ son públicos — inyectados desde
+     * StorageService::publicPathPrefixes() (derivados de
+     * StorageService::zoneDefinitions(), la única fuente de verdad).
+     * Privado por defecto (deny-by-default): cualquier zona nueva que se
+     * olvide de agregar ahí queda privada automáticamente, no al revés.
+     * Corrige un caso real (2026-09-11): ZONE_SIHOS_REPORTES se creó con
+     * 'visibility' => 'private' en StorageService pero antes de este fix
+     * este driver mantenía su PROPIA lista suelta (nunca actualizada) y
+     * trataba como pública cualquier zona no listada explícitamente como
+     * privada — justo al revés de lo seguro.
+     *
+     * @var list<string>
+     */
+    private array $publicPrefixes;
 
-    public function __construct(?string $publicRoot = null, ?string $privateRoot = null)
+    public function __construct(?string $publicRoot = null, ?string $privateRoot = null, ?array $publicPrefixes = null)
     {
         $base = defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 2);
         $this->publicRoot = rtrim($publicRoot ?: (getenv('STORAGE_PUBLIC_ROOT') ?: $base . '/public/uploads'), '/');
         $this->privateRoot = rtrim($privateRoot ?: (getenv('STORAGE_PRIVATE_ROOT') ?: $base . '/storage'), '/');
+        // Fallback si se instancia fuera de StorageService::createFromEnv()
+        // (p. ej. un test que construya el driver directo): debe coincidir
+        // con StorageService::zoneDefinitions() al momento de escribir esto.
+        $this->publicPrefixes = $publicPrefixes ?? ['sgd/', 'empresas/', 'usuarios/', 'acad/'];
     }
 
     public function putContents(string $key, string $contents): void
@@ -23,6 +40,12 @@ class LocalStorageDriver implements StorageDriverInterface
         if (@file_put_contents($path, $contents) === false) {
             throw new RuntimeException('No se pudo guardar el archivo: ' . $key);
         }
+        // Igual que en ensureParentDir(): sin esto el archivo queda 0644
+        // (el umask del proceso quita el bit de grupo), y si el creador no
+        // es el mismo usuario que luego necesita sobrescribirlo (p. ej. un
+        // cron corriendo como "ing" reescribiendo algo que creó "nginx", o
+        // viceversa) la segunda escritura falla igual que el mkdir original.
+        @chmod($path, 0664);
     }
 
     public function putFile(string $key, string $localSourcePath, bool $move = true): void
@@ -118,8 +141,15 @@ class LocalStorageDriver implements StorageDriverInterface
     {
         $keyPrefix = $this->normalizeKey($keyPrefix);
         $dir = rtrim($this->localPath($keyPrefix), '/');
-        if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
-            throw new RuntimeException('No se pudo crear el directorio de almacenamiento.');
+        if (!is_dir($dir)) {
+            // Ver comentario de ensureParentDir(): umask(0) para que el
+            // 0775 pedido no quede neutralizado por el umask del proceso.
+            $umaskPrevio = umask(0);
+            $creado = @mkdir($dir, 0775, true);
+            umask($umaskPrevio);
+            if (!$creado && !is_dir($dir)) {
+                throw new RuntimeException('No se pudo crear el directorio de almacenamiento.');
+            }
         }
 
         return $dir;
@@ -129,13 +159,6 @@ class LocalStorageDriver implements StorageDriverInterface
     {
         $key = $this->normalizeKey($key);
         if ($this->isPrivateKey($key)) {
-            return null;
-        }
-
-        if (!str_starts_with($key, 'sgd/')
-            && !str_starts_with($key, 'empresas/')
-            && !str_starts_with($key, 'usuarios/')
-            && !str_starts_with($key, 'acad/')) {
             return null;
         }
 
@@ -166,13 +189,13 @@ class LocalStorageDriver implements StorageDriverInterface
 
     private function isPrivateKey(string $key): bool
     {
-        foreach ($this->privatePrefixes as $prefix) {
+        foreach ($this->publicPrefixes as $prefix) {
             if (str_starts_with($key, $prefix)) {
-                return true;
+                return false;
             }
         }
 
-        return false;
+        return true;
     }
 
     private function ensureParentDir(string $path): void
@@ -181,7 +204,16 @@ class LocalStorageDriver implements StorageDriverInterface
         if (is_dir($dir)) {
             return;
         }
-        if (!@mkdir($dir, 0755, true) && !is_dir($dir)) {
+        // umask(0) alrededor del mkdir: el umask por defecto de este
+        // servidor (0022) neutraliza el bit de escritura de grupo del modo
+        // pedido (0775 & ~0022 = 0755) — sin esto, un directorio creado por
+        // un proceso CLI (usuario "ing") queda sin permiso de escritura
+        // para el grupo "nginx" (PHP-FPM), y viceversa. Aplica a TODOS los
+        // niveles que mkdir(..., true) cree de una vez, no solo al último.
+        $umaskPrevio = umask(0);
+        $creado = @mkdir($dir, 0775, true);
+        umask($umaskPrevio);
+        if (!$creado && !is_dir($dir)) {
             throw new RuntimeException('No se pudo crear el directorio: ' . $dir);
         }
     }
