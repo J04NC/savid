@@ -25,6 +25,8 @@ $assetSihosConstruirDetaPlan = BASE_PATH . '/public/js/sihos-construir-detaplan.
 $sihosConstruirDetaPlanJsV = is_readable($assetSihosConstruirDetaPlan) ? (int)filemtime($assetSihosConstruirDetaPlan) : time();
 $assetSihosConstruirDetaPlanMasivo = BASE_PATH . '/public/js/sihos-construir-detaplan-masivo.js';
 $sihosConstruirDetaPlanMasivoJsV = is_readable($assetSihosConstruirDetaPlanMasivo) ? (int)filemtime($assetSihosConstruirDetaPlanMasivo) : time();
+$assetSihosReclasificarCuentaMasivo = BASE_PATH . '/public/js/sihos-reclasificar-cuenta-masivo.js';
+$sihosReclasificarCuentaMasivoJsV = is_readable($assetSihosReclasificarCuentaMasivo) ? (int)filemtime($assetSihosReclasificarCuentaMasivo) : time();
 ?>
 
 <div class="module-container auditoria-page">
@@ -138,6 +140,11 @@ $sihosConstruirDetaPlanMasivoJsV = is_readable($assetSihosConstruirDetaPlanMasiv
                             ▶️ Construir seleccionados (0)
                         </button>
                     <?php endif; ?>
+                    <?php if (($seccion['accionReclasificar'] ?? false) && $puedeReversarCuenta): ?>
+                        <button type="button" id="btnSihosReclasificarCuentaMasivo" class="auditoria-btn-primary" disabled>
+                            ▶️ Reclasificar seleccionadas (0)
+                        </button>
+                    <?php endif; ?>
                 </div>
 
                 <?php if ($seccion['filas'] === []): ?>
@@ -146,8 +153,10 @@ $sihosConstruirDetaPlanMasivoJsV = is_readable($assetSihosConstruirDetaPlanMasiv
                     <div style="overflow-x:auto;">
                         <?php
                         $muestraSeleccionMasiva = ($seccion['accionConstruirDetaPlan'] ?? false) && $puedeConstruirDetaPlan;
+                        $muestraSeleccionReclasificar = ($seccion['accionReclasificar'] ?? false) && $puedeReversarCuenta;
+                        $tablaId = $muestraSeleccionMasiva ? 'sihosConstruirDetaPlanTable' : ($muestraSeleccionReclasificar ? 'sihosReclasificarCuentaTable' : '');
                         ?>
-                        <table class="seguridad-table" <?= $muestraSeleccionMasiva ? 'id="sihosConstruirDetaPlanTable"' : '' ?>>
+                        <table class="seguridad-table" <?= $tablaId !== '' ? 'id="' . $tablaId . '"' : '' ?>>
                             <?php if ($seccion['tipo'] === 'factura'): ?>
                                 <thead><tr><th>Documento</th><th>Fecha</th><th>Valor total</th><th>Tercero</th><th>Centro de costo</th></tr></thead>
                                 <tbody>
@@ -238,6 +247,11 @@ $sihosConstruirDetaPlanMasivoJsV = is_readable($assetSihosConstruirDetaPlanMasiv
                                 <?php $muestraAccionReclasificar = $seccion['accionReclasificar'] ?? false; ?>
                                 <thead>
                                     <tr>
+                                        <?php if ($muestraSeleccionReclasificar): ?>
+                                            <th class="no-dt-filter no-dt-order no-export" aria-label="Selección">
+                                                <input type="checkbox" id="sihosReclasificarCuentaSelectAll" aria-label="Seleccionar todo lo visible">
+                                            </th>
+                                        <?php endif; ?>
                                         <th>Documento</th><th>Fecha</th><th>Cuenta</th><th>Valor</th><th>Factura</th>
                                         <?php if ($muestraAccionReclasificar): ?><th>Vigencia</th><th>Opciones</th><?php endif; ?>
                                     </tr>
@@ -246,6 +260,15 @@ $sihosConstruirDetaPlanMasivoJsV = is_readable($assetSihosConstruirDetaPlanMasiv
                                 <?php foreach ($seccion['filas'] as $f): ?>
                                     <?php $esVigenciaAnterior = $f['EsVigenciaAnterior'] ?? false; ?>
                                     <tr>
+                                        <?php if ($muestraSeleccionReclasificar): ?>
+                                            <td class="no-export">
+                                                <?php if ($esVigenciaAnterior): ?>
+                                                    <input type="checkbox" class="sihosReclasificarCuentaCheckbox"
+                                                           data-codi-docu="<?= htmlspecialchars($f['CodiDocu']) ?>"
+                                                           data-nume-docu="<?= htmlspecialchars($f['NumeDocu']) ?>">
+                                                <?php endif; ?>
+                                            </td>
+                                        <?php endif; ?>
                                         <td><?= htmlspecialchars($f['CodiDocu'] . '-' . $f['NumeDocu']) ?></td>
                                         <td><?= htmlspecialchars($f['FechDocu']) ?></td>
                                         <td><?= htmlspecialchars($f['CodiCont']) ?></td>
@@ -598,6 +621,57 @@ $sihosConstruirDetaPlanMasivoJsV = is_readable($assetSihosConstruirDetaPlanMasiv
             </div>
         </div>
         <script src="/js/sihos-reclasificar-cuenta.js?v=<?= (int)$sihosReclasificarCuentaJsV ?>"></script>
+
+        <div id="sihosReclasificarCuentaMasivoModal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header-bar">
+                    <span>↩️ Reclasificar cuenta — selección masiva</span>
+                    <span class="close-modal" id="sihosReclasificarCuentaMasivoCerrar" role="button" tabindex="0" aria-label="Cerrar">&times;</span>
+                </div>
+                <div style="padding:16px;">
+                    <div id="sihosReclasificarCuentaMasivoPreInicio">
+                        <p class="modal-form-alert">
+                            Esto reclasificará en SIHOS todas las líneas 4312 de <strong id="sihosReclasificarCuentaMasivoConteo">0</strong>
+                            documento(s) hacia la cuenta destino que elija abajo. Cada uno es <strong>irreversible</strong> desde SAVID.
+                            No cierre esta ventana mientras esté en proceso — si se interrumpe, puede volver a correr la selección
+                            restante después sin duplicar nada.
+                        </p>
+                        <div class="form-group">
+                            <label for="sihosReclasificarCuentaMasivoDestino">Cuenta destino (aplica a todo el lote)</label>
+                            <select id="sihosReclasificarCuentaMasivoDestino" class="form-input">
+                                <option value="">— Seleccione —</option>
+                                <?php foreach ($cuentasVigenciaAnteriorOpciones as $opcion): ?>
+                                    <option value="<?= htmlspecialchars($opcion['cuenta']) ?>">
+                                        <?= htmlspecialchars($opcion['etiqueta']) ?> (<?= htmlspecialchars($opcion['cuenta']) ?>)
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="sihosReclasificarCuentaMasivoConfirmacion">Escriba <strong>RECLASIFICAR</strong> para confirmar</label>
+                            <input type="text" id="sihosReclasificarCuentaMasivoConfirmacion" class="form-input" autocomplete="off">
+                        </div>
+                        <div class="auditoria-filters-footer">
+                            <button type="button" id="sihosReclasificarCuentaMasivoIniciar" class="auditoria-btn-primary" style="background:#c0392b;" disabled>▶️ Iniciar</button>
+                        </div>
+                    </div>
+                    <div id="sihosReclasificarCuentaMasivoProgreso" hidden>
+                        <p id="sihosReclasificarCuentaMasivoContador" aria-live="polite">Procesando 0/0… (✅ 0 ok · ⚠️ 0 con error)</p>
+                        <ul id="sihosReclasificarCuentaMasivoFallidos" style="max-height:200px; overflow-y:auto; list-style:none; padding:0; margin:0;"></ul>
+                        <div class="auditoria-filters-footer">
+                            <button type="button" id="sihosReclasificarCuentaMasivoDetener" class="auditoria-btn-primary" style="background:#c0392b;">⏹ Detener</button>
+                        </div>
+                    </div>
+                    <div id="sihosReclasificarCuentaMasivoResumen" hidden>
+                        <p id="sihosReclasificarCuentaMasivoResumenTexto" aria-live="polite"></p>
+                        <div class="auditoria-filters-footer">
+                            <button type="button" id="sihosReclasificarCuentaMasivoActualizar" class="auditoria-btn-primary">🔄 Actualizar página</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <script src="/js/sihos-reclasificar-cuenta-masivo.js?v=<?= (int)$sihosReclasificarCuentaMasivoJsV ?>"></script>
     <?php endif; ?>
 
 </div>
