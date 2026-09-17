@@ -77,6 +77,27 @@ class Router
     }
 
     /**
+     * Deja rastro de accesos denegados por falta de PERMISO (no por falta de
+     * sesión — eso solo redirige a login y ocurre todo el tiempo por sesiones
+     * expiradas, sin valor como señal). Varias entradas seguidas del mismo
+     * usuario/IP contra rutas distintas es señal de reconocimiento o intento
+     * de escalar privilegios, y hoy no quedaba rastro de esto en ningún lado.
+     */
+    private static function logAccesoDenegado(string $razon): void
+    {
+        $linea = sprintf(
+            "[%s] url=%s ip=%s usuario_id=%s razon=%s\n",
+            date('Y-m-d H:i:s'),
+            (string)($_GET['url'] ?? ''),
+            (string)($_SERVER['REMOTE_ADDR'] ?? ''),
+            (string)($_SESSION['user_id'] ?? 'ninguno'),
+            $razon
+        );
+
+        @file_put_contents(BASE_PATH . '/storage/acceso_denegado.log', $linea, FILE_APPEND);
+    }
+
+    /**
      * Deja rastro de por qué falló el CSRF: distingue "no había sesión" de
      * "el token del navegador no coincide con el de la sesión" (página servida
      * desde caché con un token viejo). Solo huellas cortas, nunca el token.
@@ -265,6 +286,7 @@ class Router
             && in_array($method, $usuarioJsonLookupMethods, true)
             && class_exists('PermisoService')
             && !PermisoService::canUsuarioFormApi()) {
+            self::logAccesoDenegado("{$controllerName}::{$method} sin permiso de formulario de usuario");
             http_response_code(403);
             header('Content-Type: application/json; charset=utf-8');
             echo json_encode(['ok' => false, 'error' => 'Sin permiso'], JSON_UNESCAPED_UNICODE);
@@ -275,6 +297,7 @@ class Router
             && $controllerName === 'ItemController'
             && class_exists('PermisoService')
             && !PermisoService::isSuperAdminSession()) {
+            self::logAccesoDenegado("{$controllerName}::{$method} requiere superadministrador");
             http_response_code(403);
             exit('Acceso denegado. Solo superadministrador.');
         }
@@ -311,6 +334,7 @@ class Router
                 && in_array($method, $sihosTarifaProcedimientoAccionMethods, true)
                 && PermisoService::can('sihos/tarifaProcedimiento', 'ver'))
             && !PermisoService::can($rutaCompleta, 'ver')) {
+            self::logAccesoDenegado("sin permiso 'ver' sobre {$rutaCompleta}");
             http_response_code(403);
             exit('Acceso denegado.');
         }
