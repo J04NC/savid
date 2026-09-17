@@ -6,18 +6,6 @@
  */
 class AcadAttemptService
 {
-    private const ALLOWED_AUDIO_MIME = [
-        'audio/mpeg' => 'mp3',
-        'audio/mp4' => 'm4a',
-        'audio/x-m4a' => 'm4a',
-        'audio/webm' => 'webm',
-        'audio/ogg' => 'ogg',
-        'audio/wav' => 'wav',
-        'audio/x-wav' => 'wav',
-    ];
-
-    private const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
-
     private AcadRepository $repo;
     private AcadScopeService $scope;
 
@@ -51,6 +39,8 @@ class AcadAttemptService
         return match ($exercise['exercise_type_codigo']) {
             'MULTIPLE_CHOICE' => $this->submitReading($empresaId, $usuarioId, $exercise, $post),
             'OPEN_TEXT' => $this->submitWriting($empresaId, $usuarioId, $exercise, $post),
+            'FILL_BLANKS' => $this->submitFillBlanks($empresaId, $usuarioId, $exercise, $post),
+            'SENTENCE_ORDER' => $this->submitSentenceOrder($empresaId, $usuarioId, $exercise, $post),
             default => ['success' => false, 'message' => 'Use the audio upload endpoint for this exercise type.'],
         };
     }
@@ -121,6 +111,137 @@ class AcadAttemptService
     }
 
     /**
+     * "Fill in the blanks": compara la palabra que el estudiante ubicó en
+     * cada hueco contra la palabra de acad_exercise_option cuyo blank_index
+     * coincide (las que tienen blank_index NULL son señuelos, nunca
+     * cuentan). Se autocalifica al instante, igual que Multiple Choice.
+     *
+     * @param array<string, mixed> $exercise
+     */
+    private function submitFillBlanks(int $empresaId, int $usuarioId, array $exercise, array $post): array
+    {
+        $submitted = json_decode((string)($post['blanks'] ?? '{}'), true);
+        if (!is_array($submitted)) {
+            $submitted = [];
+        }
+
+        $correctByBlank = [];
+        foreach ($this->repo->getOptionsByExercise((int)$exercise['id']) as $option) {
+            if ($option['blank_index'] !== null) {
+                $correctByBlank[(int)$option['blank_index']] = mb_strtolower(trim((string)$option['texto_en']));
+            }
+        }
+
+        $totalBlanks = count($correctByBlank);
+        if ($totalBlanks === 0) {
+            return ['success' => false, 'message' => 'This exercise has no word bank configured yet.'];
+        }
+
+        $correctCount = 0;
+        foreach ($correctByBlank as $blankIndex => $correctWord) {
+            $given = mb_strtolower(trim((string)($submitted[(string)$blankIndex] ?? $submitted[$blankIndex] ?? '')));
+            if ($given !== '' && $given === $correctWord) {
+                $correctCount++;
+            }
+        }
+
+        $maxScore = (float)$exercise['max_score'];
+        $score = round(($correctCount / $totalBlanks) * $maxScore, 2);
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s.v');
+
+        $attemptId = $this->repo->insertAttempt([
+            'empresa_id' => $empresaId,
+            'exercise_id' => (int)$exercise['id'],
+            'usuario_id' => $usuarioId,
+            'iniciado_at' => $now,
+            'enviado_at' => $now,
+            'respuesta_texto' => json_encode($submitted, JSON_UNESCAPED_UNICODE),
+            'score' => $score,
+            'calificado_at' => $now,
+            'estado_id' => AcadRepository::ESTADO_AUTO_CALIFICADO,
+        ]);
+
+        return [
+            'success' => true,
+            'message' => $correctCount === $totalBlanks ? 'All correct!' : "{$correctCount} of {$totalBlanks} correct.",
+            'attempt_id' => $attemptId,
+            'correct' => $correctCount === $totalBlanks,
+            'correct_count' => $correctCount,
+            'total_blanks' => $totalBlanks,
+            'score' => $score,
+            'max_score' => $maxScore,
+        ];
+    }
+
+    /**
+     * "Sentence order": compara la secuencia de ids de opción que el
+     * estudiante ubicó en cada oración contra el orden correcto real (las
+     * opciones de esa oración, es decir mismo blank_index, ordenadas por
+     * `orden`). Comparación por id (no por texto) para no confundirse si hay
+     * palabras repetidas entre una oración y los señuelos. Autocalifica al
+     * instante, igual que Multiple Choice y Fill in the blanks.
+     *
+     * @param array<string, mixed> $exercise
+     */
+    private function submitSentenceOrder(int $empresaId, int $usuarioId, array $exercise, array $post): array
+    {
+        $submitted = json_decode((string)($post['order_answers'] ?? '{}'), true);
+        if (!is_array($submitted)) {
+            $submitted = [];
+        }
+
+        $correctBySentence = [];
+        foreach ($this->repo->getOptionsByExercise((int)$exercise['id']) as $option) {
+            if ($option['blank_index'] !== null) {
+                $correctBySentence[(int)$option['blank_index']][(int)$option['orden']] = (int)$option['id'];
+            }
+        }
+
+        $totalSentences = count($correctBySentence);
+        if ($totalSentences === 0) {
+            return ['success' => false, 'message' => 'This exercise has no sentences configured yet.'];
+        }
+
+        $correctCount = 0;
+        foreach ($correctBySentence as $sentenceIndex => $wordsByPosition) {
+            ksort($wordsByPosition);
+            $correctIds = array_values($wordsByPosition);
+            $givenIds = $submitted[(string)$sentenceIndex] ?? $submitted[$sentenceIndex] ?? [];
+            $givenIds = is_array($givenIds) ? array_map('intval', $givenIds) : [];
+            if ($givenIds === $correctIds) {
+                $correctCount++;
+            }
+        }
+
+        $maxScore = (float)$exercise['max_score'];
+        $score = round(($correctCount / $totalSentences) * $maxScore, 2);
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s.v');
+
+        $attemptId = $this->repo->insertAttempt([
+            'empresa_id' => $empresaId,
+            'exercise_id' => (int)$exercise['id'],
+            'usuario_id' => $usuarioId,
+            'iniciado_at' => $now,
+            'enviado_at' => $now,
+            'respuesta_texto' => json_encode($submitted, JSON_UNESCAPED_UNICODE),
+            'score' => $score,
+            'calificado_at' => $now,
+            'estado_id' => AcadRepository::ESTADO_AUTO_CALIFICADO,
+        ]);
+
+        return [
+            'success' => true,
+            'message' => $correctCount === $totalSentences ? 'All correct!' : "{$correctCount} of {$totalSentences} sentences correct.",
+            'attempt_id' => $attemptId,
+            'correct' => $correctCount === $totalSentences,
+            'correct_count' => $correctCount,
+            'total_sentences' => $totalSentences,
+            'score' => $score,
+            'max_score' => $maxScore,
+        ];
+    }
+
+    /**
      * @param array<string, mixed> $files
      * @return array<string, mixed>
      */
@@ -142,41 +263,34 @@ class AcadAttemptService
             return ['success' => false, 'message' => 'Exercise not found.'];
         }
 
-        if ($exercise['exercise_type_codigo'] !== 'AUDIO_RESPONSE') {
+        $isTongueTwister = $exercise['exercise_type_codigo'] === 'TONGUE_TWISTER';
+        $acceptsAudio = in_array($exercise['exercise_type_codigo'], ['AUDIO_RESPONSE', 'TONGUE_TWISTER', 'DIALOGUE'], true);
+        if (!$acceptsAudio) {
             return ['success' => false, 'message' => 'This exercise does not accept audio answers.'];
         }
 
+        $referenceAudioId = (int)($post['reference_audio_id'] ?? 0);
+        if ($referenceAudioId > 0) {
+            if ($this->repo->findReferenceAudio($exerciseId, $referenceAudioId) === null) {
+                return ['success' => false, 'message' => 'Reference audio not found.'];
+            }
+            // TONGUE_TWISTER no bloquea: el estudiante puede volver a grabar
+            // tantas veces como quiera para ver su progresión de velocidad;
+            // cada toma queda como una fila propia (ver
+            // findAttemptsHistoryForReferenceAudio()). AUDIO_RESPONSE y
+            // DIALOGUE (una toma confirmada por turno) sí bloquean.
+            if (!$isTongueTwister && $this->repo->findAttemptForReferenceAudio($empresaId, $exerciseId, $referenceAudioId, $usuarioId) !== null) {
+                return ['success' => false, 'message' => 'This recording is already confirmed.'];
+            }
+        }
+
         $file = $files['archivo'] ?? null;
-        if (!is_array($file) || empty($file['tmp_name']) || !is_uploaded_file((string)$file['tmp_name'])) {
-            return ['success' => false, 'message' => 'Audio recording required.'];
+        $validated = AcadAudioValidationService::validate(is_array($file) ? $file : null);
+        if (!$validated['success']) {
+            return $validated;
         }
 
-        $uploadErr = (int)($file['error'] ?? 0);
-        if ($uploadErr !== UPLOAD_ERR_OK) {
-            return ['success' => false, 'message' => 'Error uploading the audio recording.'];
-        }
-
-        $tmp = (string)$file['tmp_name'];
-        $mime = '';
-        if (class_exists('finfo')) {
-            $info = new finfo(FILEINFO_MIME_TYPE);
-            $mime = $info->file($tmp) ?: '';
-        }
-        if ($mime === '' && function_exists('mime_content_type')) {
-            $mime = mime_content_type($tmp) ?: '';
-        }
-
-        if (!isset(self::ALLOWED_AUDIO_MIME[$mime])) {
-            return ['success' => false, 'message' => 'Only MP3, M4A, WEBM, OGG or WAV audio is allowed.'];
-        }
-
-        clearstatcache(true, $tmp);
-        if ((int)@filesize($tmp) > self::MAX_AUDIO_BYTES) {
-            return ['success' => false, 'message' => 'Maximum 15 MB per audio recording.'];
-        }
-
-        $ext = self::ALLOWED_AUDIO_MIME[$mime];
-        $name = 'attempt_' . bin2hex(random_bytes(8)) . '.' . $ext;
+        $name = 'attempt_' . bin2hex(random_bytes(8)) . '.' . $validated['ext'];
         $path = StorageService::instance()->putUploadedFile(
             StorageService::ZONE_ACAD_MEDIA,
             $name,
@@ -189,14 +303,28 @@ class AcadAttemptService
             return ['success' => false, 'message' => 'Could not save the audio recording.'];
         }
 
+        // Duración medida por el navegador (fin - inicio de grabación), solo
+        // informativa/motivacional — nunca se usa para calificar. Se acepta
+        // un rango amplio pero acotado (hasta 2 minutos) para descartar
+        // valores corruptos sin pretender validar precisión real.
+        $metaJson = null;
+        if ($isTongueTwister) {
+            $durationMs = (int)($post['duration_ms'] ?? 0);
+            if ($durationMs > 0 && $durationMs < 120000) {
+                $metaJson = json_encode(['duration_ms' => $durationMs], JSON_UNESCAPED_UNICODE);
+            }
+        }
+
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s.v');
         $attemptId = $this->repo->insertAttempt([
             'empresa_id' => $empresaId,
             'exercise_id' => $exerciseId,
+            'reference_audio_id' => $referenceAudioId > 0 ? $referenceAudioId : null,
             'usuario_id' => $usuarioId,
             'iniciado_at' => $now,
             'enviado_at' => $now,
             'audio_ruta' => $path,
+            'meta_json' => $metaJson,
             'estado_id' => AcadRepository::ESTADO_PENDIENTE,
         ]);
 

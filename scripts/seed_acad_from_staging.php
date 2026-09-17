@@ -194,7 +194,7 @@ foreach ($stagingFiles as $stagingFile) {
                     throw new RuntimeException("Skill '{$exDef['skill_codigo']}' o tipo '{$exDef['exercise_type_codigo']}' no existe para empresa {$empresaId}.");
                 }
 
-                $stmt = $pdo->prepare('SELECT id, audio_referencia_ruta FROM acad_exercise WHERE empresa_id = ? AND lesson_id = ? AND titulo_en = ? AND deleted_at IS NULL LIMIT 1');
+                $stmt = $pdo->prepare('SELECT id FROM acad_exercise WHERE empresa_id = ? AND lesson_id = ? AND titulo_en = ? AND deleted_at IS NULL LIMIT 1');
                 $stmt->execute([$empresaId, $lessonId, $exDef['titulo_en']]);
                 $existing = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -206,7 +206,6 @@ foreach ($stagingFiles as $stagingFile) {
                         WHERE id = ?
                     ')->execute([$skillId, $typeId, $exDef['prompt_en'], (int)$exDef['orden'], $exerciseId]);
                     $report['exercises_updated']++;
-                    $currentAudio = $existing['audio_referencia_ruta'];
                 } else {
                     $pdo->prepare('
                         INSERT INTO acad_exercise
@@ -215,8 +214,8 @@ foreach ($stagingFiles as $stagingFile) {
                     ')->execute([$empresaId, $lessonId, $skillId, $typeId, $exDef['titulo_en'], $exDef['prompt_en'], (int)$exDef['orden']]);
                     $exerciseId = (int)$pdo->lastInsertId();
                     $report['exercises_inserted']++;
-                    $currentAudio = null;
                 }
+                $hasReferenceAudio = $repo->getReferenceAudiosByExercise($exerciseId) !== [];
 
                 if (($exDef['exercise_type_codigo'] ?? '') === 'MULTIPLE_CHOICE' && !empty($exDef['options'])) {
                     $repo->deleteOptionsByExercise($exerciseId);
@@ -229,7 +228,7 @@ foreach ($stagingFiles as $stagingFile) {
                 }
 
                 if (!empty($exDef['audio_file'])) {
-                    if (!empty($currentAudio)) {
+                    if ($hasReferenceAudio) {
                         $report['audio_skipped_existing']++;
                     } else {
                         $srcPath = $audioBaseDir . '/' . $unitDef['audio_zip_folder'] . '/' . $exDef['audio_file'];
@@ -250,7 +249,7 @@ foreach ($stagingFiles as $stagingFile) {
                             if ($refPath === null) {
                                 $warnings[] = "No se pudo copiar audio para ejercicio '{$exDef['titulo_en']}' ({$srcPath})";
                             } else {
-                                $repo->setExerciseAudioReferencia($empresaId, $exerciseId, $refPath);
+                                $repo->insertReferenceAudio($exerciseId, null, $refPath, 10);
                                 $report['audio_uploaded']++;
                             }
                         }

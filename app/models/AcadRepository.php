@@ -193,24 +193,60 @@ class AcadRepository
         $stmt->execute([$exerciseId]);
     }
 
-    public function insertOption(int $exerciseId, string $textoEn, bool $esCorrecta, int $orden): int
+    public function insertOption(int $exerciseId, string $textoEn, bool $esCorrecta, int $orden, ?int $blankIndex = null): int
     {
         $stmt = $this->pdo->prepare('
-            INSERT INTO acad_exercise_option (exercise_id, texto_en, es_correcta, orden, created_at)
-            VALUES (?, ?, ?, ?, NOW(3))
+            INSERT INTO acad_exercise_option (exercise_id, texto_en, es_correcta, blank_index, orden, created_at)
+            VALUES (?, ?, ?, ?, ?, NOW(3))
         ');
-        $stmt->execute([$exerciseId, $textoEn, $esCorrecta ? 1 : 0, $orden]);
+        $stmt->execute([$exerciseId, $textoEn, $esCorrecta ? 1 : 0, $blankIndex, $orden]);
 
         return (int)$this->pdo->lastInsertId();
     }
 
-    public function setExerciseAudioReferencia(int $empresaId, int $exerciseId, string $path): void
+    /* ------------------------------------------------------------------ */
+    /* Audios de referencia (N por ejercicio)                             */
+    /* ------------------------------------------------------------------ */
+
+    /** @return list<array<string, mixed>> */
+    public function getReferenceAudiosByExercise(int $exerciseId): array
     {
         $stmt = $this->pdo->prepare('
-            UPDATE acad_exercise SET audio_referencia_ruta = ?
-            WHERE empresa_id = ? AND id = ?
+            SELECT * FROM acad_exercise_reference_audio
+            WHERE exercise_id = ? AND deleted_at IS NULL
+            ORDER BY orden, id
         ');
-        $stmt->execute([$path, $empresaId, $exerciseId]);
+        $stmt->execute([$exerciseId]);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    public function findReferenceAudio(int $exerciseId, int $referenceAudioId): ?array
+    {
+        $stmt = $this->pdo->prepare('
+            SELECT * FROM acad_exercise_reference_audio
+            WHERE id = ? AND exercise_id = ? AND deleted_at IS NULL LIMIT 1
+        ');
+        $stmt->execute([$referenceAudioId, $exerciseId]);
+
+        return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
+
+    public function insertReferenceAudio(int $exerciseId, ?string $textoEn, string $ruta, int $orden): int
+    {
+        $stmt = $this->pdo->prepare('
+            INSERT INTO acad_exercise_reference_audio (exercise_id, texto_en, ruta, orden, created_at)
+            VALUES (?, ?, ?, ?, NOW(3))
+        ');
+        $stmt->execute([$exerciseId, $textoEn, $ruta, $orden]);
+
+        return (int)$this->pdo->lastInsertId();
+    }
+
+    public function deleteReferenceAudio(int $referenceAudioId): void
+    {
+        $stmt = $this->pdo->prepare('UPDATE acad_exercise_reference_audio SET deleted_at = NOW(3) WHERE id = ?');
+        $stmt->execute([$referenceAudioId]);
     }
 
     /* ------------------------------------------------------------------ */
@@ -274,24 +310,26 @@ class AcadRepository
     {
         $stmt = $this->pdo->prepare('
             INSERT INTO acad_attempt (
-                empresa_id, exercise_id, usuario_id, iniciado_at, enviado_at,
-                respuesta_texto, selected_option_id, audio_ruta,
+                empresa_id, exercise_id, reference_audio_id, usuario_id, iniciado_at, enviado_at,
+                respuesta_texto, selected_option_id, audio_ruta, meta_json,
                 score, feedback_en, calificado_by, calificado_at, estado_id, created_at
             ) VALUES (
-                ?, ?, ?, ?, ?,
-                ?, ?, ?,
+                ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?,
                 ?, ?, ?, ?, ?, NOW(3)
             )
         ');
         $stmt->execute([
             $data['empresa_id'],
             $data['exercise_id'],
+            $data['reference_audio_id'] ?? null,
             $data['usuario_id'],
             $data['iniciado_at'] ?? null,
             $data['enviado_at'] ?? null,
             $data['respuesta_texto'] ?? null,
             $data['selected_option_id'] ?? null,
             $data['audio_ruta'] ?? null,
+            $data['meta_json'] ?? null,
             $data['score'] ?? null,
             $data['feedback_en'] ?? null,
             $data['calificado_by'] ?? null,
@@ -300,6 +338,45 @@ class AcadRepository
         ]);
 
         return (int)$this->pdo->lastInsertId();
+    }
+
+    /**
+     * Intento activo (cualquier estado, PENDIENTE/CALIFICADO/AUTO_CALIFICADO) ya
+     * registrado para un audio de referencia puntual de un estudiante — usado
+     * para bloquear en el servidor una segunda grabación sobre el mismo slot ya
+     * confirmado (no solo deshabilitar el botón en el navegador).
+     */
+    public function findAttemptForReferenceAudio(int $empresaId, int $exerciseId, int $referenceAudioId, int $usuarioId): ?array
+    {
+        $stmt = $this->pdo->prepare('
+            SELECT * FROM acad_attempt
+            WHERE empresa_id = ? AND exercise_id = ? AND reference_audio_id = ? AND usuario_id = ? AND deleted_at IS NULL
+            ORDER BY id DESC LIMIT 1
+        ');
+        $stmt->execute([$empresaId, $exerciseId, $referenceAudioId, $usuarioId]);
+
+        return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
+
+    /**
+     * Historial COMPLETO (no solo el último) de tomas confirmadas de un
+     * estudiante para un audio de referencia — usado por TONGUE_TWISTER, que
+     * a diferencia de AUDIO_RESPONSE no bloquea tras la primera confirmación:
+     * cada toma queda registrada para poder mostrar la progresión de
+     * duración entre intentos.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function findAttemptsHistoryForReferenceAudio(int $empresaId, int $exerciseId, int $referenceAudioId, int $usuarioId): array
+    {
+        $stmt = $this->pdo->prepare('
+            SELECT * FROM acad_attempt
+            WHERE empresa_id = ? AND exercise_id = ? AND reference_audio_id = ? AND usuario_id = ? AND deleted_at IS NULL
+            ORDER BY id ASC
+        ');
+        $stmt->execute([$empresaId, $exerciseId, $referenceAudioId, $usuarioId]);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
 
     public function gradeAttempt(int $attemptId, float $score, ?string $feedbackEn, int $calificadoBy): void
@@ -317,11 +394,13 @@ class AcadRepository
     {
         $stmt = $this->pdo->prepare('
             SELECT a.*, e.titulo_en AS exercise_titulo_en, e.skill_id, s.codigo AS skill_codigo,
-                   e.max_score, u.username AS estudiante_username
+                   e.max_score, u.username AS estudiante_username,
+                   ra.texto_en AS reference_audio_texto_en, ra.orden AS reference_audio_orden
             FROM acad_attempt a
             INNER JOIN acad_exercise e ON e.id = a.exercise_id
             INNER JOIN acad_skill s ON s.id = e.skill_id
             INNER JOIN usuario u ON u.id = a.usuario_id
+            LEFT JOIN acad_exercise_reference_audio ra ON ra.id = a.reference_audio_id
             WHERE a.empresa_id = ? AND a.estado_id = ? AND a.deleted_at IS NULL
             ORDER BY a.enviado_at ASC, a.id ASC
         ');

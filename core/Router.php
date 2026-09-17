@@ -51,10 +51,29 @@ class Router
 
         if (!method_exists($controller, $method)) {
             http_response_code(404);
-            die("Método no encontrado: $controllerName::$method()");
+            error_log("404: método no encontrado $controllerName::$method() | url=" . (string)($_GET['url'] ?? ''));
+            $this->render404();
+            exit;
         }
 
         call_user_func_array([$controller, $method], $params);
+    }
+
+    /**
+     * Página 404 genérica (app/views/error_404.php): nunca debe revelar el
+     * nombre de la clase/método interno que se buscó — eso solo queda en
+     * error_log(), no en la respuesta al cliente.
+     */
+    private function render404(): void
+    {
+        $error404VolverUrl = (class_exists('SessionManager') && SessionManager::userLogged())
+            ? '?url=dashboard'
+            : '?url=login';
+        $error404VolverTexto = (class_exists('SessionManager') && SessionManager::userLogged())
+            ? 'Volver al inicio'
+            : 'Volver al inicio de sesión';
+
+        require BASE_PATH . '/app/views/error_404.php';
     }
 
     /**
@@ -136,11 +155,11 @@ class Router
         /*
          * Sesión obligatoria en todo el sistema salvo pantallas de Login.
          * (Antes se excluían index/modulo/item y cualquier usuario podía pegar ?url=usuario sin sesión.)
-         * PrivacidadController: debe verse ANTES de loguearse (enlazada desde
-         * login.php) y también por terceros que ni siquiera son usuarios del
-         * sistema (Habeas Data no exige tener cuenta para consultarla).
+         * PrivacidadController/AvisolegalController: deben verse ANTES de loguearse
+         * (enlazadas desde login.php) y también por terceros que ni siquiera son
+         * usuarios del sistema (Habeas Data no exige tener cuenta para consultarla).
          */
-        if (!in_array($controllerName, ['LoginController', 'HealthController', 'PrivacidadController'], true)) {
+        if (!in_array($controllerName, ['LoginController', 'HealthController', 'PrivacidadController', 'AvisolegalController'], true)) {
             SessionManager::requireLogin();
         }
 
@@ -218,7 +237,7 @@ class Router
         }
 
         if (SessionManager::userLogged()
-            && !in_array($controllerName, ['LoginController', 'HealthController', 'PrivacidadController', 'DashboardController', 'ModuleController', 'ContextController'], true)
+            && !in_array($controllerName, ['LoginController', 'HealthController', 'PrivacidadController', 'AvisolegalController', 'DashboardController', 'ModuleController', 'ContextController'], true)
             && class_exists('PermisoService')
             && !($controllerName === 'UsuarioController' && in_array($method, $usuarioJsonLookupMethods, true))
             && !($controllerName === 'EmpresaController' && in_array($method, $empresaJsonApiMethods, true))

@@ -22,13 +22,22 @@ if (!function_exists('acadH')) {
             <?php else: ?>
                 <table class="sgd-doc-table">
                     <thead>
-                        <tr><th>Student</th><th>Exercise</th><th>Skill</th><th>Answer</th><th>Grade</th></tr>
+                        <tr><th>Student</th><th>Exercise</th><th>Prompt</th><th>Skill</th><th>Answer</th><th>Grade</th></tr>
                     </thead>
                     <tbody>
                         <?php foreach ($pending as $a): ?>
                             <tr>
                                 <td><?= acadH($a['estudiante_username']) ?></td>
                                 <td><?= acadH($a['exercise_titulo_en']) ?></td>
+                                <td>
+                                    <?php if (!empty($a['reference_audio_id'])): ?>
+                                        <?= $a['reference_audio_texto_en'] !== null && $a['reference_audio_texto_en'] !== ''
+                                            ? acadH($a['reference_audio_texto_en'])
+                                            : 'Audio #' . acadH((string)$a['reference_audio_id']) ?>
+                                    <?php else: ?>
+                                        —
+                                    <?php endif; ?>
+                                </td>
                                 <td><span class="sgd-doc-badge"><?= acadH($a['skill_codigo']) ?></span></td>
                                 <td>
                                     <?php if (!empty($a['audio_ruta'])): ?>

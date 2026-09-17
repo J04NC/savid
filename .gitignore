@@ -15,3 +15,8 @@
 # Logs de diagnostico en runtime
 /storage/*.log
 /storage/*.txt
+
+# Entorno virtual Python local para edge-tts (audio de referencia de
+# Academic con texto a voz) — se recrea con:
+#   python3 -m venv scripts/.tts-venv && scripts/.tts-venv/bin/pip install edge-tts
+/scripts/.tts-venv/
