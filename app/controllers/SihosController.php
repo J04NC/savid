@@ -8,6 +8,7 @@ class SihosController
     private SihosGlosaConclusionService $glosaConclusionService;
     private SihosPresupuestoEliminacionService $eliminacionService;
     private SihosCancelacionCuentaService $cancelacionCuentaService;
+    private SihosAuditoriaReferenciasService $auditoriaReferenciasService;
     private SihosNominaPilaService $nominaPilaService;
     private SihosNominaPilaCorreccionService $correccionService;
     private SihosPlanillaIntegradaService $planillaIntegradaService;
@@ -23,6 +24,7 @@ class SihosController
         $this->glosaConclusionService = new SihosGlosaConclusionService();
         $this->eliminacionService = new SihosPresupuestoEliminacionService();
         $this->cancelacionCuentaService = new SihosCancelacionCuentaService();
+        $this->auditoriaReferenciasService = new SihosAuditoriaReferenciasService();
         $this->nominaPilaService = new SihosNominaPilaService();
         $this->correccionService = new SihosNominaPilaCorreccionService();
         $this->planillaIntegradaService = new SihosPlanillaIntegradaService();
@@ -607,6 +609,38 @@ class SihosController
         }
 
         $resultado = $this->cancelacionCuentaService->reclasificarCuentaVigenciaAnterior($empresaId, $codiDocu, $numeDocu, $cuentaDestino);
+
+        if (!$resultado['ok']) {
+            http_response_code(400);
+        }
+
+        echo json_encode($resultado, JSON_UNESCAPED_UNICODE);
+    }
+
+    /**
+     * GET ?url=sihos/cruceAuditarReferencias&empresa_id=N&codi_docu=X&nume_docu=Y
+     * — modal "Auditar referencias" del reporte de cruce: trazabilidad de
+     * solo lectura de un documento puntual (contabilidad + presupuesto,
+     * documentos que lo referencian). Sin permiso adicional — el middleware
+     * ya exige 'ver' sobre sihos/cruce, y es de solo lectura.
+     */
+    public function cruceAuditarReferencias(): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+
+        $scope = $this->connectionService->buildScope($_GET);
+        $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : 0;
+        $codiDocu = trim((string)($_GET['codi_docu'] ?? ''));
+        $numeDocu = trim((string)($_GET['nume_docu'] ?? ''));
+
+        if ($empresaId <= 0 || $codiDocu === '' || $numeDocu === '') {
+            http_response_code(400);
+            echo json_encode(['ok' => false, 'message' => 'Faltan datos del documento.'], JSON_UNESCAPED_UNICODE);
+
+            return;
+        }
+
+        $resultado = $this->auditoriaReferenciasService->auditarDocumento($empresaId, $codiDocu, $numeDocu);
 
         if (!$resultado['ok']) {
             http_response_code(400);
