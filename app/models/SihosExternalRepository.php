@@ -3577,4 +3577,177 @@ where e.CodiInst=:codiInst";
 
         return $resultado;
     }
+
+    /**
+     * Líneas DetaCont propias de un documento puntual (auditoría de
+     * referencias) — sin límite de fecha.
+     *
+     * @return list<array{ConsDeta:int,CodiCont:string,NombCuen:?string,Valor:float,CentCost:?string,TiDoTerc:?string,NuDoTerc:?string,NombTerc:?string,TiDoRefe:?string,NuDoRefe:?string}>
+     */
+    public function fetchDetaContPropio(string $codiDocu, string $numeDocu): array
+    {
+        $stmt = $this->connect()->prepare(
+            'SELECT ConsDeta, CodiCont, Valor, CentCost, TiDoTerc, NuDoTerc, TiDoRefe, NuDoRefe
+             FROM DetaCont WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?
+             ORDER BY ConsDeta'
+        );
+        $stmt->execute([$this->codiInst(), $codiDocu, $numeDocu]);
+        $filas = $stmt->fetchAll();
+
+        $nombresCuentas = $this->resolverNombresCuentas(array_column($filas, 'CodiCont'));
+        $nombresTerceros = $this->resolverNombresTerceros(array_map(
+            static fn (array $f): array => ['tipo' => $f['TiDoTerc'], 'numero' => $f['NuDoTerc']],
+            $filas
+        ));
+
+        return array_map(
+            static function (array $f) use ($nombresCuentas, $nombresTerceros): array {
+                $claveTercero = $f['TiDoTerc'] . '-' . $f['NuDoTerc'];
+
+                return [
+                    'ConsDeta' => (int)$f['ConsDeta'],
+                    'CodiCont' => $f['CodiCont'],
+                    'NombCuen' => $nombresCuentas[$f['CodiCont']] ?? null,
+                    'Valor' => (float)$f['Valor'],
+                    'CentCost' => $f['CentCost'],
+                    'TiDoTerc' => $f['TiDoTerc'],
+                    'NuDoTerc' => $f['NuDoTerc'],
+                    'NombTerc' => $nombresTerceros[$claveTercero] ?? null,
+                    'TiDoRefe' => $f['TiDoRefe'],
+                    'NuDoRefe' => $f['NuDoRefe'],
+                ];
+            },
+            $filas
+        );
+    }
+
+    /**
+     * Líneas DetaPlan propias de un documento puntual (auditoría de
+     * referencias) — sin límite de fecha.
+     *
+     * @return list<array{ConsDeta:int,CodiPlan:string,NombPlan:?string,Valor:float,CentCost:?string}>
+     */
+    public function fetchDetaPlanPropio(string $codiDocu, string $numeDocu): array
+    {
+        $stmt = $this->connect()->prepare(
+            'SELECT ConsDeta, CodiPlan, Valor, CentCost
+             FROM DetaPlan WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?
+             ORDER BY ConsDeta'
+        );
+        $stmt->execute([$this->codiInst(), $codiDocu, $numeDocu]);
+        $filas = $stmt->fetchAll();
+
+        $nombresRubros = $this->resolverNombresRubros(array_column($filas, 'CodiPlan'));
+
+        return array_map(
+            static fn (array $f): array => [
+                'ConsDeta' => (int)$f['ConsDeta'],
+                'CodiPlan' => $f['CodiPlan'],
+                'NombPlan' => $nombresRubros[$f['CodiPlan']] ?? null,
+                'Valor' => (float)$f['Valor'],
+                'CentCost' => $f['CentCost'],
+            ],
+            $filas
+        );
+    }
+
+    /**
+     * Documentos que referencian a este documento puntual (vía
+     * DetaCont.TiDoRefe/NuDoRefe) — para el modal "Auditar referencias".
+     * Por cada vinculado: su encabezado, las líneas puntuales que
+     * referencian a este documento, y su presupuesto TOTAL (DetaPlan no
+     * tiene referencia por línea — no se puede atribuir solo la parte que
+     * corresponde a esta referencia, mismo criterio ya documentado en
+     * SihosCruceReconocimientoService::buildDiferenciasPresupuestoContabilidad()).
+     * Sin límite de fecha; búsqueda por índice exacto TiDoRefe/NuDoRefe,
+     * normalmente pocos documentos vinculados.
+     *
+     * @return list<array{CodiDocu:string,NumeDocu:string,FechDocu:string,TipoUsua:?string,ValoTota:float,Anulado:int,Causado:int,TiDoTerc:?string,NuDoTerc:?string,NombTerc:?string,lineas:list<array{ConsDeta:int,CodiCont:string,NombCuen:?string,Valor:float}>,presupuestoTotal:float}>
+     */
+    public function fetchDocumentosQueReferencian(string $codiDocu, string $numeDocu): array
+    {
+        $codiInst = $this->codiInst();
+
+        // Excluye la auto-referencia (dc.CodiDocu = dc.TiDoRefe AND dc.NumeDocu = dc.NuDoRefe)
+        // — verificado con datos reales que una FACTURA puede tener sus
+        // propias líneas con TiDoRefe/NuDoRefe apuntando a sí misma (no es
+        // una "corrección", es la línea original). Mismo criterio ya usado
+        // en fetchClavesConAjustePrevio().
+        $stmt = $this->connect()->prepare(
+            'SELECT dc.ConsDeta, dc.CodiCont, dc.Valor, ec.CodiDocu, ec.NumeDocu,
+                    ec.FechDocu, ec.TipoUsua, ec.ValoTota, ec.Anulado, ec.Causado,
+                    ec.TiDoTerc, ec.NuDoTerc
+             FROM DetaCont dc
+             INNER JOIN EncaCont ec ON ec.CodiInst = dc.CodiInst AND ec.CodiDocu = dc.CodiDocu AND ec.NumeDocu = dc.NumeDocu
+             WHERE dc.CodiInst = ? AND dc.TiDoRefe = ? AND dc.NuDoRefe = ? AND ec.Anulado = 0
+               AND NOT (dc.CodiDocu = dc.TiDoRefe AND dc.NumeDocu = dc.NuDoRefe)
+             ORDER BY ec.FechDocu, ec.NumeDocu, dc.ConsDeta'
+        );
+        $stmt->execute([$codiInst, $codiDocu, $numeDocu]);
+        $filas = $stmt->fetchAll();
+
+        $porDocumento = [];
+        foreach ($filas as $f) {
+            $clave = $f['CodiDocu'] . '-' . $f['NumeDocu'];
+            if (!isset($porDocumento[$clave])) {
+                $porDocumento[$clave] = [
+                    'CodiDocu' => $f['CodiDocu'],
+                    'NumeDocu' => $f['NumeDocu'],
+                    'FechDocu' => (string)$f['FechDocu'],
+                    'TipoUsua' => $f['TipoUsua'],
+                    'ValoTota' => (float)$f['ValoTota'],
+                    'Anulado' => (int)$f['Anulado'],
+                    'Causado' => (int)$f['Causado'],
+                    'TiDoTerc' => $f['TiDoTerc'],
+                    'NuDoTerc' => $f['NuDoTerc'],
+                    'lineas' => [],
+                    'presupuestoTotal' => 0.0,
+                ];
+            }
+            $porDocumento[$clave]['lineas'][] = [
+                'ConsDeta' => (int)$f['ConsDeta'],
+                'CodiCont' => $f['CodiCont'],
+                'Valor' => (float)$f['Valor'],
+            ];
+        }
+
+        if ($porDocumento === []) {
+            return [];
+        }
+
+        $stmtPlan = $this->connect()->prepare(
+            'SELECT SUM(Valor) AS Valor FROM DetaPlan WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?'
+        );
+        foreach ($porDocumento as $clave => &$vinculado) {
+            $stmtPlan->execute([$codiInst, $vinculado['CodiDocu'], $vinculado['NumeDocu']]);
+            $vinculado['presupuestoTotal'] = (float)($stmtPlan->fetchColumn() ?: 0);
+        }
+        unset($vinculado);
+
+        // Nombres de cuenta (todas las líneas de todos los vinculados) y de
+        // tercero (encabezado de cada vinculado), resueltos en batch.
+        $todosLosCodigosCuenta = [];
+        foreach ($porDocumento as $vinculado) {
+            foreach ($vinculado['lineas'] as $linea) {
+                $todosLosCodigosCuenta[] = $linea['CodiCont'];
+            }
+        }
+        $nombresCuentas = $this->resolverNombresCuentas($todosLosCodigosCuenta);
+        $nombresTerceros = $this->resolverNombresTerceros(array_map(
+            static fn (array $v): array => ['tipo' => $v['TiDoTerc'], 'numero' => $v['NuDoTerc']],
+            $porDocumento
+        ));
+
+        foreach ($porDocumento as $clave => &$vinculado) {
+            $claveTercero = $vinculado['TiDoTerc'] . '-' . $vinculado['NuDoTerc'];
+            $vinculado['NombTerc'] = $nombresTerceros[$claveTercero] ?? null;
+            foreach ($vinculado['lineas'] as &$linea) {
+                $linea['NombCuen'] = $nombresCuentas[$linea['CodiCont']] ?? null;
+            }
+            unset($linea);
+        }
+        unset($vinculado);
+
+        return array_values($porDocumento);
+    }
 }
