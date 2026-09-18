@@ -219,8 +219,8 @@ $sihosAuditarReferenciasJsV = is_readable($assetSihosAuditarReferencias) ? (int)
                                             <?php endif; ?>
                                             <button type="button" class="auditoria-btn-primary btnSihosAuditarReferencias"
                                                     data-empresa-id="<?= (int)$empresaId ?>"
-                                                    data-codi-docu="<?= htmlspecialchars($f['CodiDocu']) ?>"
-                                                    data-nume-docu="<?= htmlspecialchars($f['NumeDocu']) ?>">🔍 Referencias</button>
+                                                    data-codi-docu="<?= htmlspecialchars($f['FacturaCodiDocu'] ?? $f['CodiDocu']) ?>"
+                                                    data-nume-docu="<?= htmlspecialchars($f['FacturaNumeDocu'] ?? $f['NumeDocu']) ?>">🔍 Referencias</button>
                                         </td>
                                     </tr>
                                 <?php endforeach; ?>
@@ -298,8 +298,8 @@ $sihosAuditarReferenciasJsV = is_readable($assetSihosAuditarReferencias) ? (int)
                                             <?php endif; ?>
                                             <button type="button" class="auditoria-btn-primary btnSihosAuditarReferencias"
                                                     data-empresa-id="<?= (int)$empresaId ?>"
-                                                    data-codi-docu="<?= htmlspecialchars($f['CodiDocu']) ?>"
-                                                    data-nume-docu="<?= htmlspecialchars($f['NumeDocu']) ?>">🔍 Referencias</button>
+                                                    data-codi-docu="<?= htmlspecialchars($f['FacturaCodiDocu'] ?? $f['CodiDocu']) ?>"
+                                                    data-nume-docu="<?= htmlspecialchars($f['FacturaNumeDocu'] ?? $f['NumeDocu']) ?>">🔍 Referencias</button>
                                         </td>
                                     </tr>
                                 <?php endforeach; ?>
@@ -369,7 +369,18 @@ $sihosAuditarReferenciasJsV = is_readable($assetSihosAuditarReferencias) ? (int)
                         <thead><tr><th>Documento</th><th>Fecha</th><th>Tipo de usuario</th><th>Presupuesto</th><th>Contabilidad</th><th>Diferencia</th><th>Documento relacionado</th><th>Fecha relacionado</th><th>Cuenta real (si no es 4312)</th><th>Opciones</th></tr></thead>
                         <tbody>
                         <?php foreach ($dif['detalle'] as $f): ?>
-                            <?php $tieneRelacionado = $f['RelacionadoCodiDocu'] !== null; ?>
+                            <?php
+                            $tieneRelacionado = $f['RelacionadoCodiDocu'] !== null;
+                            // "Relacionado" es la factura solo cuando el documento
+                            // propio de la fila es una nota/glosa (referencia hacia
+                            // ella); si el propio ya es una factura, "Relacionado" es
+                            // el vinculado que la afecta (p. ej. la nota), no otra
+                            // factura — la base de auditoría debe seguir siendo la
+                            // factura propia en ese caso.
+                            $esFacturaPropia = in_array($f['CodiDocu'], $reporte['codigosFactura'], true);
+                            $refAuditoriaCodiDocu = $esFacturaPropia ? $f['CodiDocu'] : ($f['RelacionadoCodiDocu'] ?? $f['CodiDocu']);
+                            $refAuditoriaNumeDocu = $esFacturaPropia ? $f['NumeDocu'] : ($f['RelacionadoNumeDocu'] ?? $f['NumeDocu']);
+                            ?>
                             <tr>
                                 <td><?= htmlspecialchars($f['CodiDocu'] . '-' . $f['NumeDocu']) ?></td>
                                 <td><?= htmlspecialchars($f['FechDocu']) ?></td>
@@ -390,8 +401,8 @@ $sihosAuditarReferenciasJsV = is_readable($assetSihosAuditarReferencias) ? (int)
                                     <?php endif; ?>
                                     <button type="button" class="auditoria-btn-primary btnSihosAuditarReferencias"
                                             data-empresa-id="<?= (int)$empresaId ?>"
-                                            data-codi-docu="<?= htmlspecialchars($f['CodiDocu']) ?>"
-                                            data-nume-docu="<?= htmlspecialchars($f['NumeDocu']) ?>">🔍 Referencias</button>
+                                            data-codi-docu="<?= htmlspecialchars($refAuditoriaCodiDocu) ?>"
+                                            data-nume-docu="<?= htmlspecialchars($refAuditoriaNumeDocu) ?>">🔍 Referencias</button>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
