@@ -501,7 +501,6 @@ class SihosCruceReconocimientoService
         // de 4312 (verificado con un caso real).
         $cuentasNoIdentificadas = $repository->fetchCuentasNoIdentificadasFacturas(
             $codigosFactura,
-            $cuentasCapitaPasivo,
             $fechaIni,
             $fechaFin
         );
@@ -526,6 +525,7 @@ class SihosCruceReconocimientoService
             $filaCont = $porContabilidad[$clave] ?? null;
             [$codiDocu, $numeDocu] = explode('-', $clave, 2);
             $esReconocimientoTesoreria = in_array($codiDocu, $codigosReconocimientoTesoreria, true);
+            $ref = $facturaReferenciada[$clave] ?? null;
 
             $presupuesto = round((float)($filaPres['Valor'] ?? 0), 2);
             // Créditos en DetaCont quedan en negativo (convención SIHOS); se
@@ -553,7 +553,16 @@ class SihosCruceReconocimientoService
                 continue;
             }
 
-            $codiTipoUsua = $filaPres['TipoUsua'] ?? $filaCont['TipoUsua'] ?? null;
+            // Para una nota/glosa/DAC que referencia una factura puntual (no
+            // ambigua), el tipo de usuario real es el de la FACTURA, no el
+            // de la nota — confirmado con datos reales: el 100% de las
+            // notas NCF sobre facturas de vigencia anterior tiene
+            // TipoUsua=5 ("RIESGO PROFESIO") en su propio encabezado sin
+            // importar el pagador real de la factura (valor por defecto de
+            // SIHOS al crearlas, no información real). Si $clave es la
+            // propia factura, $ref es null y no cambia nada.
+            $facturaTipoUsua = ($ref !== null && !($ref['ReferenciaAmbigua'] ?? false)) ? ($ref['FacturaTipoUsua'] ?? null) : null;
+            $codiTipoUsua = $facturaTipoUsua ?? $filaPres['TipoUsua'] ?? $filaCont['TipoUsua'] ?? null;
             $nombreTipoUsua = $codiTipoUsua !== null && isset($nombresTipoUsua[$codiTipoUsua])
                 ? $nombresTipoUsua[$codiTipoUsua]
                 : ('Tipo ' . ($codiTipoUsua ?? 'sin dato'));
@@ -566,7 +575,6 @@ class SihosCruceReconocimientoService
             $porTipoUsua[$nombreTipoUsua]['diferencia'] += $diferencia;
 
             if (abs($diferencia) >= 0.01) {
-                $ref = $facturaReferenciada[$clave] ?? null;
                 $fechaDocu = $filaPres['FechDocu'] ?? $filaCont['FechDocu'] ?? '';
                 $facturaFecha = $ref['FacturaFecha'] ?? null;
 

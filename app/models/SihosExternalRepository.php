@@ -361,7 +361,8 @@ class SihosExternalRepository
         $ph = implode(',', array_fill(0, count($codigos), '?'));
         $sql = "
             SELECT DISTINCT nc.CodiDocu, nc.NumeDocu,
-                   fact.CodiDocu AS FacturaCodiDocu, fact.NumeDocu AS FacturaNumeDocu, fact.FechDocu AS FacturaFecha
+                   fact.CodiDocu AS FacturaCodiDocu, fact.NumeDocu AS FacturaNumeDocu, fact.FechDocu AS FacturaFecha,
+                   fact.TipoUsua AS FacturaTipoUsua
             FROM EncaCont nc
             INNER JOIN DetaCont dcref
                 ON dcref.CodiInst = nc.CodiInst AND dcref.CodiDocu = nc.CodiDocu AND dcref.NumeDocu = nc.NumeDocu
@@ -1081,37 +1082,29 @@ class SihosExternalRepository
 
     /**
      * Para facturas en rango: qué otras cuentas (fuera de cartera 13/14,
-     * ingreso 4312xx, capita pasivo, y cuenta de orden 8xxx) tocó la
-     * factura en su propia causación — NO para conciliar nada, solo para
-     * mostrar en la sección de diferencias qué cuenta real se usó cuando
-     * no es 4312 (verificado con un caso real: una factura "Otros
-     * deudores" acredita 48xx "OTROS INGRESOS" en vez de 4312, así que su
-     * contabilidad(4312) da $0 aunque sí tiene un asiento real). La
-     * diferencia se sigue mostrando igual — esto es solo trazabilidad.
+     * ingreso 4312xx, y cuenta de orden 8xxx) tocó la factura en su propia
+     * causación — NO para conciliar nada, solo para mostrar en la sección
+     * de diferencias qué cuenta real se usó cuando no es 4312 (verificado
+     * con un caso real: una factura "Otros deudores" acredita 48xx "OTROS
+     * INGRESOS" en vez de 4312, así que su contabilidad(4312) da $0 aunque
+     * sí tiene un asiento real). La diferencia se sigue mostrando igual —
+     * esto es solo trazabilidad. Incluye a propósito las cuentas de capita
+     * pasivo (a diferencia de fetchCuentasInesperadasFacturas() y
+     * fetchFacturasSinCuentaIngreso(), donde sí deben excluirse porque ahí
+     * SÍ son la cuenta esperada) — confirmado por el usuario: quiere ver
+     * exactamente qué cuenta real se usó, capita incluida, sin que eso
+     * cambie la diferencia calculada.
      *
      * @param string[] $codigosFactura
-     * @param string[] $cuentasCapitaPasivo
      * @return array<string, list<array{CodiCont:string,Valor:float}>> indexado por "CodiDocu-NumeDocu"
      */
-    public function fetchCuentasNoIdentificadasFacturas(
-        array $codigosFactura,
-        array $cuentasCapitaPasivo,
-        string $fechaIni,
-        string $fechaFin
-    ): array {
+    public function fetchCuentasNoIdentificadasFacturas(array $codigosFactura, string $fechaIni, string $fechaFin): array
+    {
         if ($codigosFactura === []) {
             return [];
         }
 
         $phFact = implode(',', array_fill(0, count($codigosFactura), '?'));
-        $exclCapita = '';
-        $paramsCapita = [];
-
-        if ($cuentasCapitaPasivo !== []) {
-            $phCapita = implode(',', array_fill(0, count($cuentasCapitaPasivo), '?'));
-            $exclCapita = " AND dc.CodiCont NOT IN ({$phCapita})";
-            $paramsCapita = $cuentasCapitaPasivo;
-        }
 
         $sql = "
             SELECT ec.CodiDocu, ec.NumeDocu, dc.CodiCont, SUM(dc.Valor) AS Valor
@@ -1125,11 +1118,10 @@ class SihosExternalRepository
               AND dc.CodiCont NOT LIKE '14%'
               AND dc.CodiCont NOT LIKE '4312%'
               AND dc.CodiCont NOT LIKE '8%'
-              {$exclCapita}
             GROUP BY ec.CodiDocu, ec.NumeDocu, dc.CodiCont
         ";
         $stmt = $this->connect()->prepare($sql);
-        $stmt->execute([$this->codiInst(), ...$codigosFactura, $fechaIni, $fechaFin, ...$paramsCapita]);
+        $stmt->execute([$this->codiInst(), ...$codigosFactura, $fechaIni, $fechaFin]);
 
         $porFactura = [];
         while ($fila = $stmt->fetch()) {
