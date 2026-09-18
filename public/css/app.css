@@ -8476,6 +8476,79 @@ label.sgd-word-tool.sgd-word-import-trigger{
     background:#eee;
 }
 
+/* SIHOS — Auditar referencias (modal de trazabilidad de documento) */
+.sihos-auditoria-resumen{
+    display:grid;
+    grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));
+    gap:10px 16px;
+    padding:12px 14px;
+    border-radius:8px;
+    background:var(--surface-2,#2a2a2a);
+    margin-bottom:16px;
+}
+
+.light-mode .sihos-auditoria-resumen{
+    background:#f2f2f2;
+}
+
+.sihos-auditoria-resumen-item .field-note{
+    margin:0 0 2px;
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:.02em;
+    opacity:.75;
+}
+
+.sihos-auditoria-resumen-item strong{
+    font-size:14px;
+}
+
+.sihos-auditoria-badge{
+    display:inline-block;
+    font-size:11px;
+    padding:3px 10px;
+    border-radius:10px;
+    font-weight:600;
+}
+
+.sihos-auditoria-badge-confirmado{
+    background:rgba(46,125,50,.35);
+    color:#a5d6a7;
+}
+
+.light-mode .sihos-auditoria-badge-confirmado{
+    background:#e8f5e9;
+    color:#2e7d32;
+}
+
+.sihos-auditoria-badge-anulado{
+    background:rgba(198,40,40,.3);
+    color:#ef9a9a;
+}
+
+.light-mode .sihos-auditoria-badge-anulado{
+    background:#ffebee;
+    color:#c62828;
+}
+
+.sihos-auditoria-badge-preliminar{
+    background:rgba(158,158,158,.3);
+    color:#e0e0e0;
+}
+
+.light-mode .sihos-auditoria-badge-preliminar{
+    background:#eeeeee;
+    color:#616161;
+}
+
+.sihos-auditoria-fila-autorreferencia{
+    background:rgba(63,81,181,.18);
+}
+
+.light-mode .sihos-auditoria-fila-autorreferencia{
+    background:#e8eaf6;
+}
+
 .sihos-interlab-progreso ul{
     margin:8px 0 0;
     padding-left:18px;
