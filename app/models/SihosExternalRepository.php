@@ -3405,4 +3405,176 @@ where e.CodiInst=:codiInst";
 
         return $tarifas;
     }
+
+    /**
+     * Encabezado de un documento puntual para el modal "Auditar referencias"
+     * (trazabilidad, inspirado en sihos/modulos/procesos/audicart.php, modo
+     * "Trazabilidad de Documentos" — pero agregando presupuesto, que SIHOS
+     * nativo no muestra). Incluye a qué documento referencia ESTE documento
+     * (vía su propia línea DetaCont, si tiene — mismo patrón ya usado en
+     * fetchEstadoParaReclasificacionVigenciaAnterior()). Sin límite de
+     * fecha: es trazabilidad completa de un documento puntual, no un
+     * reporte por rango.
+     *
+     * @return array{FechDocu:string,TipoUsua:?string,ValoTota:float,TiDoTerc:?string,NuDoTerc:?string,NombTerc:?string,Anulado:int,Causado:int,TiDoRefe:?string,NuDoRefe:?string}|null
+     */
+    public function fetchEncabezadoDocumentoAuditoria(string $codiDocu, string $numeDocu): ?array
+    {
+        $codiInst = $this->codiInst();
+
+        $stmt = $this->connect()->prepare(
+            'SELECT FechDocu, TipoUsua, ValoTota, TiDoTerc, NuDoTerc, Anulado, Causado
+             FROM EncaCont WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?'
+        );
+        $stmt->execute([$codiInst, $codiDocu, $numeDocu]);
+        $encabezado = $stmt->fetch();
+
+        if ($encabezado === false) {
+            return null;
+        }
+
+        $stmt = $this->connect()->prepare(
+            'SELECT TiDoRefe, NuDoRefe FROM DetaCont
+             WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?
+               AND TiDoRefe IS NOT NULL AND TiDoRefe <> ""
+             LIMIT 1'
+        );
+        $stmt->execute([$codiInst, $codiDocu, $numeDocu]);
+        $referencia = $stmt->fetch();
+
+        $nombresTerceros = $this->resolverNombresTerceros([
+            ['tipo' => $encabezado['TiDoTerc'], 'numero' => $encabezado['NuDoTerc']],
+        ]);
+        $claveTercero = $encabezado['TiDoTerc'] . '-' . $encabezado['NuDoTerc'];
+
+        return [
+            'FechDocu' => (string)$encabezado['FechDocu'],
+            'TipoUsua' => $encabezado['TipoUsua'],
+            'ValoTota' => (float)$encabezado['ValoTota'],
+            'TiDoTerc' => $encabezado['TiDoTerc'],
+            'NuDoTerc' => $encabezado['NuDoTerc'],
+            'NombTerc' => $nombresTerceros[$claveTercero] ?? null,
+            'Anulado' => (int)$encabezado['Anulado'],
+            'Causado' => (int)$encabezado['Causado'],
+            'TiDoRefe' => $referencia !== false ? $referencia['TiDoRefe'] : null,
+            'NuDoRefe' => $referencia !== false ? $referencia['NuDoRefe'] : null,
+        ];
+    }
+
+    /**
+     * Nombres de cuenta contable (CodiCont.NombCuen) para un conjunto de
+     * códigos, quedándose con el Periodo (año) más reciente disponible por
+     * código — el nombre de una cuenta rara vez cambia de un año a otro, y
+     * esto evita tener que rastrear el año de cada documento por separado.
+     *
+     * @param array<int,?string> $codigosCuenta
+     * @return array<string,string> CodiCont => NombCuen
+     */
+    private function resolverNombresCuentas(array $codigosCuenta): array
+    {
+        $codigosCuenta = array_values(array_unique(array_filter(
+            $codigosCuenta,
+            static fn (?string $c): bool => $c !== null && $c !== ''
+        )));
+        if ($codigosCuenta === []) {
+            return [];
+        }
+
+        $in = implode(',', array_fill(0, count($codigosCuenta), '?'));
+        $stmt = $this->connect()->prepare(
+            "SELECT CodiCont, Periodo, NombCuen FROM CodiCont WHERE CodiInst = ? AND CodiCont IN ($in)"
+        );
+        $stmt->execute([$this->codiInst(), ...$codigosCuenta]);
+
+        $porCodigo = [];
+        foreach ($stmt->fetchAll() as $f) {
+            $codigo = $f['CodiCont'];
+            if (!isset($porCodigo[$codigo]) || $f['Periodo'] > $porCodigo[$codigo]['periodo']) {
+                $porCodigo[$codigo] = ['periodo' => $f['Periodo'], 'nombre' => $f['NombCuen']];
+            }
+        }
+
+        return array_map(static fn (array $v): string => (string)$v['nombre'], $porCodigo);
+    }
+
+    /**
+     * Nombres de rubro presupuestal (PlanPres.NombPlan), mismo criterio de
+     * "año más reciente disponible" que resolverNombresCuentas().
+     *
+     * @param array<int,?string> $codigosRubro
+     * @return array<string,string> CodiPlan => NombPlan
+     */
+    private function resolverNombresRubros(array $codigosRubro): array
+    {
+        $codigosRubro = array_values(array_unique(array_filter(
+            $codigosRubro,
+            static fn (?string $c): bool => $c !== null && $c !== ''
+        )));
+        if ($codigosRubro === []) {
+            return [];
+        }
+
+        $in = implode(',', array_fill(0, count($codigosRubro), '?'));
+        $stmt = $this->connect()->prepare(
+            "SELECT CodiPlan, CodiAno, NombPlan FROM PlanPres WHERE CodiInst = ? AND CodiPlan IN ($in)"
+        );
+        $stmt->execute([$this->codiInst(), ...$codigosRubro]);
+
+        $porCodigo = [];
+        foreach ($stmt->fetchAll() as $f) {
+            $codigo = $f['CodiPlan'];
+            if (!isset($porCodigo[$codigo]) || $f['CodiAno'] > $porCodigo[$codigo]['anio']) {
+                $porCodigo[$codigo] = ['anio' => $f['CodiAno'], 'nombre' => $f['NombPlan']];
+            }
+        }
+
+        return array_map(static fn (array $v): string => (string)$v['nombre'], $porCodigo);
+    }
+
+    /**
+     * Nombres de tercero (CodiTerc.NombTerc) para un conjunto de pares
+     * TipoDocu+NumeTerc — CodiTerc no tiene columna CodiInst (tabla global
+     * de terceros, mismo criterio que la función legada nombreTercero() de
+     * SIHOS). Usa condiciones OR explícitas en vez de un IN de tuplas:
+     * MySQL 5.6 no optimiza bien ese patrón (mismo criterio ya usado en
+     * fetchClavesConAjustePrevioNotasVigenciaAnterior()).
+     *
+     * @param list<array{tipo:?string,numero:?string}> $pares
+     * @return array<string,string> "TIPO-NUMERO" => NombTerc
+     */
+    private function resolverNombresTerceros(array $pares): array
+    {
+        $unicos = [];
+        foreach ($pares as $p) {
+            $tipo = $p['tipo'] ?? null;
+            $numero = $p['numero'] ?? null;
+            if ($tipo === null || $tipo === '' || $numero === null || $numero === '') {
+                continue;
+            }
+            $unicos[$tipo . '-' . $numero] = ['tipo' => $tipo, 'numero' => $numero];
+        }
+        if ($unicos === []) {
+            return [];
+        }
+
+        $condiciones = [];
+        $params = [];
+        foreach ($unicos as $par) {
+            $condiciones[] = '(TipoDocu = ? AND NumeTerc = ?)';
+            $params[] = $par['tipo'];
+            $params[] = $par['numero'];
+        }
+
+        $stmt = $this->connect()->prepare(
+            'SELECT TipoDocu, NumeTerc, NombTerc FROM CodiTerc WHERE ' . implode(' OR ', $condiciones)
+        );
+        $stmt->execute($params);
+
+        $resultado = [];
+        foreach ($stmt->fetchAll() as $f) {
+            $resultado[$f['TipoDocu'] . '-' . $f['NumeTerc']] = (string)$f['NombTerc'];
+        }
+
+        return $resultado;
+    }
 }
