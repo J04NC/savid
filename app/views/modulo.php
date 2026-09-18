@@ -3,7 +3,7 @@
 <div class="system-menu-wrapper">
 
 <div class="system-menu-header">
-    <img src="/img/logo.png" class="system-menu-logo">
+    <img src="/img/logo.png" class="system-menu-logo" alt="SAVID">
     <h1>OPCIONES</h1>
     <p>Seleccione una acción disponible</p>
 </div>
