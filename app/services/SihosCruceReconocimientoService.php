@@ -358,7 +358,17 @@ class SihosCruceReconocimientoService
         $codigosReconocimientoTesoreria = $repository->resolveCodigosDocumentoPorAplicacionSinFiltroPresupuesto(
             self::DOCU_APLI_RECONOCIMIENTO_TESORERIA
         );
-        $codigosSignoInvertido = array_values(array_unique([...$codigosGlosa, ...$codigosNota]));
+        // Faltaba $codigosNotaGenerica aquí (bug real, confirmado con datos:
+        // NC-3571 sobre FE-657005, empresa 18) — una nota "genérica" (NC/NT,
+        // DocuApli=3) con TipoComp=5 ("Devolución Factura") también debe
+        // invertir el signo de su DetaPlan, igual que NCF/GLC, para que al
+        // fusionarse con el presupuesto de la factura (más abajo) el efecto
+        // sea restar y no sumar. Sin esto, el presupuesto se duplicaba
+        // (verificado: 416 notas NC reales con presupuesto exactamente
+        // igual al de su factura, en vez de neto cero). NAT (también
+        // DocuApli=3) queda fuera a propósito — MaesDocu.ManePres=0 para
+        // NAT, resolveCodigosDocumentoPorAplicacion() ya lo excluye.
+        $codigosSignoInvertido = array_values(array_unique([...$codigosGlosa, ...$codigosNota, ...$codigosNotaGenerica]));
         $codigosPresupuesto = array_values(array_unique([
             ...$codigosFactura,
             ...$codigosGlosa,
@@ -504,6 +514,12 @@ class SihosCruceReconocimientoService
         $totalContabilidad = 0.0;
         $totalDiferenciaReconocimientoTesoreria = 0.0;
         $porTipoUsua = [];
+        // Pares de vigencia anterior que se cancelan entre sí (p. ej. la nota
+        // mal clasificada original y la nota de ajuste que la corrige, ambas
+        // sobre la misma factura vieja) — se suman por factura y, si el
+        // grupo neta a ~0, se excluyen de $detalle más abajo. Ninguno de los
+        // dos ya tiene nada pendiente por revisar.
+        $sumaPorGrupoVigenciaAnterior = [];
 
         foreach ($claves as $clave) {
             $filaPres = $porPresupuesto[$clave] ?? null;
@@ -553,6 +569,20 @@ class SihosCruceReconocimientoService
                 $ref = $facturaReferenciada[$clave] ?? null;
                 $fechaDocu = $filaPres['FechDocu'] ?? $filaCont['FechDocu'] ?? '';
                 $facturaFecha = $ref['FacturaFecha'] ?? null;
+
+                // Independiente de $puedeEliminarDetaPlan (que exige
+                // presupuesto ≠ 0 y no aplica aquí — estos pares tienen
+                // presupuesto = 0 en ambos lados, correctamente). Solo
+                // agrupa por factura cuando la referencia no es ambigua
+                // (una nota que reparte varias facturas a la vez no se debe
+                // netear a ciegas contra una sola).
+                $esVigenciaAnterior = $ref !== null && !($ref['ReferenciaAmbigua'] ?? false)
+                    && $facturaFecha !== null && $fechaDocu !== ''
+                    && (int)substr((string)$facturaFecha, 0, 4) < (int)substr((string)$fechaDocu, 0, 4);
+                $grupoVigenciaAnterior = $esVigenciaAnterior ? ($ref['FacturaCodiDocu'] . '-' . $ref['FacturaNumeDocu']) : null;
+                if ($grupoVigenciaAnterior !== null) {
+                    $sumaPorGrupoVigenciaAnterior[$grupoVigenciaAnterior] = ($sumaPorGrupoVigenciaAnterior[$grupoVigenciaAnterior] ?? 0) + $diferencia;
+                }
 
                 // Elegible para borrar el DetaPlan huérfano solo cuando es una
                 // nota (no la factura misma) sobre una factura de vigencia
@@ -607,9 +637,28 @@ class SihosCruceReconocimientoService
                     'RelacionadoFecha' => $relacionadoFecha,
                     'CuentaReal' => $cuentaReal,
                     'puedeEliminarDetaPlan' => $puedeEliminarDetaPlan,
+                    '_grupoVigenciaAnterior' => $grupoVigenciaAnterior,
                 ];
             }
         }
+
+        // Pares de vigencia anterior cuyo grupo (mismo factura vieja) neta a
+        // ~0 se excluyen — ya no hay nada pendiente por revisar para esa
+        // factura. Los totales de arriba (totalPresupuesto/totalContabilidad
+        // /porTipoUsua) NO se tocan, mismo criterio que ya aplica
+        // esReconocimientoTesoreria (sigue sumando aunque no salga aquí).
+        $detalle = array_values(array_filter($detalle, static function (array $f) use ($sumaPorGrupoVigenciaAnterior): bool {
+            if ($f['_grupoVigenciaAnterior'] === null) {
+                return true;
+            }
+
+            return abs($sumaPorGrupoVigenciaAnterior[$f['_grupoVigenciaAnterior']] ?? 0) >= 0.01;
+        }));
+        $detalle = array_map(static function (array $f): array {
+            unset($f['_grupoVigenciaAnterior']);
+
+            return $f;
+        }, $detalle);
 
         usort($detalle, static fn (array $a, array $b): int => abs($b['diferencia']) <=> abs($a['diferencia']));
         usort(
