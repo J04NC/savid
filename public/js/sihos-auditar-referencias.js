@@ -94,7 +94,7 @@
         }).join('');
         filas += '<tr><td colspan="3" style="text-align:right"><strong>Total</strong></td><td style="text-align:right"><strong>' +
             money(totalDebito) + '</strong></td><td style="text-align:right"><strong>' + money(totalCredito) + '</strong></td></tr>';
-        return '<table class="seguridad-table"><thead><tr><th>Cuenta</th><th>Tercero</th><th>Referencia</th><th>Débito</th><th>Crédito</th></tr></thead><tbody>' + filas + '</tbody></table>';
+        return '<table class="seguridad-table no-datatable"><thead><tr><th>Cuenta</th><th>Tercero</th><th>Referencia</th><th>Débito</th><th>Crédito</th></tr></thead><tbody>' + filas + '</tbody></table>';
     }
 
     function tablaPresupuesto(lineas) {
@@ -103,7 +103,7 @@
             var rubro = escapeHtml(l.CodiPlan) + (l.NombPlan ? ' - ' + escapeHtml(l.NombPlan) : '');
             return '<tr><td>' + rubro + '</td><td style="text-align:right">' + money(l.Valor) + '</td></tr>';
         }).join('');
-        return '<table class="seguridad-table"><thead><tr><th>Rubro</th><th>Valor</th></tr></thead><tbody>' + filas + '</tbody></table>';
+        return '<table class="seguridad-table no-datatable"><thead><tr><th>Rubro</th><th>Valor</th></tr></thead><tbody>' + filas + '</tbody></table>';
     }
 
     function tablaResumenReferencias(referenciadoPor) {
@@ -130,7 +130,7 @@
             filas += '<tr><td colspan="6" style="text-align:right">Presupuesto total del documento</td><td style="text-align:right"><strong>' +
                 money(v.presupuestoTotal) + '</strong></td></tr>';
         });
-        return '<table class="seguridad-table"><thead><tr><th>Documento</th><th>Fecha</th><th>Tercero</th><th>Cuenta</th><th>D/C</th><th>Valor</th><th>Estado</th></tr></thead><tbody>' + filas + '</tbody></table>';
+        return '<table class="seguridad-table no-datatable"><thead><tr><th>Documento</th><th>Fecha</th><th>Tercero</th><th>Cuenta</th><th>D/C</th><th>Valor</th><th>Estado</th></tr></thead><tbody>' + filas + '</tbody></table>';
     }
 
     function render(j) {
