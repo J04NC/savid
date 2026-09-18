@@ -3040,8 +3040,14 @@ SAVID MODAL SYSTEM GOD
     backdrop-filter:blur(8px);
     -webkit-backdrop-filter:blur(8px);
     opacity:1;
-    transition:.18s ease;
+    transition:opacity .18s ease;
     overflow:hidden;
+    /* El blur necesita su propia capa de composición estable: sin esto,
+       Chromium puede recomponer el fondo desenfocado junto con el scroll
+       interno del modal, sobre todo en el primer modal abierto tras una
+       recarga (pipeline de blur "en frío") — se percibe como parpadeo. */
+    transform:translateZ(0);
+    will-change:backdrop-filter, transform;
 }
 
 .modal.hidden{
@@ -3062,6 +3068,13 @@ SAVID MODAL SYSTEM GOD
     flex-direction:column;
     position:relative;
     animation:savidModalIn .18s ease;
+    /* Aísla el layout/paint del scroll interno (cada modal define su propio
+       contenedor scrolleable, con o sin id/clase propia) de la capa del
+       blur en .modal — el compositor ya no recalcula el fondo al hacer
+       scroll dentro. Seguro: ningún modal/overlay secundario (crud-image-
+       review-modal, crud-camera-modal, etc.) vive anidado dentro de
+       .modal-content — todos se insertan directo en <body> vía JS. */
+    contain:layout paint style;
 }
 
 .dark-mode .modal-content{
