@@ -27,6 +27,8 @@ $assetSihosConstruirDetaPlanMasivo = BASE_PATH . '/public/js/sihos-construir-det
 $sihosConstruirDetaPlanMasivoJsV = is_readable($assetSihosConstruirDetaPlanMasivo) ? (int)filemtime($assetSihosConstruirDetaPlanMasivo) : time();
 $assetSihosReclasificarCuentaMasivo = BASE_PATH . '/public/js/sihos-reclasificar-cuenta-masivo.js';
 $sihosReclasificarCuentaMasivoJsV = is_readable($assetSihosReclasificarCuentaMasivo) ? (int)filemtime($assetSihosReclasificarCuentaMasivo) : time();
+$assetSihosAuditarReferencias = BASE_PATH . '/public/js/sihos-auditar-referencias.js';
+$sihosAuditarReferenciasJsV = is_readable($assetSihosAuditarReferencias) ? (int)filemtime($assetSihosAuditarReferencias) : time();
 ?>
 
 <div class="module-container auditoria-page">
@@ -158,7 +160,7 @@ $sihosReclasificarCuentaMasivoJsV = is_readable($assetSihosReclasificarCuentaMas
                         ?>
                         <table class="seguridad-table" <?= $tablaId !== '' ? 'id="' . $tablaId . '"' : '' ?>>
                             <?php if ($seccion['tipo'] === 'factura'): ?>
-                                <thead><tr><th>Documento</th><th>Fecha</th><th>Valor total</th><th>Tercero</th><th>Centro de costo</th></tr></thead>
+                                <thead><tr><th>Documento</th><th>Fecha</th><th>Valor total</th><th>Tercero</th><th>Centro de costo</th><th>Opciones</th></tr></thead>
                                 <tbody>
                                 <?php foreach ($seccion['filas'] as $f): ?>
                                     <tr>
@@ -167,6 +169,12 @@ $sihosReclasificarCuentaMasivoJsV = is_readable($assetSihosReclasificarCuentaMas
                                         <td><?= sihosFormatoMoneda($f['ValoTota']) ?></td>
                                         <td><?= htmlspecialchars(trim(($f['TiDoTerc'] ?? '') . ' ' . ($f['NuDoTerc'] ?? ''))) ?></td>
                                         <td><?= htmlspecialchars((string)($f['CentCost'] ?? '')) ?></td>
+                                        <td>
+                                            <button type="button" class="auditoria-btn-primary btnSihosAuditarReferencias"
+                                                    data-empresa-id="<?= (int)$empresaId ?>"
+                                                    data-codi-docu="<?= htmlspecialchars($f['CodiDocu']) ?>"
+                                                    data-nume-docu="<?= htmlspecialchars($f['NumeDocu']) ?>">🔍 Referencias</button>
+                                        </td>
                                     </tr>
                                 <?php endforeach; ?>
                                 </tbody>
@@ -180,7 +188,7 @@ $sihosReclasificarCuentaMasivoJsV = is_readable($assetSihosReclasificarCuentaMas
                                             </th>
                                         <?php endif; ?>
                                         <th>Documento</th><th>Fecha</th><th>Valor</th><th>Factura</th><th>Fecha factura</th><th>Tiene DetaPlan</th><th>Tiene cuenta esperada</th>
-                                        <?php if ($muestraAccionConstruirDetaPlan): ?><th>Opciones</th><?php endif; ?>
+                                        <th>Opciones</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -202,18 +210,18 @@ $sihosReclasificarCuentaMasivoJsV = is_readable($assetSihosReclasificarCuentaMas
                                         <td><?= htmlspecialchars($f['FacturaFecha']) ?></td>
                                         <td><?= ((int)$f['TieneDetaPlan'] > 0) ? 'Sí' : '❌ No' ?></td>
                                         <td><?= ((int)$f['TieneCuenta4'] > 0) ? 'Sí' : '❌ No' ?></td>
-                                        <?php if ($muestraAccionConstruirDetaPlan): ?>
-                                            <td>
-                                                <?php if ($puedeConstruirDetaPlan && (int)$f['TieneDetaPlan'] === 0): ?>
-                                                    <button type="button" class="auditoria-btn-primary btnSihosConstruirDetaPlan"
-                                                            data-empresa-id="<?= (int)$empresaId ?>"
-                                                            data-codi-docu="<?= htmlspecialchars($f['CodiDocu']) ?>"
-                                                            data-nume-docu="<?= htmlspecialchars($f['NumeDocu']) ?>">➕ Construir DetaPlan</button>
-                                                <?php else: ?>
-                                                    —
-                                                <?php endif; ?>
-                                            </td>
-                                        <?php endif; ?>
+                                        <td>
+                                            <?php if ($muestraAccionConstruirDetaPlan && $puedeConstruirDetaPlan && (int)$f['TieneDetaPlan'] === 0): ?>
+                                                <button type="button" class="auditoria-btn-primary btnSihosConstruirDetaPlan"
+                                                        data-empresa-id="<?= (int)$empresaId ?>"
+                                                        data-codi-docu="<?= htmlspecialchars($f['CodiDocu']) ?>"
+                                                        data-nume-docu="<?= htmlspecialchars($f['NumeDocu']) ?>">➕ Construir DetaPlan</button>
+                                            <?php endif; ?>
+                                            <button type="button" class="auditoria-btn-primary btnSihosAuditarReferencias"
+                                                    data-empresa-id="<?= (int)$empresaId ?>"
+                                                    data-codi-docu="<?= htmlspecialchars($f['CodiDocu']) ?>"
+                                                    data-nume-docu="<?= htmlspecialchars($f['NumeDocu']) ?>">🔍 Referencias</button>
+                                        </td>
                                     </tr>
                                 <?php endforeach; ?>
                                 </tbody>
@@ -236,9 +244,11 @@ $sihosReclasificarCuentaMasivoJsV = is_readable($assetSihosReclasificarCuentaMas
                                                         data-nume-docu="<?= htmlspecialchars($f['NumeDocu']) ?>"
                                                         data-cons-deta="<?= (int)$f['ConsDeta'] ?>"
                                                         data-cuenta="<?= htmlspecialchars($f['CodiCont']) ?>">↩️ Nota de ajuste</button>
-                                            <?php else: ?>
-                                                —
                                             <?php endif; ?>
+                                            <button type="button" class="auditoria-btn-primary btnSihosAuditarReferencias"
+                                                    data-empresa-id="<?= (int)$empresaId ?>"
+                                                    data-codi-docu="<?= htmlspecialchars($f['CodiDocu']) ?>"
+                                                    data-nume-docu="<?= htmlspecialchars($f['NumeDocu']) ?>">🔍 Referencias</button>
                                         </td>
                                     </tr>
                                 <?php endforeach; ?>
@@ -253,7 +263,8 @@ $sihosReclasificarCuentaMasivoJsV = is_readable($assetSihosReclasificarCuentaMas
                                             </th>
                                         <?php endif; ?>
                                         <th>Documento</th><th>Fecha</th><th>Cuenta</th><th>Valor</th><th>Factura</th>
-                                        <?php if ($muestraAccionReclasificar): ?><th>Vigencia</th><th>Opciones</th><?php endif; ?>
+                                        <?php if ($muestraAccionReclasificar): ?><th>Vigencia</th><?php endif; ?>
+                                        <th>Opciones</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -276,18 +287,20 @@ $sihosReclasificarCuentaMasivoJsV = is_readable($assetSihosReclasificarCuentaMas
                                         <td><?= htmlspecialchars($f['FacturaCodiDocu'] . '-' . $f['FacturaNumeDocu']) ?></td>
                                         <?php if ($muestraAccionReclasificar): ?>
                                             <td><?= $esVigenciaAnterior ? 'Anterior' : 'Actual' ?></td>
-                                            <td>
-                                                <?php if ($esVigenciaAnterior && $puedeReversarCuenta): ?>
-                                                    <button type="button" class="auditoria-btn-primary btnSihosReclasificarCuenta"
-                                                            data-empresa-id="<?= (int)$empresaId ?>"
-                                                            data-codi-docu="<?= htmlspecialchars($f['CodiDocu']) ?>"
-                                                            data-nume-docu="<?= htmlspecialchars($f['NumeDocu']) ?>"
-                                                            data-cuenta="<?= htmlspecialchars($f['CodiCont']) ?>">↩️ Reclasificar cuenta</button>
-                                                <?php else: ?>
-                                                    —
-                                                <?php endif; ?>
-                                            </td>
                                         <?php endif; ?>
+                                        <td>
+                                            <?php if ($muestraAccionReclasificar && $esVigenciaAnterior && $puedeReversarCuenta): ?>
+                                                <button type="button" class="auditoria-btn-primary btnSihosReclasificarCuenta"
+                                                        data-empresa-id="<?= (int)$empresaId ?>"
+                                                        data-codi-docu="<?= htmlspecialchars($f['CodiDocu']) ?>"
+                                                        data-nume-docu="<?= htmlspecialchars($f['NumeDocu']) ?>"
+                                                        data-cuenta="<?= htmlspecialchars($f['CodiCont']) ?>">↩️ Reclasificar cuenta</button>
+                                            <?php endif; ?>
+                                            <button type="button" class="auditoria-btn-primary btnSihosAuditarReferencias"
+                                                    data-empresa-id="<?= (int)$empresaId ?>"
+                                                    data-codi-docu="<?= htmlspecialchars($f['CodiDocu']) ?>"
+                                                    data-nume-docu="<?= htmlspecialchars($f['NumeDocu']) ?>">🔍 Referencias</button>
+                                        </td>
                                     </tr>
                                 <?php endforeach; ?>
                                 </tbody>
@@ -374,9 +387,11 @@ $sihosReclasificarCuentaMasivoJsV = is_readable($assetSihosReclasificarCuentaMas
                                                 data-codi-docu="<?= htmlspecialchars($f['CodiDocu']) ?>"
                                                 data-nume-docu="<?= htmlspecialchars($f['NumeDocu']) ?>"
                                                 style="background:#c0392b;">🗑️ Eliminar DetaPlan</button>
-                                    <?php else: ?>
-                                        —
                                     <?php endif; ?>
+                                    <button type="button" class="auditoria-btn-primary btnSihosAuditarReferencias"
+                                            data-empresa-id="<?= (int)$empresaId ?>"
+                                            data-codi-docu="<?= htmlspecialchars($f['CodiDocu']) ?>"
+                                            data-nume-docu="<?= htmlspecialchars($f['NumeDocu']) ?>">🔍 Referencias</button>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
@@ -391,7 +406,7 @@ $sihosReclasificarCuentaMasivoJsV = is_readable($assetSihosReclasificarCuentaMas
             <?php else: ?>
                 <div style="overflow-x:auto;">
                     <table class="seguridad-table">
-                        <thead><tr><th>Documento</th><th>Fecha</th><th>Presupuesto</th><th>Contabilidad</th><th>Diferencia</th><th>Rubros</th></tr></thead>
+                        <thead><tr><th>Documento</th><th>Fecha</th><th>Presupuesto</th><th>Contabilidad</th><th>Diferencia</th><th>Rubros</th><th>Opciones</th></tr></thead>
                         <tbody>
                         <?php foreach ($dif['detalleReconocimientoTesoreria'] as $f): ?>
                             <?php $documentoRec = $f['CodiDocu'] . '-' . $f['NumeDocu']; ?>
@@ -411,6 +426,12 @@ $sihosReclasificarCuentaMasivoJsV = is_readable($assetSihosReclasificarCuentaMas
                                     <?php else: ?>
                                         —
                                     <?php endif; ?>
+                                </td>
+                                <td>
+                                    <button type="button" class="auditoria-btn-primary btnSihosAuditarReferencias"
+                                            data-empresa-id="<?= (int)$empresaId ?>"
+                                            data-codi-docu="<?= htmlspecialchars($f['CodiDocu']) ?>"
+                                            data-nume-docu="<?= htmlspecialchars($f['NumeDocu']) ?>">🔍 Referencias</button>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
@@ -673,6 +694,20 @@ $sihosReclasificarCuentaMasivoJsV = is_readable($assetSihosReclasificarCuentaMas
         </div>
         <script src="/js/sihos-reclasificar-cuenta-masivo.js?v=<?= (int)$sihosReclasificarCuentaMasivoJsV ?>"></script>
     <?php endif; ?>
+
+    <div id="sihosAuditarReferenciasModal" class="modal hidden">
+        <div class="modal-content" style="max-width:1100px;">
+            <div class="modal-header-bar">
+                <span>🔍 Auditar referencias — <span id="sihosAuditarReferenciasDocumento"></span></span>
+                <span class="close-modal" id="sihosAuditarReferenciasCerrar" role="button" tabindex="0" aria-label="Cerrar">&times;</span>
+            </div>
+            <div style="padding:16px; max-height:70vh; overflow-y:auto;">
+                <p id="sihosAuditarReferenciasStatus" aria-live="polite"></p>
+                <div id="sihosAuditarReferenciasContenido" hidden></div>
+            </div>
+        </div>
+    </div>
+    <script src="/js/sihos-auditar-referencias.js?v=<?= (int)$sihosAuditarReferenciasJsV ?>"></script>
 
 </div>
 
