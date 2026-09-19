@@ -8,13 +8,13 @@
 class SecurityAlertService
 {
     private PDO $pdo;
-    private MailerService $mailer;
+    private ResendService $resend;
 
     public function __construct()
     {
         $database = new Database();
         $this->pdo = $database->connect();
-        $this->mailer = new MailerService();
+        $this->resend = new ResendService();
     }
 
     public function notificarBloqueoFuerzaBruta(string $username, string $ip): void
@@ -35,7 +35,7 @@ class SecurityAlertService
         ';
 
         foreach ($destinatarios as $email => $nombre) {
-            $this->mailer->send($email, $nombre, 'Bloqueo por fuerza bruta detectado - SAVID', $html);
+            $this->resend->send($email, $nombre, 'Bloqueo por fuerza bruta detectado - SAVID', $html);
         }
     }
 
@@ -52,7 +52,7 @@ class SecurityAlertService
         ';
 
         foreach ($destinatarios as $email => $nombre) {
-            $this->mailer->send($email, $nombre, 'Suscripción próxima a vencer - SAVID', $html);
+            $this->resend->send($email, $nombre, 'Suscripción próxima a vencer - SAVID', $html);
         }
     }
 

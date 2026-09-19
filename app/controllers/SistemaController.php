@@ -1,7 +1,7 @@
 <?php
 /**
  * Configuración del sistema visible desde la UI (superadmin). Por ahora,
- * estado del SMTP saliente y envío de un correo de prueba.
+ * estado del correo saliente (Resend) y envío de un correo de prueba.
  */
 
 class SistemaController
@@ -17,13 +17,8 @@ class SistemaController
         Database::bootstrapEnv();
 
         $config = [
-            'host' => (string)(getenv('SMTP_HOST') ?: ''),
-            'port' => (string)(getenv('SMTP_PORT') ?: ''),
-            'secure' => (string)(getenv('SMTP_SECURE') ?: ''),
-            'user' => (string)(getenv('SMTP_USER') ?: ''),
-            'from_email' => (string)(getenv('SMTP_FROM_EMAIL') ?: ''),
-            'from_name' => (string)(getenv('SMTP_FROM_NAME') ?: ''),
-            'password_configurada' => trim((string)(getenv('SMTP_PASSWORD') ?: '')) !== '',
+            'configurada' => ResendService::isConfigured(),
+            'remitente' => 'SAVID <codigos@notificaciones.savid.com.co>',
             'app_url' => MailerService::baseUrl(),
         ];
 
@@ -61,9 +56,9 @@ class SistemaController
             <p>Si lo recibiste, el envío de correo saliente está funcionando correctamente.</p>
         ';
 
-        $mailer = new MailerService();
+        $resend = new ResendService();
         $error = null;
-        $ok = $mailer->send($destino, $destino, 'Correo de prueba - SAVID', $html, $error);
+        $ok = $resend->send($destino, $destino, 'Correo de prueba - SAVID', $html, $error);
 
         if (!$ok) {
             http_response_code(400);

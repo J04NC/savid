@@ -6,6 +6,12 @@ use PHPMailer\PHPMailer\Exception as PHPMailerException;
 /**
  * Envío de correo saliente vía SMTP (PHPMailer).
  *
+ * Desde la migración a Resend (ver ResendService), ningún flujo de la app
+ * llama a send() — se mantiene sin uso activo por si se necesita un
+ * fallback SMTP a futuro. baseUrl() sigue en uso (no depende del
+ * mecanismo de envío): lo usan PasswordResetService y SistemaController
+ * para armar enlaces en los correos.
+ *
  * Variables de entorno soportadas (config/.env, igual que Database):
  * SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_SECURE (tls|ssl|""),
  * SMTP_FROM_EMAIL, SMTP_FROM_NAME, APP_URL

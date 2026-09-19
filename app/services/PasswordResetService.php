@@ -10,7 +10,7 @@ class PasswordResetService
     private PDO $pdo;
     private UserRepository $userRepository;
     private PasswordResetRepository $resetRepository;
-    private MailerService $mailer;
+    private ResendService $resend;
     private UsuarioFormValidationService $passwordValidator;
 
     public function __construct()
@@ -20,7 +20,7 @@ class PasswordResetService
 
         $this->userRepository = new UserRepository($this->pdo);
         $this->resetRepository = new PasswordResetRepository($this->pdo);
-        $this->mailer = new MailerService();
+        $this->resend = new ResendService();
         $this->passwordValidator = new UsuarioFormValidationService($this->pdo);
     }
 
@@ -71,7 +71,7 @@ class PasswordResetService
             <p>Si no solicitaste este cambio, puedes ignorar este correo.</p>
         ";
 
-        $this->mailer->send((string)$user['email'], (string)($user['nombre'] ?? $user['username']), 'Recuperar contraseña - SAVID', $html);
+        $this->resend->send((string)$user['email'], (string)($user['nombre'] ?? $user['username']), 'Recuperar contraseña - SAVID', $html);
     }
 
     /**
