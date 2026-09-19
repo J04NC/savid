@@ -11,7 +11,7 @@ class TwoFactorService
 
     private PDO $pdo;
     private TwoFactorRepository $repository;
-    private MailerService $mailer;
+    private ResendService $resend;
 
     public function __construct()
     {
@@ -19,7 +19,7 @@ class TwoFactorService
         $this->pdo = $database->connect();
 
         $this->repository = new TwoFactorRepository($this->pdo);
-        $this->mailer = new MailerService();
+        $this->resend = new ResendService();
     }
 
     public function isEnabledForUser(array $user): bool
@@ -94,16 +94,7 @@ class TwoFactorService
         $this->repository->invalidateAllCodesForUser($usuarioId);
         $this->repository->createCode($usuarioId, $codeHash, $expiresAt, $ip);
 
-        $nombreSeguro = htmlspecialchars($nombre, ENT_QUOTES, 'UTF-8');
-        $html = "
-            <p>Hola {$nombreSeguro},</p>
-            <p>Tu código de verificación para iniciar sesión en SAVID es:</p>
-            <p style=\"font-size:28px;font-weight:bold;letter-spacing:4px;\">{$code}</p>
-            <p>Vence en " . self::CODE_TTL_MINUTES . " minutos y solo puede usarse una vez.</p>
-            <p>Si no intentaste iniciar sesión, ignora este correo y considera cambiar tu contraseña.</p>
-        ";
-
-        $this->mailer->send($email, $nombre, 'Código de verificación - SAVID', $html);
+        $this->resend->sendAccessCode($email, $code, $nombre);
 
         return ['success' => true];
     }
