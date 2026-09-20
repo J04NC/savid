@@ -6,7 +6,7 @@
     <title>Empresa y sede | Savid</title>
     <link rel="stylesheet" href="/css/login.css">
 </head>
-<body class="login-page light-mode">
+<body class="login-page dark-mode">
 
 <div class="main-container">
     <div class="login-box">
