@@ -8562,6 +8562,18 @@ label.sgd-word-tool.sgd-word-import-trigger{
     background:#e8eaf6;
 }
 
+/* Banda alterna por GRUPO de documento (no fila por fila) en las tablas
+   "Referencias contables"/"Referencias presupuestales" del modal Auditar
+   referencias — distingue dónde termina un documento vinculado y empieza
+   el siguiente, ya que su nombre se repite en cada línea. */
+.sihos-auditoria-fila-grupo-alterno{
+    background:rgba(255,255,255,.04);
+}
+
+.light-mode .sihos-auditoria-fila-grupo-alterno{
+    background:#f2f2f2;
+}
+
 .sihos-interlab-progreso ul{
     margin:8px 0 0;
     padding-left:18px;

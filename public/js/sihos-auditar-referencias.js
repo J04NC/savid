@@ -73,17 +73,39 @@
     }
 
     /** Una fila por línea, agrupada por documento (propio primero, luego cada vinculado). */
+    /**
+     * Una clase CSS por grupo: el propio conserva su resaltado de siempre;
+     * los vinculados alternan entre "con banda" y "sin banda" (no fila por
+     * fila, sino grupo por grupo) para que se note dónde termina un
+     * documento y empieza el siguiente, aun repitiendo su nombre en cada
+     * línea. Se calcula una sola vez y la reutilizan ambas tablas
+     * (contable y presupuestal) en vez de duplicar el contador.
+     */
+    function clasesPorGrupo(grupos) {
+        var clases = [];
+        var contadorVinculado = 0;
+        grupos.forEach(function (g) {
+            if (g.esPropio) {
+                clases.push(' class="sihos-auditoria-fila-autorreferencia"');
+                return;
+            }
+            clases.push(contadorVinculado % 2 === 0 ? ' class="sihos-auditoria-fila-grupo-alterno"' : '');
+            contadorVinculado++;
+        });
+        return clases;
+    }
+
     function tablaReferenciasContables(grupos) {
         if (!grupos.some(function (g) { return g.lineas.length > 0; })) {
             return '<p class="field-note">Sin líneas contables.</p>';
         }
+        var clases = clasesPorGrupo(grupos);
         var filas = '';
         var totalDebito = 0;
         var totalCredito = 0;
-        grupos.forEach(function (g) {
+        grupos.forEach(function (g, i) {
             var documento = escapeHtml(g.CodiDocu) + '-' + escapeHtml(g.NumeDocu);
             var estado = badgeEstado(g.Estado);
-            var clasePropio = g.esPropio ? ' class="sihos-auditoria-fila-autorreferencia"' : '';
             g.lineas.forEach(function (l, idx) {
                 var debito = '';
                 var credito = '';
@@ -94,7 +116,7 @@
                     credito = '<span style="color:#ef5350">' + money(Math.abs(l.Valor)) + '</span>';
                     totalCredito += Math.abs(l.Valor);
                 }
-                filas += '<tr' + clasePropio + '>' +
+                filas += '<tr' + clases[i] + '>' +
                     '<td>' + documento + '</td>' +
                     '<td>' + fecha(g.FechDocu) + '</td>' +
                     '<td>' + nombreTercero(l.TiDoTerc, l.NuDoTerc, l.NombTerc) + '</td>' +
@@ -115,16 +137,16 @@
         if (!grupos.some(function (g) { return g.lineas.length > 0; })) {
             return '<p class="field-note">Sin líneas de presupuesto.</p>';
         }
+        var clases = clasesPorGrupo(grupos);
         var filas = '';
         var total = 0;
-        grupos.forEach(function (g) {
+        grupos.forEach(function (g, i) {
             var documento = escapeHtml(g.CodiDocu) + '-' + escapeHtml(g.NumeDocu);
             var estado = badgeEstado(g.Estado);
-            var clasePropio = g.esPropio ? ' class="sihos-auditoria-fila-autorreferencia"' : '';
             g.lineas.forEach(function (l, idx) {
                 var rubro = escapeHtml(l.CodiPlan) + (l.NombPlan ? ' - ' + escapeHtml(l.NombPlan) : '');
                 total += l.Valor;
-                filas += '<tr' + clasePropio + '>' +
+                filas += '<tr' + clases[i] + '>' +
                     '<td>' + documento + '</td>' +
                     '<td>' + fecha(g.FechDocu) + '</td>' +
                     '<td>' + rubro + '</td>' +
