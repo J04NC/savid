@@ -13,12 +13,25 @@ class SessionManager {
             $cookieLifetime = max(60, (int)(getenv('SESSION_LIFETIME') ?: 86400));
             $secure = in_array(strtolower((string)(getenv('SESSION_COOKIE_SECURE'))), ['1', 'true', 'yes'], true);
 
-            session_start([
+            $options = [
                 'cookie_lifetime' => $cookieLifetime,
                 'cookie_httponly' => true,
                 'cookie_secure' => $secure,
                 'use_strict_mode' => true
-            ]);
+            ];
+
+            // Vacío por defecto (cookie atada al host exacto, comportamiento
+            // de siempre) — solo se fija en producción para que la sesión
+            // sobreviva al saltar entre subdominios de cliente (ver plan de
+            // acceso exclusivo por empresa). Con un dominio como
+            // ".savid.com.co" en localhost/desarrollo el navegador rechaza
+            // la cookie entera, por eso queda detrás de una env var.
+            $cookieDomain = trim((string)(getenv('SESSION_COOKIE_DOMAIN') ?: ''));
+            if ($cookieDomain !== '') {
+                $options['cookie_domain'] = $cookieDomain;
+            }
+
+            session_start($options);
             self::$started = true;
         }
     }
