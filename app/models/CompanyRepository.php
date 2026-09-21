@@ -14,7 +14,7 @@ class CompanyRepository
         $eNd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'empresa', 'e');
 
         $stmt = $this->pdo->prepare("
-            SELECT e.id, t.razon_social
+            SELECT e.id, e.subdominio, t.razon_social
             FROM empresa e
             INNER JOIN tercero t ON t.id = e.tercero_id
             WHERE e.id = ?

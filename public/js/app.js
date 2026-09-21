@@ -465,7 +465,7 @@ function bindContextForm() {
 
             if (data.success) {
                 closeModalGod();
-                window.location.href = "?url=dashboard";
+                window.location.href = data.redirect_url || "?url=dashboard";
             } else {
                 alert(data.error || "No se pudo guardar");
             }

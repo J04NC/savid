@@ -5,6 +5,7 @@ class ContextService
     private CompanyRepository $companyRepository;
     private BranchRepository $branchRepository;
     private SubscriptionRepository $subscriptionRepository;
+    private EmpresaSubdominioService $subdominioService;
 
     public function __construct()
     {
@@ -14,6 +15,7 @@ class ContextService
         $this->companyRepository = new CompanyRepository($pdo);
         $this->branchRepository = new BranchRepository($pdo);
         $this->subscriptionRepository = new SubscriptionRepository($pdo);
+        $this->subdominioService = new EmpresaSubdominioService();
     }
 
     /**
@@ -108,10 +110,20 @@ class ContextService
             error_log('SesionTrackingService (changeContext): ' . $e->getMessage());
         }
 
+        // Si la empresa elegida tiene subdominio propio y es distinto al
+        // dominio actual, el frontend debe redirigir ahí (la cookie de
+        // sesión ya es compartida entre subdominios — ver
+        // SESSION_COOKIE_DOMAIN — así que no hace falta loguearse de nuevo).
+        $redirectUrl = $this->subdominioService->redirectUrlIfNeeded(
+            $empresa['subdominio'] ?? null,
+            (string)($_SERVER['HTTP_HOST'] ?? '')
+        );
+
         return [
             'success' => true,
             'empresa' => $_SESSION['empresa'],
             'sede' => $_SESSION['sede'],
+            'redirect_url' => $redirectUrl,
         ];
     }
 

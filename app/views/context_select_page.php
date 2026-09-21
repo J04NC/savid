@@ -47,7 +47,7 @@
             .then(r => r.json())
             .then(data => {
                 if (data.success) {
-                    window.location.href = "?url=dashboard";
+                    window.location.href = data.redirect_url || "?url=dashboard";
                 } else {
                     alert(data.error || "No se pudo guardar la selección.");
                 }

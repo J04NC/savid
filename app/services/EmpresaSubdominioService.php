@@ -69,6 +69,29 @@ class EmpresaSubdominioService
         return $this->companyRepository->findActiveBySubdominio($subdominio);
     }
 
+    /**
+     * Para el selector de "cambiar empresa" (ya autenticado): si la empresa
+     * elegida tiene subdominio propio y no es el que ya se está usando,
+     * arma la URL a la que hay que redirigir. Null si no hace falta
+     * moverse de dominio (la empresa no tiene subdominio, o ya se está en
+     * el correcto, o APP_BASE_DOMAIN no está configurada).
+     */
+    public function redirectUrlIfNeeded(?string $empresaSubdominio, string $currentHost): ?string
+    {
+        $empresaSubdominio = trim((string)$empresaSubdominio);
+        if ($empresaSubdominio === '') {
+            return null;
+        }
+
+        if ($this->resolveSubdominioFromHost($currentHost) === $empresaSubdominio) {
+            return null;
+        }
+
+        $base = $this->baseDomain();
+
+        return $base !== '' ? 'https://' . $empresaSubdominio . '.' . $base : null;
+    }
+
     public function baseDomain(): string
     {
         Database::bootstrapEnv();
