@@ -92,6 +92,32 @@ class EmpresaSubdominioService
         return $base !== '' ? 'https://' . $empresaSubdominio . '.' . $base : null;
     }
 
+    /**
+     * Para el link de recuperación de contraseña: si el usuario tiene
+     * alguna empresa con subdominio propio, usa el de la PRIMERA (regla de
+     * desempate simple para el caso raro de varias con subdominio distinto
+     * — documentado en el plan como simplificación consciente de la v1).
+     * Null si ninguna tiene, para que el llamador use el dominio genérico
+     * (MailerService::baseUrl()) tal como hoy.
+     *
+     * @param list<array<string, mixed>> $empresas cada una con al menos 'subdominio'
+     */
+    public function baseUrlForEmpresas(array $empresas): ?string
+    {
+        foreach ($empresas as $e) {
+            $sub = trim((string)($e['subdominio'] ?? ''));
+            if ($sub === '') {
+                continue;
+            }
+
+            $base = $this->baseDomain();
+
+            return $base !== '' ? 'https://' . $sub . '.' . $base : null;
+        }
+
+        return null;
+    }
+
     public function baseDomain(): string
     {
         Database::bootstrapEnv();

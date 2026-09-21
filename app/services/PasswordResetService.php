@@ -9,8 +9,10 @@ class PasswordResetService
 
     private PDO $pdo;
     private UserRepository $userRepository;
+    private CompanyRepository $companyRepository;
     private PasswordResetRepository $resetRepository;
     private ResendService $resend;
+    private EmpresaSubdominioService $subdominioService;
     private UsuarioFormValidationService $passwordValidator;
 
     public function __construct()
@@ -19,8 +21,10 @@ class PasswordResetService
         $this->pdo = $database->connect();
 
         $this->userRepository = new UserRepository($this->pdo);
+        $this->companyRepository = new CompanyRepository($this->pdo);
         $this->resetRepository = new PasswordResetRepository($this->pdo);
         $this->resend = new ResendService();
+        $this->subdominioService = new EmpresaSubdominioService();
         $this->passwordValidator = new UsuarioFormValidationService($this->pdo);
     }
 
@@ -60,7 +64,9 @@ class PasswordResetService
         $this->resetRepository->invalidateAllForUser($usuarioId);
         $this->resetRepository->create($usuarioId, $tokenHash, $expiresAt, $ip);
 
-        $link = MailerService::baseUrl() . '/?url=login/resetPassword&token=' . $token;
+        $empresas = $this->companyRepository->findActiveByUserId($usuarioId);
+        $baseUrl = $this->subdominioService->baseUrlForEmpresas($empresas) ?? MailerService::baseUrl();
+        $link = $baseUrl . '/?url=login/resetPassword&token=' . $token;
         $nombre = htmlspecialchars((string)($user['nombre'] ?? $user['username']), ENT_QUOTES, 'UTF-8');
 
         $html = "
