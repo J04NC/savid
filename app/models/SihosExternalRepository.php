@@ -1921,9 +1921,7 @@ class SihosExternalRepository
     }
 
     /**
-     * Saldo de cartera real por FACTURA referenciada, para TODA la
-     * institución — igual espíritu que fetchSaldoCuentaPorFactura() (sin
-     * acotar a un lote, sin HAVING <> 0), pero filtrando por el/los
+     * Saldo de cartera real por FACTURA referenciada — filtrando por el/los
      * PREFIJO(S) de $prefijosCartera (ver
      * resolvePrefijosCuentaCarteraPorTipoUsuario()) en vez de un prefijo
      * LIKE fijo tipo '14%'.
@@ -1934,17 +1932,37 @@ class SihosExternalRepository
      * misma familia que no están en el catálogo de asignación inicial por
      * tipo de usuario.
      *
+     * Sin $codiDocuFactura/$numeDocuFactura: para TODA la institución (sin
+     * acotar a un lote, sin HAVING <> 0), igual espíritu que
+     * fetchSaldoCuentaPorFactura() — así la usa SihosAuditoriaGlosaService,
+     * UNA vez por ejecución de reporte, compartida entre todas las glosas
+     * del rango. Con esos dos parámetros: acotada a una sola factura (así
+     * la usa SihosAuditoriaReferenciasService, que consulta el saldo de UN
+     * documento puntual por request — sin el filtro, agrupar TODA la
+     * cartera histórica de la institución agotó la memoria del proceso en
+     * ese contexto).
+     *
      * @param string[] $prefijosCartera prefijos de 2 caracteres, sin '%'
      * @return array<string, float> indexado por "TiDoRefe-NuDoRefe"
      */
-    public function fetchSaldoCarteraPorFactura(array $prefijosCartera): array
-    {
+    public function fetchSaldoCarteraPorFactura(
+        array $prefijosCartera,
+        ?string $codiDocuFactura = null,
+        ?string $numeDocuFactura = null
+    ): array {
         if ($prefijosCartera === []) {
             return [];
         }
 
         $condiciones = implode(' OR ', array_fill(0, count($prefijosCartera), 'd.CodiCont LIKE ?'));
         $paramsPrefijos = array_map(static fn (string $p): string => $p . '%', $prefijosCartera);
+
+        $filtroFactura = '';
+        $paramsFactura = [];
+        if ($codiDocuFactura !== null && $numeDocuFactura !== null) {
+            $filtroFactura = ' AND d.TiDoRefe = ? AND d.NuDoRefe = ?';
+            $paramsFactura = [$codiDocuFactura, $numeDocuFactura];
+        }
 
         $sql = "
             SELECT d.TiDoRefe, d.NuDoRefe, SUM(d.Valor) AS V
@@ -1954,10 +1972,11 @@ class SihosExternalRepository
               AND e.Causado = '1' AND e.Anulado <> '1'
               AND ({$condiciones})
               AND d.TiDoRefe IS NOT NULL AND d.TiDoRefe <> ''
+              {$filtroFactura}
             GROUP BY d.TiDoRefe, d.NuDoRefe
         ";
         $stmt = $this->connect()->prepare($sql);
-        $stmt->execute([$this->codiInst(), ...$paramsPrefijos]);
+        $stmt->execute([$this->codiInst(), ...$paramsPrefijos, ...$paramsFactura]);
 
         $porFactura = [];
         while ($fila = $stmt->fetch()) {
@@ -3654,15 +3673,17 @@ where e.CodiInst=:codiInst";
     /**
      * Documentos que referencian a este documento puntual (vía
      * DetaCont.TiDoRefe/NuDoRefe) — para el modal "Auditar referencias".
-     * Por cada vinculado: su encabezado, las líneas puntuales que
-     * referencian a este documento, y su presupuesto TOTAL (DetaPlan no
-     * tiene referencia por línea — no se puede atribuir solo la parte que
-     * corresponde a esta referencia, mismo criterio ya documentado en
-     * SihosCruceReconocimientoService::buildDiferenciasPresupuestoContabilidad()).
+     * Por cada vinculado: su encabezado, las líneas contables puntuales que
+     * referencian a este documento (con el tercero DE CADA LÍNEA, no el del
+     * encabezado — mismo criterio que sihos/modulos/comun/auditarefe.php),
+     * y sus líneas de presupuesto completas (DetaPlan no tiene referencia
+     * por línea — se traen TODAS las líneas del documento vinculado, no
+     * solo la parte atribuible a esta referencia puntual; mismo criterio ya
+     * documentado en SihosCruceReconocimientoService::buildDiferenciasPresupuestoContabilidad()).
      * Sin límite de fecha; búsqueda por índice exacto TiDoRefe/NuDoRefe,
      * normalmente pocos documentos vinculados.
      *
-     * @return list<array{CodiDocu:string,NumeDocu:string,FechDocu:string,TipoUsua:?string,ValoTota:float,Anulado:int,Causado:int,TiDoTerc:?string,NuDoTerc:?string,NombTerc:?string,lineas:list<array{ConsDeta:int,CodiCont:string,NombCuen:?string,Valor:float}>,presupuestoTotal:float}>
+     * @return list<array{CodiDocu:string,NumeDocu:string,FechDocu:string,TipoUsua:?string,ValoTota:float,Anulado:int,Causado:int,lineas:list<array{ConsDeta:int,CodiCont:string,NombCuen:?string,Valor:float,TiDoTerc:?string,NuDoTerc:?string,NombTerc:?string}>,presupuesto:list<array{ConsDeta:int,CodiPlan:string,NombPlan:?string,Valor:float,CentCost:?string}>}>
      */
     public function fetchDocumentosQueReferencian(string $codiDocu, string $numeDocu): array
     {
@@ -3674,9 +3695,8 @@ where e.CodiInst=:codiInst";
         // una "corrección", es la línea original). Mismo criterio ya usado
         // en fetchClavesConAjustePrevio().
         $stmt = $this->connect()->prepare(
-            'SELECT dc.ConsDeta, dc.CodiCont, dc.Valor, ec.CodiDocu, ec.NumeDocu,
-                    ec.FechDocu, ec.TipoUsua, ec.ValoTota, ec.Anulado, ec.Causado,
-                    ec.TiDoTerc, ec.NuDoTerc
+            'SELECT dc.ConsDeta, dc.CodiCont, dc.Valor, dc.TiDoTerc, dc.NuDoTerc,
+                    ec.CodiDocu, ec.NumeDocu, ec.FechDocu, ec.TipoUsua, ec.ValoTota, ec.Anulado, ec.Causado
              FROM DetaCont dc
              INNER JOIN EncaCont ec ON ec.CodiInst = dc.CodiInst AND ec.CodiDocu = dc.CodiDocu AND ec.NumeDocu = dc.NumeDocu
              WHERE dc.CodiInst = ? AND dc.TiDoRefe = ? AND dc.NuDoRefe = ? AND ec.Anulado = 0
@@ -3698,16 +3718,16 @@ where e.CodiInst=:codiInst";
                     'ValoTota' => (float)$f['ValoTota'],
                     'Anulado' => (int)$f['Anulado'],
                     'Causado' => (int)$f['Causado'],
-                    'TiDoTerc' => $f['TiDoTerc'],
-                    'NuDoTerc' => $f['NuDoTerc'],
                     'lineas' => [],
-                    'presupuestoTotal' => 0.0,
+                    'presupuesto' => [],
                 ];
             }
             $porDocumento[$clave]['lineas'][] = [
                 'ConsDeta' => (int)$f['ConsDeta'],
                 'CodiCont' => $f['CodiCont'],
                 'Valor' => (float)$f['Valor'],
+                'TiDoTerc' => $f['TiDoTerc'],
+                'NuDoTerc' => $f['NuDoTerc'],
             ];
         }
 
@@ -3715,36 +3735,62 @@ where e.CodiInst=:codiInst";
             return [];
         }
 
-        $stmtPlan = $this->connect()->prepare(
-            'SELECT SUM(Valor) AS Valor FROM DetaPlan WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?'
-        );
-        foreach ($porDocumento as $clave => &$vinculado) {
-            $stmtPlan->execute([$codiInst, $vinculado['CodiDocu'], $vinculado['NumeDocu']]);
-            $vinculado['presupuestoTotal'] = (float)($stmtPlan->fetchColumn() ?: 0);
+        // Líneas de presupuesto (DetaPlan) de todos los vinculados en un
+        // solo query batch — condiciones OR explícitas en vez de tupla-IN
+        // (MySQL 5.6 no la optimiza bien, mismo criterio ya usado en
+        // fetchClavesConAjustePrevioNotasVigenciaAnterior()).
+        $condiciones = [];
+        $params = [$codiInst];
+        foreach ($porDocumento as $vinculado) {
+            $condiciones[] = '(CodiDocu = ? AND NumeDocu = ?)';
+            $params[] = $vinculado['CodiDocu'];
+            $params[] = $vinculado['NumeDocu'];
         }
-        unset($vinculado);
+        $stmtPlan = $this->connect()->prepare(
+            'SELECT CodiDocu, NumeDocu, ConsDeta, CodiPlan, Valor, CentCost FROM DetaPlan
+             WHERE CodiInst = ? AND (' . implode(' OR ', $condiciones) . ')
+             ORDER BY CodiDocu, NumeDocu, ConsDeta'
+        );
+        $stmtPlan->execute($params);
+        foreach ($stmtPlan->fetchAll() as $p) {
+            $clave = $p['CodiDocu'] . '-' . $p['NumeDocu'];
+            $porDocumento[$clave]['presupuesto'][] = [
+                'ConsDeta' => (int)$p['ConsDeta'],
+                'CodiPlan' => $p['CodiPlan'],
+                'Valor' => (float)$p['Valor'],
+                'CentCost' => $p['CentCost'],
+            ];
+        }
 
-        // Nombres de cuenta (todas las líneas de todos los vinculados) y de
-        // tercero (encabezado de cada vinculado), resueltos en batch.
+        // Nombres de cuenta y de tercero (por línea contable) y de rubro
+        // (por línea de presupuesto), resueltos en batch.
         $todosLosCodigosCuenta = [];
+        $todosLosCodigosRubro = [];
+        $paresTercero = [];
         foreach ($porDocumento as $vinculado) {
             foreach ($vinculado['lineas'] as $linea) {
                 $todosLosCodigosCuenta[] = $linea['CodiCont'];
+                $paresTercero[] = ['tipo' => $linea['TiDoTerc'], 'numero' => $linea['NuDoTerc']];
+            }
+            foreach ($vinculado['presupuesto'] as $p) {
+                $todosLosCodigosRubro[] = $p['CodiPlan'];
             }
         }
         $nombresCuentas = $this->resolverNombresCuentas($todosLosCodigosCuenta);
-        $nombresTerceros = $this->resolverNombresTerceros(array_map(
-            static fn (array $v): array => ['tipo' => $v['TiDoTerc'], 'numero' => $v['NuDoTerc']],
-            $porDocumento
-        ));
+        $nombresRubros = $this->resolverNombresRubros($todosLosCodigosRubro);
+        $nombresTerceros = $this->resolverNombresTerceros($paresTercero);
 
         foreach ($porDocumento as $clave => &$vinculado) {
-            $claveTercero = $vinculado['TiDoTerc'] . '-' . $vinculado['NuDoTerc'];
-            $vinculado['NombTerc'] = $nombresTerceros[$claveTercero] ?? null;
             foreach ($vinculado['lineas'] as &$linea) {
                 $linea['NombCuen'] = $nombresCuentas[$linea['CodiCont']] ?? null;
+                $claveTercero = $linea['TiDoTerc'] . '-' . $linea['NuDoTerc'];
+                $linea['NombTerc'] = $nombresTerceros[$claveTercero] ?? null;
             }
             unset($linea);
+            foreach ($vinculado['presupuesto'] as &$p) {
+                $p['NombPlan'] = $nombresRubros[$p['CodiPlan']] ?? null;
+            }
+            unset($p);
         }
         unset($vinculado);
 
