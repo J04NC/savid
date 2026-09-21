@@ -48,6 +48,15 @@ class SihosAuditoriaReferenciasService
             $contabilidadPropia = $repositorio->fetchDetaContPropio($codiDocu, $numeDocu);
             $presupuestoPropio = $repositorio->fetchDetaPlanPropio($codiDocu, $numeDocu);
             $referenciadoPor = $repositorio->fetchDocumentosQueReferencian($codiDocu, $numeDocu);
+            // Saldo de cartera real de la factura: reusa las mismas
+            // funciones que ya usa SihosAuditoriaGlosaService para la
+            // columna "Saldo" del reporte de glosas, en vez de
+            // reimplementar el cálculo aquí — acotado a este documento
+            // puntual (sin los dos últimos argumentos, la consulta agrupa
+            // TODA la cartera histórica de la institución, que aquí no
+            // hace falta y agota memoria).
+            $prefijosCartera = $repositorio->resolvePrefijosCuentaCarteraPorTipoUsuario();
+            $saldoCartera = $repositorio->fetchSaldoCarteraPorFactura($prefijosCartera, $codiDocu, $numeDocu);
         } catch (PDOException $e) {
             return ['ok' => false, 'message' => 'No se pudo consultar la trazabilidad en SIHOS: ' . $e->getMessage()];
         }
@@ -66,18 +75,6 @@ class SihosAuditoriaReferenciasService
 
         $encabezado['Estado'] = $estadoDocumento($encabezado['Anulado'], $encabezado['Causado']);
 
-        // Resumen débito/crédito del documento propio (todas sus líneas
-        // DetaCont, no solo 4312 — mismo criterio que el bloque "Documento
-        // X - Y" de auditarefe.php).
-        $valorDebitoPropio = array_sum(array_map(
-            static fn (array $l): float => $l['Valor'] > 0 ? $l['Valor'] : 0.0,
-            $contabilidadPropia
-        ));
-        $valorCreditoPropio = abs(array_sum(array_map(
-            static fn (array $l): float => $l['Valor'] < 0 ? $l['Valor'] : 0.0,
-            $contabilidadPropia
-        )));
-
         $referenciadoPor = array_map(
             static function (array $v) use ($estadoDocumento): array {
                 $v['Estado'] = $estadoDocumento($v['Anulado'], $v['Causado']);
@@ -87,28 +84,52 @@ class SihosAuditoriaReferenciasService
             $referenciadoPor
         );
 
+        // Una sola tabla "Referencias contables" y una sola "Referencias
+        // presupuestales" (pedido del usuario tras ver el modal en uso):
+        // el documento propio deja de mostrarse aparte y pasa a ser el
+        // primer grupo de cada tabla, seguido de cada documento vinculado.
+        // $grupoDe() se reutiliza para ambas dimensiones (contable y
+        // presupuestal) en vez de duplicar la misma lógica de armado.
+        $grupoDe = static fn (string $cd, string $nd, string $fecha, string $estado, bool $esPropio, array $lineas): array => [
+            'CodiDocu' => $cd,
+            'NumeDocu' => $nd,
+            'FechDocu' => $fecha,
+            'Estado' => $estado,
+            'esPropio' => $esPropio,
+            'lineas' => $lineas,
+        ];
+
+        $referenciasContables = [$grupoDe($codiDocu, $numeDocu, $encabezado['FechDocu'], $encabezado['Estado'], true, $contabilidadPropia)];
+        $referenciasPresupuestales = [$grupoDe($codiDocu, $numeDocu, $encabezado['FechDocu'], $encabezado['Estado'], true, $presupuestoPropio)];
+        foreach ($referenciadoPor as $v) {
+            $referenciasContables[] = $grupoDe($v['CodiDocu'], $v['NumeDocu'], $v['FechDocu'], $v['Estado'], false, $v['lineas']);
+            $referenciasPresupuestales[] = $grupoDe($v['CodiDocu'], $v['NumeDocu'], $v['FechDocu'], $v['Estado'], false, $v['presupuesto']);
+        }
+
         // El "total" de contabilidad, para que sea comparable contra
         // presupuesto, aísla la familia 4312 (mismo criterio que
         // SihosCruceReconocimientoService::buildDiferenciasPresupuestoContabilidad())
         // — sumar TODAS las líneas de un documento balanceado (cartera +
         // ingreso) siempre daría ~0 y no diría nada. Las tablas de detalle
-        // ('contabilidadPropia'/'lineas' de cada vinculado) sí muestran
-        // todas las cuentas, sin filtrar, para trazabilidad completa. Mismo
-        // signo que ya usa el resto del módulo: créditos en DetaCont quedan
-        // negativos en la BD, se invierten para comparar contra
-        // presupuesto (siempre positivo).
+        // (referenciasContables) sí muestran todas las cuentas, sin
+        // filtrar, para trazabilidad completa. Mismo signo que ya usa el
+        // resto del módulo: créditos en DetaCont quedan negativos en la
+        // BD, se invierten para comparar contra presupuesto (siempre
+        // positivo).
         $sumaCuentas4312 = static function (array $lineas): float {
             $filtradas = array_filter($lineas, static fn (array $l): bool => str_starts_with($l['CodiCont'], '4312'));
 
             return -array_sum(array_column($filtradas, 'Valor'));
         };
 
-        $contabilidadTotal = $sumaCuentas4312($contabilidadPropia);
-        $presupuestoTotal = array_sum(array_column($presupuestoPropio, 'Valor'));
+        $contabilidadTotal = 0.0;
+        foreach ($referenciasContables as $grupo) {
+            $contabilidadTotal += $sumaCuentas4312($grupo['lineas']);
+        }
 
-        foreach ($referenciadoPor as $vinculado) {
-            $contabilidadTotal += $sumaCuentas4312($vinculado['lineas']);
-            $presupuestoTotal += $vinculado['presupuestoTotal'];
+        $presupuestoTotal = 0.0;
+        foreach ($referenciasPresupuestales as $grupo) {
+            $presupuestoTotal += array_sum(array_column($grupo['lineas'], 'Valor'));
         }
 
         return [
@@ -116,13 +137,11 @@ class SihosAuditoriaReferenciasService
             'codiDocu' => $codiDocu,
             'numeDocu' => $numeDocu,
             'encabezado' => $encabezado,
-            'contabilidadPropia' => $contabilidadPropia,
-            'presupuestoPropio' => $presupuestoPropio,
-            'referenciadoPor' => $referenciadoPor,
+            'referenciasContables' => $referenciasContables,
+            'referenciasPresupuestales' => $referenciasPresupuestales,
             'resumenPropio' => [
                 'valorTotal' => $encabezado['ValoTota'],
-                'valorDebito' => round($valorDebitoPropio, 2),
-                'valorCredito' => round($valorCreditoPropio, 2),
+                'saldo' => $saldoCartera["{$codiDocu}-{$numeDocu}"] ?? null,
             ],
             'totales' => [
                 'presupuesto' => round($presupuestoTotal, 2),
