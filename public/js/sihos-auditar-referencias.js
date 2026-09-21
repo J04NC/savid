@@ -16,6 +16,10 @@
         return '$' + n.toLocaleString('es-CO', { maximumFractionDigits: 0 });
     }
 
+    function moneyOrDash(valor) {
+        return (valor === null || valor === undefined) ? '—' : money(valor);
+    }
+
     function escapeHtml(texto) {
         var div = document.createElement('div');
         div.textContent = texto === null || texto === undefined ? '' : String(texto);
@@ -47,18 +51,13 @@
         return texto;
     }
 
-    function esAutorreferencia(linea, codiDocu, numeDocu) {
-        return linea.TiDoRefe === codiDocu && String(linea.NuDoRefe) === String(numeDocu);
-    }
-
     function resumen(j) {
         var e = j.encabezado;
         var r = j.resumenPropio;
         var items = [
             ['Tercero', nombreTercero(e.TiDoTerc, e.NuDoTerc, e.NombTerc)],
             ['Valor total', money(r.valorTotal)],
-            ['Valor débito', money(r.valorDebito)],
-            ['Valor crédito', money(r.valorCredito)],
+            ['Saldo', moneyOrDash(r.saldo)],
             ['Fecha', fecha(e.FechDocu)],
             ['Estado', badgeEstado(e.Estado)]
         ];
@@ -73,82 +72,81 @@
         return html;
     }
 
-    function tablaContabilidad(lineas, codiDocu, numeDocu) {
-        if (lineas.length === 0) return '<p class="field-note">Sin líneas contables.</p>';
+    /** Una fila por línea, agrupada por documento (propio primero, luego cada vinculado). */
+    function tablaReferenciasContables(grupos) {
+        if (!grupos.some(function (g) { return g.lineas.length > 0; })) {
+            return '<p class="field-note">Sin líneas contables.</p>';
+        }
+        var filas = '';
         var totalDebito = 0;
         var totalCredito = 0;
-        var filas = lineas.map(function (l) {
-            var clase = esAutorreferencia(l, codiDocu, numeDocu) ? ' class="sihos-auditoria-fila-autorreferencia"' : '';
-            var debito = '';
-            var credito = '';
-            if (l.Valor > 0) {
-                debito = money(l.Valor);
-                totalDebito += l.Valor;
-            } else {
-                credito = money(Math.abs(l.Valor));
-                totalCredito += Math.abs(l.Valor);
-            }
-            var referencia = l.NuDoRefe ? escapeHtml(l.TiDoRefe) + '-' + escapeHtml(l.NuDoRefe) : '—';
-            return '<tr' + clase + '><td>' + nombreCuenta(l.CodiCont, l.NombCuen) + '</td><td>' + nombreTercero(l.TiDoTerc, l.NuDoTerc, l.NombTerc) +
-                '</td><td>' + referencia + '</td><td style="text-align:right">' + debito + '</td><td style="text-align:right">' + credito + '</td></tr>';
-        }).join('');
-        filas += '<tr><td colspan="3" style="text-align:right"><strong>Total</strong></td><td style="text-align:right"><strong>' +
-            money(totalDebito) + '</strong></td><td style="text-align:right"><strong>' + money(totalCredito) + '</strong></td></tr>';
-        return '<table class="seguridad-table no-datatable"><thead><tr><th>Cuenta</th><th>Tercero</th><th>Referencia</th><th>Débito</th><th>Crédito</th></tr></thead><tbody>' + filas + '</tbody></table>';
-    }
-
-    function tablaPresupuesto(lineas) {
-        if (lineas.length === 0) return '<p class="field-note">Sin líneas de presupuesto.</p>';
-        var filas = lineas.map(function (l) {
-            var rubro = escapeHtml(l.CodiPlan) + (l.NombPlan ? ' - ' + escapeHtml(l.NombPlan) : '');
-            return '<tr><td>' + rubro + '</td><td style="text-align:right">' + money(l.Valor) + '</td></tr>';
-        }).join('');
-        return '<table class="seguridad-table no-datatable"><thead><tr><th>Rubro</th><th>Valor</th></tr></thead><tbody>' + filas + '</tbody></table>';
-    }
-
-    function tablaResumenReferencias(referenciadoPor) {
-        if (referenciadoPor.length === 0) return '<p class="field-note">Ningún documento referencia a este.</p>';
-        var filas = '';
-        referenciadoPor.forEach(function (v) {
-            var documento = escapeHtml(v.CodiDocu) + '-' + escapeHtml(v.NumeDocu);
-            var tercero = nombreTercero(v.TiDoTerc, v.NuDoTerc, v.NombTerc);
-            var estado = badgeEstado(v.Estado);
-            v.lineas.forEach(function (l, idx) {
+        grupos.forEach(function (g) {
+            var documento = escapeHtml(g.CodiDocu) + '-' + escapeHtml(g.NumeDocu);
+            var estado = badgeEstado(g.Estado);
+            var clasePropio = g.esPropio ? ' class="sihos-auditoria-fila-autorreferencia"' : '';
+            g.lineas.forEach(function (l, idx) {
                 var debito = '';
                 var credito = '';
                 if (l.Valor > 0) {
                     debito = money(l.Valor);
+                    totalDebito += l.Valor;
                 } else {
                     credito = '<span style="color:#ef5350">' + money(Math.abs(l.Valor)) + '</span>';
+                    totalCredito += Math.abs(l.Valor);
                 }
-                filas += '<tr>' +
+                filas += '<tr' + clasePropio + '>' +
                     '<td>' + documento + '</td>' +
-                    '<td>' + fecha(v.FechDocu) + '</td>' +
-                    '<td>' + tercero + '</td>' +
+                    '<td>' + fecha(g.FechDocu) + '</td>' +
+                    '<td>' + nombreTercero(l.TiDoTerc, l.NuDoTerc, l.NombTerc) + '</td>' +
                     '<td>' + nombreCuenta(l.CodiCont, l.NombCuen) + '</td>' +
                     '<td style="text-align:right">' + debito + '</td>' +
                     '<td style="text-align:right">' + credito + '</td>' +
                     '<td>' + (idx === 0 ? estado : '') + '</td>' +
                     '</tr>';
             });
-            filas += '<tr><td colspan="6" style="text-align:right">Presupuesto total del documento</td><td style="text-align:right"><strong>' +
-                money(v.presupuestoTotal) + '</strong></td></tr>';
         });
+        filas += '<tr><td colspan="4" style="text-align:right"><strong>Total</strong></td><td style="text-align:right"><strong>' +
+            money(totalDebito) + '</strong></td><td style="text-align:right"><strong>' + money(totalCredito) + '</strong></td><td></td></tr>';
         return '<table class="seguridad-table no-datatable"><thead><tr><th>Documento</th><th>Fecha</th><th>Tercero</th><th>Cuenta</th><th>Débito</th><th>Crédito</th><th>Estado</th></tr></thead><tbody>' + filas + '</tbody></table>';
+    }
+
+    /** Misma idea que tablaReferenciasContables(), para las líneas de presupuesto (DetaPlan). */
+    function tablaReferenciasPresupuestales(grupos) {
+        if (!grupos.some(function (g) { return g.lineas.length > 0; })) {
+            return '<p class="field-note">Sin líneas de presupuesto.</p>';
+        }
+        var filas = '';
+        var total = 0;
+        grupos.forEach(function (g) {
+            var documento = escapeHtml(g.CodiDocu) + '-' + escapeHtml(g.NumeDocu);
+            var estado = badgeEstado(g.Estado);
+            var clasePropio = g.esPropio ? ' class="sihos-auditoria-fila-autorreferencia"' : '';
+            g.lineas.forEach(function (l, idx) {
+                var rubro = escapeHtml(l.CodiPlan) + (l.NombPlan ? ' - ' + escapeHtml(l.NombPlan) : '');
+                total += l.Valor;
+                filas += '<tr' + clasePropio + '>' +
+                    '<td>' + documento + '</td>' +
+                    '<td>' + fecha(g.FechDocu) + '</td>' +
+                    '<td>' + rubro + '</td>' +
+                    '<td style="text-align:right">' + money(l.Valor) + '</td>' +
+                    '<td>' + (idx === 0 ? estado : '') + '</td>' +
+                    '</tr>';
+            });
+        });
+        filas += '<tr><td colspan="3" style="text-align:right"><strong>Total</strong></td><td style="text-align:right"><strong>' +
+            money(total) + '</strong></td><td></td></tr>';
+        return '<table class="seguridad-table no-datatable"><thead><tr><th>Documento</th><th>Fecha</th><th>Rubro</th><th>Valor</th><th>Estado</th></tr></thead><tbody>' + filas + '</tbody></table>';
     }
 
     function render(j) {
         var html = '';
         html += resumen(j);
 
-        html += '<h4 class="auditoria-title" style="font-size:14px; margin-top:16px;">Contabilidad propia</h4>';
-        html += tablaContabilidad(j.contabilidadPropia, j.codiDocu, j.numeDocu);
+        html += '<h4 class="auditoria-title" style="font-size:14px; margin-top:16px;">Referencias contables</h4>';
+        html += tablaReferenciasContables(j.referenciasContables);
 
-        html += '<h4 class="auditoria-title" style="font-size:14px; margin-top:16px;">Presupuesto propio</h4>';
-        html += tablaPresupuesto(j.presupuestoPropio);
-
-        html += '<h4 class="auditoria-title" style="font-size:14px; margin-top:16px;">Resumen de Referencias — documentos que referencian a este (' + j.referenciadoPor.length + ')</h4>';
-        html += tablaResumenReferencias(j.referenciadoPor);
+        html += '<h4 class="auditoria-title" style="font-size:14px; margin-top:16px;">Referencias presupuestales</h4>';
+        html += tablaReferenciasPresupuestales(j.referenciasPresupuestales);
 
         html += '<h4 class="auditoria-title" style="font-size:14px; margin-top:16px;">Totales (cuenta 4312 + presupuesto, propio + referenciado)</h4>';
         html += '<p class="field-note">Presupuesto: <strong>' + money(j.totales.presupuesto) + '</strong> · Contabilidad: <strong>' +
