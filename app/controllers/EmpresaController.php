@@ -473,6 +473,57 @@ class EmpresaController
     }
 
     /**
+     * Modal: subdominio exclusivo de la empresa (solo superadmin) — crea
+     * el DNS en Cloudflare y, si tiene éxito, lo guarda (ver
+     * EmpresaSubdominioAdminService).
+     * Ruta: ?url=empresa/subdominio/{empresaId}
+     * GET  → muestra el subdominio actual, o el formulario para asignar uno.
+     * POST → intenta asignarlo.
+     */
+    public function subdominio($empresaId = null): void
+    {
+        SessionManager::requireLogin();
+
+        $eid = $empresaId !== null && $empresaId !== '' ? (int)$empresaId : 0;
+        if ($eid <= 0) {
+            $this->renderModalError('Seleccione una empresa en la tabla y vuelva a abrir la acción.', 'Subdominio de la empresa', 'empresa-subdominio-modal');
+            return;
+        }
+
+        if (!$this->isSuperAdmin()) {
+            if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+                $this->jsonResponse(['success' => false, 'message' => 'Solo el superadministrador puede gestionar el subdominio de una empresa.']);
+                return;
+            }
+            $this->renderModalError(
+                'Solo el superadministrador puede gestionar el subdominio de una empresa.',
+                'Subdominio de la empresa',
+                'empresa-subdominio-modal'
+            );
+            return;
+        }
+
+        $empresa = $this->usuarioService->obtenerEmpresa($eid);
+
+        if (!$empresa) {
+            $this->renderModalError('Empresa no encontrada.', 'Subdominio de la empresa', 'empresa-subdominio-modal');
+            return;
+        }
+
+        $service = new EmpresaSubdominioAdminService();
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $subdominio = trim((string)($_POST['subdominio'] ?? ''));
+            $this->jsonResponse($service->asignarSubdominio($eid, $subdominio));
+            return;
+        }
+
+        $subdominioActual = $service->obtenerSubdominioActual($eid);
+
+        require BASE_PATH . '/app/views/empresa/subdominio_modal.php';
+    }
+
+    /**
      * @param array<string, mixed> $payload
      */
     private function jsonResponse(array $payload): void

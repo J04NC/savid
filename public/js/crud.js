@@ -2260,6 +2260,11 @@ function initCrudAcciones() {
                     "lg",
                     "Cargando roles..."
                 ],
+                empresa_subdominio: [
+                    "empresa/subdominio/" + selectedId,
+                    "sm",
+                    "Cargando..."
+                ],
                 renovar_suscripcion: [
                     "suscripcion/renovar/" + selectedId,
                     "sm",

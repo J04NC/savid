@@ -27,6 +27,15 @@ class EmpresaSubdominioAdminService
         $this->subdominioService = new EmpresaSubdominioService();
     }
 
+    public function obtenerSubdominioActual(int $empresaId): ?string
+    {
+        $stmt = $this->pdo->prepare('SELECT subdominio FROM empresa WHERE id = ? LIMIT 1');
+        $stmt->execute([$empresaId]);
+        $valor = $stmt->fetchColumn();
+
+        return ($valor !== false && $valor !== null && $valor !== '') ? (string)$valor : null;
+    }
+
     /**
      * @return array{success: bool, message?: string, error?: string}
      */
