@@ -9,6 +9,7 @@ class AuthService
     private CompanyRepository $companyRepository;
     private BranchRepository $branchRepository;
     private SubscriptionRepository $subscriptionRepository;
+    private EmpresaSubdominioService $subdominioService;
 
     public function __construct()
     {
@@ -19,6 +20,7 @@ class AuthService
         $this->companyRepository = new CompanyRepository($pdo);
         $this->branchRepository = new BranchRepository($pdo);
         $this->subscriptionRepository = new SubscriptionRepository($pdo);
+        $this->subdominioService = new EmpresaSubdominioService();
     }
 
     /**
@@ -183,12 +185,22 @@ class AuthService
      */
     private function resolveOperationalContext(int $userId): array
     {
-        $empresas = $this->companyRepository->findActiveByUserId($userId);
+        $empresasTotales = $this->companyRepository->findActiveByUserId($userId);
+
+        if (count($empresasTotales) === 0) {
+            return [
+                'success' => false,
+                'error' => "No tiene ninguna empresa asociada.\nComuníquese con el administrador del sistema.",
+            ];
+        }
+
+        $host = (string)($_SERVER['HTTP_HOST'] ?? '');
+        $empresas = $this->subdominioService->filterEmpresasByHost($empresasTotales, $host);
 
         if (count($empresas) === 0) {
             return [
                 'success' => false,
-                'error' => "No tiene ninguna empresa asociada.\nComuníquese con el administrador del sistema.",
+                'error' => $this->subdominioService->mensajeSinAccesoDesdeEsteDominio($empresasTotales),
             ];
         }
 

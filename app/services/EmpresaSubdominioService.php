@@ -68,4 +68,64 @@ class EmpresaSubdominioService
 
         return $this->companyRepository->findActiveBySubdominio($subdominio);
     }
+
+    public function baseDomain(): string
+    {
+        Database::bootstrapEnv();
+
+        return trim((string)(getenv('APP_BASE_DOMAIN') ?: ''));
+    }
+
+    /**
+     * Usado en el LOGIN (no en el selector de cambiar empresa, que
+     * deliberadamente muestra todas las empresas del usuario y redirige al
+     * subdominio correcto): de la lista de empresas del usuario, cuáles son
+     * válidas para autenticarse desde este host.
+     * - Si el host es el subdominio exclusivo de una empresa, solo esa
+     *   empresa es válida aquí (si el usuario pertenece a ella).
+     * - Si el host es genérico (no resuelve a ninguna empresa), son
+     *   válidas las empresas que NO tengan subdominio propio asignado.
+     *
+     * @param list<array<string, mixed>> $empresas cada una con al menos 'id' y 'subdominio'
+     * @return list<array<string, mixed>>
+     */
+    public function filterEmpresasByHost(array $empresas, string $host): array
+    {
+        $empresaDelHost = $this->resolveEmpresaFromHost($host);
+
+        if ($empresaDelHost !== null) {
+            return array_values(array_filter(
+                $empresas,
+                fn ($e) => (int)$e['id'] === (int)$empresaDelHost['id']
+            ));
+        }
+
+        return array_values(array_filter(
+            $empresas,
+            fn ($e) => empty($e['subdominio'])
+        ));
+    }
+
+    /**
+     * Mensaje para cuando filterEmpresasByHost() deja la lista vacía: el
+     * usuario tiene empresas, pero ninguna es accesible desde este host.
+     *
+     * @param list<array<string, mixed>> $empresasTotales sin filtrar
+     */
+    public function mensajeSinAccesoDesdeEsteDominio(array $empresasTotales): string
+    {
+        $conSubdominio = array_values(array_filter(
+            $empresasTotales,
+            fn ($e) => !empty($e['subdominio'])
+        ));
+
+        if (count($conSubdominio) === 1) {
+            $base = $this->baseDomain();
+            if ($base !== '') {
+                return 'Esta cuenta debe acceder desde https://' . $conSubdominio[0]['subdominio'] . '.' . $base;
+            }
+        }
+
+        return 'Esta cuenta no tiene acceso desde este dominio. Use el enlace específico de su empresa.';
+    }
 }
