@@ -114,23 +114,27 @@
             var tercero = nombreTercero(v.TiDoTerc, v.NuDoTerc, v.NombTerc);
             var estado = badgeEstado(v.Estado);
             v.lineas.forEach(function (l, idx) {
-                var esDC = l.Valor > 0;
-                var marca = esDC ? 'D' : '<span style="color:#ef5350">C</span>';
-                var valor = money(Math.abs(l.Valor));
+                var debito = '';
+                var credito = '';
+                if (l.Valor > 0) {
+                    debito = money(l.Valor);
+                } else {
+                    credito = '<span style="color:#ef5350">' + money(Math.abs(l.Valor)) + '</span>';
+                }
                 filas += '<tr>' +
                     '<td>' + documento + '</td>' +
                     '<td>' + fecha(v.FechDocu) + '</td>' +
                     '<td>' + tercero + '</td>' +
                     '<td>' + nombreCuenta(l.CodiCont, l.NombCuen) + '</td>' +
-                    '<td style="text-align:center">' + marca + '</td>' +
-                    '<td style="text-align:right">' + valor + '</td>' +
+                    '<td style="text-align:right">' + debito + '</td>' +
+                    '<td style="text-align:right">' + credito + '</td>' +
                     '<td>' + (idx === 0 ? estado : '') + '</td>' +
                     '</tr>';
             });
             filas += '<tr><td colspan="6" style="text-align:right">Presupuesto total del documento</td><td style="text-align:right"><strong>' +
                 money(v.presupuestoTotal) + '</strong></td></tr>';
         });
-        return '<table class="seguridad-table no-datatable"><thead><tr><th>Documento</th><th>Fecha</th><th>Tercero</th><th>Cuenta</th><th>D/C</th><th>Valor</th><th>Estado</th></tr></thead><tbody>' + filas + '</tbody></table>';
+        return '<table class="seguridad-table no-datatable"><thead><tr><th>Documento</th><th>Fecha</th><th>Tercero</th><th>Cuenta</th><th>Débito</th><th>Crédito</th><th>Estado</th></tr></thead><tbody>' + filas + '</tbody></table>';
     }
 
     function render(j) {
