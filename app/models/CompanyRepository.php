@@ -47,6 +47,28 @@ class CompanyRepository
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function findActiveBySubdominio(string $subdominio): ?array
+    {
+        $eNd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'empresa', 'e');
+
+        $stmt = $this->pdo->prepare("
+            SELECT e.id, e.subdominio, t.razon_social
+            FROM empresa e
+            INNER JOIN tercero t ON t.id = e.tercero_id
+            WHERE e.subdominio = ?
+            AND e.estado_id = 1
+            {$eNd}
+            LIMIT 1
+        ");
+        $stmt->execute([$subdominio]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row ?: null;
+    }
+
     public function findAllActive()
     {
         $eNd = SoftDeleteService::sqlAndNotDeleted($this->pdo, 'empresa', 'e');
