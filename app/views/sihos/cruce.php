@@ -417,7 +417,7 @@ $sihosAuditarReferenciasJsV = is_readable($assetSihosAuditarReferencias) ? (int)
             <?php else: ?>
                 <div style="overflow-x:auto;">
                     <table class="seguridad-table">
-                        <thead><tr><th>Documento</th><th>Fecha</th><th>Presupuesto</th><th>Contabilidad</th><th>Diferencia</th><th>Rubros</th><th>Opciones</th></tr></thead>
+                        <thead><tr><th>Documento</th><th>Fecha</th><th>Presupuesto</th><th>Contabilidad</th><th>Diferencia</th><th>Rubros</th></tr></thead>
                         <tbody>
                         <?php foreach ($dif['detalleReconocimientoTesoreria'] as $f): ?>
                             <?php $documentoRec = $f['CodiDocu'] . '-' . $f['NumeDocu']; ?>
@@ -437,12 +437,6 @@ $sihosAuditarReferenciasJsV = is_readable($assetSihosAuditarReferencias) ? (int)
                                     <?php else: ?>
                                         —
                                     <?php endif; ?>
-                                </td>
-                                <td>
-                                    <button type="button" class="auditoria-btn-primary btnSihosAuditarReferencias"
-                                            data-empresa-id="<?= (int)$empresaId ?>"
-                                            data-codi-docu="<?= htmlspecialchars($f['CodiDocu']) ?>"
-                                            data-nume-docu="<?= htmlspecialchars($f['NumeDocu']) ?>">🔍 Referencias</button>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
