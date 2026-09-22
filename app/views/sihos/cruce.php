@@ -29,6 +29,8 @@ $assetSihosReclasificarCuentaMasivo = BASE_PATH . '/public/js/sihos-reclasificar
 $sihosReclasificarCuentaMasivoJsV = is_readable($assetSihosReclasificarCuentaMasivo) ? (int)filemtime($assetSihosReclasificarCuentaMasivo) : time();
 $assetSihosAuditarReferencias = BASE_PATH . '/public/js/sihos-auditar-referencias.js';
 $sihosAuditarReferenciasJsV = is_readable($assetSihosAuditarReferencias) ? (int)filemtime($assetSihosAuditarReferencias) : time();
+$assetSihosEliminarDetaPlanMasivo = BASE_PATH . '/public/js/sihos-eliminar-detaplan-masivo.js';
+$sihosEliminarDetaPlanMasivoJsV = is_readable($assetSihosEliminarDetaPlanMasivo) ? (int)filemtime($assetSihosEliminarDetaPlanMasivo) : time();
 ?>
 
 <div class="module-container auditoria-page">
@@ -97,11 +99,18 @@ $sihosAuditarReferenciasJsV = is_readable($assetSihosAuditarReferencias) ? (int)
                     'tipo' => 'factura',
                 ],
                 [
-                    'titulo' => '3. Notas de vigencia actual incompletas',
+                    'titulo' => '3a. Notas de vigencia actual incompletas',
                     'subtitulo' => 'Notas (NCC) sobre facturas de la misma vigencia, sin DetaPlan o sin cuenta esperada (empieza por 4, o espejo de la cuenta que usó la factura — p. ej. anulación de capita sin distribuir).',
                     'filas' => $reporte['notasIncompletas'],
                     'tipo' => 'nota',
                     'accionConstruirDetaPlan' => true,
+                ],
+                [
+                    'titulo' => '3b. Notas de vigencia anterior con presupuesto',
+                    'subtitulo' => 'Notas (NCC) sobre facturas de vigencia ANTERIOR que aún tienen DetaPlan — no debería existir (una nota sobre factura de vigencia anterior va a gasto, no genera presupuesto). Mismo subconjunto que ya habilita "Eliminar DetaPlan" en la sección 6, con selección masiva.',
+                    'filas' => $reporte['diferenciasPresupuestoContabilidad']['notasVigenciaAnteriorConPresupuesto'],
+                    'tipo' => 'nota-vigencia-anterior',
+                    'accionEliminarDetaPlanMasivo' => true,
                 ],
                 [
                     'titulo' => '4. Glosas de vigencia actual incompletas',
@@ -147,6 +156,11 @@ $sihosAuditarReferenciasJsV = is_readable($assetSihosAuditarReferencias) ? (int)
                             ▶️ Reclasificar seleccionadas (0)
                         </button>
                     <?php endif; ?>
+                    <?php if (($seccion['accionEliminarDetaPlanMasivo'] ?? false) && $puedeEliminarDetaPlan): ?>
+                        <button type="button" id="btnSihosEliminarDetaPlanMasivo" class="auditoria-btn-primary" style="background:#c0392b;" disabled>
+                            🗑️ Eliminar seleccionadas (0)
+                        </button>
+                    <?php endif; ?>
                 </div>
 
                 <?php if ($seccion['filas'] === []): ?>
@@ -156,7 +170,8 @@ $sihosAuditarReferenciasJsV = is_readable($assetSihosAuditarReferencias) ? (int)
                         <?php
                         $muestraSeleccionMasiva = ($seccion['accionConstruirDetaPlan'] ?? false) && $puedeConstruirDetaPlan;
                         $muestraSeleccionReclasificar = ($seccion['accionReclasificar'] ?? false) && $puedeReversarCuenta;
-                        $tablaId = $muestraSeleccionMasiva ? 'sihosConstruirDetaPlanTable' : ($muestraSeleccionReclasificar ? 'sihosReclasificarCuentaTable' : '');
+                        $muestraSeleccionEliminarDetaPlan = ($seccion['accionEliminarDetaPlanMasivo'] ?? false) && $puedeEliminarDetaPlan;
+                        $tablaId = $muestraSeleccionMasiva ? 'sihosConstruirDetaPlanTable' : ($muestraSeleccionReclasificar ? 'sihosReclasificarCuentaTable' : ($muestraSeleccionEliminarDetaPlan ? 'sihosEliminarDetaPlanMasivoTable' : ''));
                         ?>
                         <table class="seguridad-table" <?= $tablaId !== '' ? 'id="' . $tablaId . '"' : '' ?>>
                             <?php if ($seccion['tipo'] === 'factura'): ?>
@@ -221,6 +236,50 @@ $sihosAuditarReferenciasJsV = is_readable($assetSihosAuditarReferencias) ? (int)
                                                     data-empresa-id="<?= (int)$empresaId ?>"
                                                     data-codi-docu="<?= htmlspecialchars($f['FacturaCodiDocu'] ?? $f['CodiDocu']) ?>"
                                                     data-nume-docu="<?= htmlspecialchars($f['FacturaNumeDocu'] ?? $f['NumeDocu']) ?>">🔍 Referencias</button>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                                </tbody>
+                            <?php elseif ($seccion['tipo'] === 'nota-vigencia-anterior'): ?>
+                                <thead>
+                                    <tr>
+                                        <?php if ($muestraSeleccionEliminarDetaPlan): ?>
+                                            <th class="no-dt-filter no-dt-order no-export" aria-label="Selección">
+                                                <input type="checkbox" id="sihosEliminarDetaPlanMasivoSelectAll" aria-label="Seleccionar todo lo visible">
+                                            </th>
+                                        <?php endif; ?>
+                                        <th>Documento</th><th>Fecha</th><th>Tipo de usuario</th><th>Presupuesto</th><th>Factura</th><th>Fecha factura</th>
+                                        <th>Opciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                <?php foreach ($seccion['filas'] as $f): ?>
+                                    <tr>
+                                        <?php if ($muestraSeleccionEliminarDetaPlan): ?>
+                                            <td class="no-export">
+                                                <input type="checkbox" class="sihosEliminarDetaPlanMasivoCheckbox"
+                                                       data-codi-docu="<?= htmlspecialchars($f['CodiDocu']) ?>"
+                                                       data-nume-docu="<?= htmlspecialchars($f['NumeDocu']) ?>">
+                                            </td>
+                                        <?php endif; ?>
+                                        <td><?= htmlspecialchars($f['CodiDocu'] . '-' . $f['NumeDocu']) ?></td>
+                                        <td><?= htmlspecialchars($f['FechDocu']) ?></td>
+                                        <td><?= htmlspecialchars($f['TipoUsua']) ?></td>
+                                        <td><?= sihosFormatoMoneda($f['presupuesto']) ?></td>
+                                        <td><?= htmlspecialchars($f['RelacionadoCodiDocu'] . '-' . $f['RelacionadoNumeDocu']) ?></td>
+                                        <td><?= htmlspecialchars((string)$f['RelacionadoFecha']) ?></td>
+                                        <td>
+                                            <?php if ($puedeEliminarDetaPlan): ?>
+                                                <button type="button" class="auditoria-btn-primary btnSihosEliminarDetaPlan"
+                                                        data-empresa-id="<?= (int)$empresaId ?>"
+                                                        data-codi-docu="<?= htmlspecialchars($f['CodiDocu']) ?>"
+                                                        data-nume-docu="<?= htmlspecialchars($f['NumeDocu']) ?>"
+                                                        style="background:#c0392b;">🗑️ Eliminar DetaPlan</button>
+                                            <?php endif; ?>
+                                            <button type="button" class="auditoria-btn-primary btnSihosAuditarReferencias"
+                                                    data-empresa-id="<?= (int)$empresaId ?>"
+                                                    data-codi-docu="<?= htmlspecialchars($f['RelacionadoCodiDocu'] ?? $f['CodiDocu']) ?>"
+                                                    data-nume-docu="<?= htmlspecialchars($f['RelacionadoNumeDocu'] ?? $f['NumeDocu']) ?>">🔍 Referencias</button>
                                         </td>
                                     </tr>
                                 <?php endforeach; ?>
@@ -392,13 +451,6 @@ $sihosAuditarReferenciasJsV = is_readable($assetSihosAuditarReferencias) ? (int)
                                 <td><?= $tieneRelacionado ? htmlspecialchars((string)$f['RelacionadoFecha']) : '—' ?></td>
                                 <td><?= $f['CuentaReal'] !== null ? htmlspecialchars($f['CuentaReal']) : '—' ?></td>
                                 <td>
-                                    <?php if ($puedeEliminarDetaPlan && $f['puedeEliminarDetaPlan']): ?>
-                                        <button type="button" class="auditoria-btn-primary btnSihosEliminarDetaPlan"
-                                                data-empresa-id="<?= (int)$empresaId ?>"
-                                                data-codi-docu="<?= htmlspecialchars($f['CodiDocu']) ?>"
-                                                data-nume-docu="<?= htmlspecialchars($f['NumeDocu']) ?>"
-                                                style="background:#c0392b;">🗑️ Eliminar DetaPlan</button>
-                                    <?php endif; ?>
                                     <button type="button" class="auditoria-btn-primary btnSihosAuditarReferencias"
                                             data-empresa-id="<?= (int)$empresaId ?>"
                                             data-codi-docu="<?= htmlspecialchars($refAuditoriaCodiDocu) ?>"
@@ -496,6 +548,47 @@ $sihosAuditarReferenciasJsV = is_readable($assetSihosAuditarReferencias) ? (int)
             </div>
         </div>
         <script src="/js/sihos-cruce.js?v=<?= (int)$sihosCruceJsV ?>"></script>
+
+        <div id="sihosEliminarDetaPlanMasivoModal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header-bar">
+                    <span>🗑️ Eliminar DetaPlan — selección masiva</span>
+                    <span class="close-modal" id="sihosEliminarDetaPlanMasivoCerrar" role="button" tabindex="0" aria-label="Cerrar">&times;</span>
+                </div>
+                <div style="padding:16px;">
+                    <div id="sihosEliminarDetaPlanMasivoPreInicio">
+                        <p class="modal-form-alert">
+                            Esto borrará <strong>permanentemente</strong> el <code>DetaPlan</code> de
+                            <strong id="sihosEliminarDetaPlanMasivoConteo">0</strong> documento(s) en SIHOS, uno por uno.
+                            Cada uno es <strong>irreversible</strong> desde SAVID. No cierre esta ventana mientras esté en
+                            proceso. Después de confirmar, debe correr la reconstrucción presupuestal en SIHOS para los
+                            períodos correspondientes.
+                        </p>
+                        <div class="form-group">
+                            <label for="sihosEliminarDetaPlanMasivoConfirmacion">Escriba <strong>ELIMINAR</strong> para confirmar</label>
+                            <input type="text" id="sihosEliminarDetaPlanMasivoConfirmacion" class="form-input" autocomplete="off">
+                        </div>
+                        <div class="auditoria-filters-footer">
+                            <button type="button" id="sihosEliminarDetaPlanMasivoIniciar" class="auditoria-btn-primary" style="background:#c0392b;" disabled>🗑️ Iniciar</button>
+                        </div>
+                    </div>
+                    <div id="sihosEliminarDetaPlanMasivoProgreso" hidden>
+                        <p id="sihosEliminarDetaPlanMasivoContador" aria-live="polite">Procesando 0/0… (✅ 0 ok · ⚠️ 0 con error)</p>
+                        <ul id="sihosEliminarDetaPlanMasivoFallidos" style="max-height:200px; overflow-y:auto; list-style:none; padding:0; margin:0;"></ul>
+                        <div class="auditoria-filters-footer">
+                            <button type="button" id="sihosEliminarDetaPlanMasivoDetener" class="auditoria-btn-primary" style="background:#c0392b;">⏹ Detener</button>
+                        </div>
+                    </div>
+                    <div id="sihosEliminarDetaPlanMasivoResumen" hidden>
+                        <p id="sihosEliminarDetaPlanMasivoResumenTexto" aria-live="polite"></p>
+                        <div class="auditoria-filters-footer">
+                            <button type="button" id="sihosEliminarDetaPlanMasivoActualizar" class="auditoria-btn-primary">🔄 Actualizar página</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <script src="/js/sihos-eliminar-detaplan-masivo.js?v=<?= (int)$sihosEliminarDetaPlanMasivoJsV ?>"></script>
     <?php endif; ?>
 
     <?php if ($puedeConstruirDetaPlan): ?>

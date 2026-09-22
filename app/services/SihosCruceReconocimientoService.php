@@ -674,8 +674,18 @@ class SihosCruceReconocimientoService
             static fn (array $a, array $b): int => abs($b['diferencia']) <=> abs($a['diferencia'])
         );
 
+        // Sección 3b del reporte: mismo subconjunto de $detalle que ya
+        // habilita el botón "Eliminar DetaPlan" ahí (puedeEliminarDetaPlan),
+        // presentado aparte con selección masiva — no es una consulta
+        // nueva, es un filtro sobre lo que este método ya calculó.
+        $notasVigenciaAnteriorConPresupuesto = array_values(array_filter(
+            $detalle,
+            static fn (array $f): bool => $f['puedeEliminarDetaPlan']
+        ));
+
         return [
             'detalle' => $detalle,
+            'notasVigenciaAnteriorConPresupuesto' => $notasVigenciaAnteriorConPresupuesto,
             'detalleReconocimientoTesoreria' => $detalleReconocimientoTesoreria,
             'totalPresupuesto' => round($totalPresupuesto, 2),
             'totalContabilidad' => round($totalContabilidad, 2),
