@@ -83,8 +83,13 @@ class SihosPresupuestoEliminacionService
 
         [$codiAno, $codiMes] = [substr($fechaDocu, 0, 4), substr($fechaDocu, 5, 2)];
 
+        // El período cerrado bloquea a cualquier usuario normal, pero NO al
+        // superadmin — pedido explícito del usuario: esta es una corrección
+        // de un huérfano ya identificado y validado (sección 3b), y el
+        // superadmin necesita poder aplicarla aun en un período que nadie
+        // más va a reabrir en SIHOS solo para esto.
         try {
-            if ($repositorioLectura->isPresupuestoCerrado($codiAno, $codiMes)) {
+            if (!PermisoService::isSuperAdminSession() && $repositorioLectura->isPresupuestoCerrado($codiAno, $codiMes)) {
                 return [
                     'ok' => false,
                     'message' => "El módulo Presupuesto está cerrado en SIHOS para {$codiMes}/{$codiAno}. Reábralo en SIHOS antes de continuar.",
