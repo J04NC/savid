@@ -270,6 +270,7 @@ class SihosCruceReconocimientoService
                 ),
                 'notasIncompletas' => $repository->fetchNotasVigenciaActualIncompletas($codigosNota, $fechaIni, $fechaFin),
                 'glosasIncompletas' => $repository->fetchNotasVigenciaActualIncompletas($codigosGlosa, $fechaIni, $fechaFin),
+                'notasSinCancelar4312' => $repository->fetchNotasVigenciaActualSinCancelar4312($codigosNota, $fechaIni, $fechaFin),
                 'cuentasInesperadasFacturas' => $cuentasInesperadasFacturas,
                 'cuentasInesperadasNotas' => $cuentasInesperadasNotas,
                 'cuentasInesperadasGlosas' => $repository->fetchCuentasInesperadasNotasVigenciaActual(

@@ -631,6 +631,89 @@ class SihosExternalRepository
     }
 
     /**
+     * Chequeo 3c (notas de vigencia actual): notas que SÍ restan presupuesto
+     * (tienen DetaPlan) pero cuya propia contabilidad NUNCA toca la familia
+     * 4312 — el patrón "castigo de cartera" (débito a una cuenta de gasto/
+     * pérdida configurada por la institución, p. ej. CodiInst.CuenDeAn,
+     * crédito a la cartera 13/14) es válido para dar de baja un incobrable
+     * SIN afectar el ingreso ya reconocido — pero si la nota TAMBIÉN resta
+     * presupuesto, la intención es que ese ingreso deje de reconocerse, y en
+     * ese caso la contabilidad debería reversar 4312, no solo castigar
+     * cartera. Verificado con un caso real (FE-562252/NCC-8932, empresa 17):
+     * la nota debita 58901901 (CuenDeAn de esta institución) x3 y acredita
+     * 13190301 (la MISMA cuenta que usó la factura como cartera) — nunca
+     * toca 4312.
+     *
+     * A propósito NO se agrega esta condición a
+     * fetchNotasVigenciaActualIncompletas(): su fallback "cualquier cuenta
+     * que la factura también usó en su propia causación" (ver docblock) hace
+     * match por coincidencia con la cartera compartida (13xxx) en este
+     * patrón, no con el ingreso — tocar esa consulta, ya afinada contra un
+     * caso real distinto (instalaciones que cancelan contra la misma
+     * subcuenta 4312xx de la factura), arriesgaba una regresión ahí. Sección
+     * de reporte separada en su lugar.
+     *
+     * @param string[] $codigosNota
+     * @return list<array{CodiDocu:string,NumeDocu:string,FechDocu:string,Presupuesto:float,FacturaCodiDocu:string,FacturaNumeDocu:string,FacturaFecha:string,CuentasUsadas:string}>
+     */
+    public function fetchNotasVigenciaActualSinCancelar4312(array $codigosNota, string $fechaIni, string $fechaFin): array
+    {
+        if ($codigosNota === []) {
+            return [];
+        }
+
+        $ph = implode(',', array_fill(0, count($codigosNota), '?'));
+        $codiInst = $this->codiInst();
+        $sql = "
+            SELECT DISTINCT
+                nc.CodiDocu, nc.NumeDocu, nc.FechDocu,
+                fact.CodiDocu AS FacturaCodiDocu, fact.NumeDocu AS FacturaNumeDocu, fact.FechDocu AS FacturaFecha,
+                (SELECT SUM(Valor) FROM DetaPlan dp WHERE dp.CodiInst = nc.CodiInst AND dp.CodiDocu = nc.CodiDocu AND dp.NumeDocu = nc.NumeDocu) AS Presupuesto,
+                (SELECT GROUP_CONCAT(DISTINCT dc2.CodiCont ORDER BY dc2.CodiCont SEPARATOR ', ')
+                   FROM DetaCont dc2
+                   WHERE dc2.CodiInst = nc.CodiInst AND dc2.CodiDocu = nc.CodiDocu AND dc2.NumeDocu = nc.NumeDocu
+                ) AS CuentasUsadas
+            FROM EncaCont nc
+            INNER JOIN DetaCont dcref
+                ON dcref.CodiInst = nc.CodiInst AND dcref.CodiDocu = nc.CodiDocu AND dcref.NumeDocu = nc.NumeDocu
+               AND dcref.TiDoRefe IS NOT NULL AND dcref.TiDoRefe <> ''
+            INNER JOIN EncaCont fact
+                ON fact.CodiInst = nc.CodiInst AND fact.CodiDocu = dcref.TiDoRefe AND fact.NumeDocu = dcref.NuDoRefe
+            WHERE nc.CodiInst = ?
+              AND nc.CodiDocu IN ({$ph})
+              AND nc.FechDocu BETWEEN ? AND ?
+              AND nc.Anulado = 0
+              AND YEAR(nc.FechDocu) = YEAR(fact.FechDocu)
+              AND EXISTS (
+                  SELECT 1 FROM DetaPlan dp2
+                  WHERE dp2.CodiInst = nc.CodiInst AND dp2.CodiDocu = nc.CodiDocu AND dp2.NumeDocu = nc.NumeDocu
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM DetaCont dc3
+                  WHERE dc3.CodiInst = nc.CodiInst AND dc3.CodiDocu = nc.CodiDocu AND dc3.NumeDocu = nc.NumeDocu
+                    AND dc3.CodiCont LIKE '4312%'
+              )
+            ORDER BY nc.FechDocu, nc.NumeDocu
+        ";
+        $stmt = $this->connect()->prepare($sql);
+        $stmt->execute([$codiInst, ...$codigosNota, $fechaIni, $fechaFin]);
+
+        return array_map(
+            static fn (array $f): array => [
+                'CodiDocu' => $f['CodiDocu'],
+                'NumeDocu' => $f['NumeDocu'],
+                'FechDocu' => (string)$f['FechDocu'],
+                'Presupuesto' => (float)$f['Presupuesto'],
+                'FacturaCodiDocu' => $f['FacturaCodiDocu'],
+                'FacturaNumeDocu' => $f['FacturaNumeDocu'],
+                'FacturaFecha' => (string)$f['FacturaFecha'],
+                'CuentasUsadas' => (string)$f['CuentasUsadas'],
+            ],
+            $stmt->fetchAll()
+        );
+    }
+
+    /**
      * Chequeo 5 (facturas): líneas DetaCont con cuenta fuera de lo esperado
      * (no cartera 13/14, no ingreso 4xxx, no capita pasivo, no cuenta de
      * orden 8xxx — estas últimas se excluyen por ser memo/contingencia).

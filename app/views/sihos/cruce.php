@@ -115,6 +115,12 @@ $sihosReversarCuentaMasivoJsV = is_readable($assetSihosReversarCuentaMasivo) ? (
                     'accionEliminarDetaPlanMasivo' => true,
                 ],
                 [
+                    'titulo' => '3c. Notas de vigencia actual con presupuesto sin cancelar 4312',
+                    'subtitulo' => 'Notas (NCC) sobre facturas de la misma vigencia que restan presupuesto pero cuya contabilidad nunca toca la cuenta 4312 de la factura — solo castigan cartera (p. ej. contra la cuenta de gasto configurada en SIHOS), sin reversar el ingreso ya reconocido. Solo detección por ahora.',
+                    'filas' => $reporte['notasSinCancelar4312'],
+                    'tipo' => 'nota-sin-4312',
+                ],
+                [
                     'titulo' => '4. Glosas de vigencia actual incompletas',
                     'subtitulo' => 'Glosas aceptadas (GLA) sobre facturas de la misma vigencia, sin DetaPlan o sin cuenta esperada (empieza por 4, o espejo de la cuenta que usó la factura). Excluye glosas cuyo trámite en SIHOS aún no es definitivo (aceptada por la EPS pero pendiente de trámite del prestador) — esas legítimamente no generan el efecto todavía.',
                     'filas' => $reporte['glosasIncompletas'],
@@ -245,6 +251,26 @@ $sihosReversarCuentaMasivoJsV = is_readable($assetSihosReversarCuentaMasivo) ? (
                                                     data-empresa-id="<?= (int)$empresaId ?>"
                                                     data-codi-docu="<?= htmlspecialchars($f['FacturaCodiDocu'] ?? $f['CodiDocu']) ?>"
                                                     data-nume-docu="<?= htmlspecialchars($f['FacturaNumeDocu'] ?? $f['NumeDocu']) ?>">🔍 Referencias</button>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                                </tbody>
+                            <?php elseif ($seccion['tipo'] === 'nota-sin-4312'): ?>
+                                <thead><tr><th>Documento</th><th>Fecha</th><th>Presupuesto</th><th>Factura</th><th>Fecha factura</th><th>Cuenta(s) usada(s)</th><th>Opciones</th></tr></thead>
+                                <tbody>
+                                <?php foreach ($seccion['filas'] as $f): ?>
+                                    <tr>
+                                        <td><?= htmlspecialchars($f['CodiDocu'] . '-' . $f['NumeDocu']) ?></td>
+                                        <td><?= htmlspecialchars($f['FechDocu']) ?></td>
+                                        <td><?= sihosFormatoMoneda($f['Presupuesto']) ?></td>
+                                        <td><?= htmlspecialchars($f['FacturaCodiDocu'] . '-' . $f['FacturaNumeDocu']) ?></td>
+                                        <td><?= htmlspecialchars($f['FacturaFecha']) ?></td>
+                                        <td><?= htmlspecialchars($f['CuentasUsadas']) ?></td>
+                                        <td>
+                                            <button type="button" class="auditoria-btn-primary btnSihosAuditarReferencias"
+                                                    data-empresa-id="<?= (int)$empresaId ?>"
+                                                    data-codi-docu="<?= htmlspecialchars($f['FacturaCodiDocu']) ?>"
+                                                    data-nume-docu="<?= htmlspecialchars($f['FacturaNumeDocu']) ?>">🔍 Referencias</button>
                                         </td>
                                     </tr>
                                 <?php endforeach; ?>
