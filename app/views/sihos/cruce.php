@@ -31,6 +31,8 @@ $assetSihosAuditarReferencias = BASE_PATH . '/public/js/sihos-auditar-referencia
 $sihosAuditarReferenciasJsV = is_readable($assetSihosAuditarReferencias) ? (int)filemtime($assetSihosAuditarReferencias) : time();
 $assetSihosEliminarDetaPlanMasivo = BASE_PATH . '/public/js/sihos-eliminar-detaplan-masivo.js';
 $sihosEliminarDetaPlanMasivoJsV = is_readable($assetSihosEliminarDetaPlanMasivo) ? (int)filemtime($assetSihosEliminarDetaPlanMasivo) : time();
+$assetSihosReversarCuentaMasivo = BASE_PATH . '/public/js/sihos-reversar-cuenta-masivo.js';
+$sihosReversarCuentaMasivoJsV = is_readable($assetSihosReversarCuentaMasivo) ? (int)filemtime($assetSihosReversarCuentaMasivo) : time();
 ?>
 
 <div class="module-container auditoria-page">
@@ -123,6 +125,7 @@ $sihosEliminarDetaPlanMasivoJsV = is_readable($assetSihosEliminarDetaPlanMasivo)
                     'subtitulo' => 'Líneas contables con cuenta que no es cartera, ingreso ni capita configurada.',
                     'filas' => $reporte['cuentasInesperadasFacturas'],
                     'tipo' => 'cuenta',
+                    'accionReversarCuentaMasivo' => true,
                 ],
                 [
                     'titulo' => '5b. Notas con cuenta fuera de lo esperado',
@@ -161,6 +164,11 @@ $sihosEliminarDetaPlanMasivoJsV = is_readable($assetSihosEliminarDetaPlanMasivo)
                             🗑️ Eliminar seleccionadas (0)
                         </button>
                     <?php endif; ?>
+                    <?php if (($seccion['accionReversarCuentaMasivo'] ?? false) && $puedeReversarCuenta): ?>
+                        <button type="button" id="btnSihosReversarCuentaMasivo" class="auditoria-btn-primary" style="background:#c0392b;" disabled>
+                            ↩️ Crear notas de ajuste (0)
+                        </button>
+                    <?php endif; ?>
                 </div>
 
                 <?php if ($seccion['filas'] === []): ?>
@@ -171,7 +179,8 @@ $sihosEliminarDetaPlanMasivoJsV = is_readable($assetSihosEliminarDetaPlanMasivo)
                         $muestraSeleccionMasiva = ($seccion['accionConstruirDetaPlan'] ?? false) && $puedeConstruirDetaPlan;
                         $muestraSeleccionReclasificar = ($seccion['accionReclasificar'] ?? false) && $puedeReversarCuenta;
                         $muestraSeleccionEliminarDetaPlan = ($seccion['accionEliminarDetaPlanMasivo'] ?? false) && $puedeEliminarDetaPlan;
-                        $tablaId = $muestraSeleccionMasiva ? 'sihosConstruirDetaPlanTable' : ($muestraSeleccionReclasificar ? 'sihosReclasificarCuentaTable' : ($muestraSeleccionEliminarDetaPlan ? 'sihosEliminarDetaPlanMasivoTable' : ''));
+                        $muestraSeleccionReversar = ($seccion['accionReversarCuentaMasivo'] ?? false) && $puedeReversarCuenta;
+                        $tablaId = $muestraSeleccionMasiva ? 'sihosConstruirDetaPlanTable' : ($muestraSeleccionReclasificar ? 'sihosReclasificarCuentaTable' : ($muestraSeleccionEliminarDetaPlan ? 'sihosEliminarDetaPlanMasivoTable' : ($muestraSeleccionReversar ? 'sihosReversarCuentaMasivoTable' : '')));
                         ?>
                         <table class="seguridad-table" <?= $tablaId !== '' ? 'id="' . $tablaId . '"' : '' ?>>
                             <?php if ($seccion['tipo'] === 'factura'): ?>
@@ -285,11 +294,30 @@ $sihosEliminarDetaPlanMasivoJsV = is_readable($assetSihosEliminarDetaPlanMasivo)
                                 <?php endforeach; ?>
                                 </tbody>
                             <?php elseif ($seccion['tipo'] === 'cuenta'): ?>
-                                <thead><tr><th>Documento</th><th>Fecha</th><th>Cuenta</th><th>Valor</th><th>Centro de costo</th><th>Opciones</th></tr></thead>
+                                <thead>
+                                    <tr>
+                                        <?php if ($muestraSeleccionReversar): ?>
+                                            <th class="no-dt-filter no-dt-order no-export" aria-label="Selección">
+                                                <input type="checkbox" id="sihosReversarCuentaMasivoSelectAll" aria-label="Seleccionar todo lo visible">
+                                            </th>
+                                        <?php endif; ?>
+                                        <th>Documento</th><th>Fecha</th><th>Cuenta</th><th>Valor</th><th>Centro de costo</th><th>Opciones</th>
+                                    </tr>
+                                </thead>
                                 <tbody>
                                 <?php foreach ($seccion['filas'] as $f): ?>
                                     <?php $puedeReversarEstaFila = $puedeReversarCuenta && (int)($f['Tiene4312'] ?? 0) > 0; ?>
                                     <tr>
+                                        <?php if ($muestraSeleccionReversar): ?>
+                                            <td class="no-export">
+                                                <?php if ($puedeReversarEstaFila): ?>
+                                                    <input type="checkbox" class="sihosReversarCuentaMasivoCheckbox"
+                                                           data-codi-docu="<?= htmlspecialchars($f['CodiDocu']) ?>"
+                                                           data-nume-docu="<?= htmlspecialchars($f['NumeDocu']) ?>"
+                                                           data-cons-deta="<?= (int)$f['ConsDeta'] ?>">
+                                                <?php endif; ?>
+                                            </td>
+                                        <?php endif; ?>
                                         <td><?= htmlspecialchars($f['CodiDocu'] . '-' . $f['NumeDocu']) ?></td>
                                         <td><?= htmlspecialchars($f['FechDocu']) ?></td>
                                         <td><?= htmlspecialchars($f['CodiCont']) ?></td>
@@ -686,6 +714,47 @@ $sihosEliminarDetaPlanMasivoJsV = is_readable($assetSihosEliminarDetaPlanMasivo)
             </div>
         </div>
         <script src="/js/sihos-reversar-cuenta.js?v=<?= (int)$sihosReversarCuentaJsV ?>"></script>
+
+        <div id="sihosReversarCuentaMasivoModal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header-bar">
+                    <span>↩️ Crear notas de ajuste — selección masiva</span>
+                    <span class="close-modal" id="sihosReversarCuentaMasivoCerrar" role="button" tabindex="0" aria-label="Cerrar">&times;</span>
+                </div>
+                <div style="padding:16px;">
+                    <div id="sihosReversarCuentaMasivoPreInicio">
+                        <p class="modal-form-alert">
+                            Esto creará en SIHOS una <strong>Nota Contabilidad (NC) permanente</strong> por cada una de
+                            <strong id="sihosReversarCuentaMasivoConteo">0</strong> factura(s), cancelando su cuenta fuera de
+                            lo esperado contra la(s) cuenta(s) 4312 correspondiente(s). Solo contabilidad — no afecta
+                            presupuesto. Cada una es <strong>irreversible</strong> desde SAVID. No cierre esta ventana
+                            mientras esté en proceso.
+                        </p>
+                        <div class="form-group">
+                            <label for="sihosReversarCuentaMasivoConfirmacion">Escriba <strong>AJUSTAR</strong> para confirmar</label>
+                            <input type="text" id="sihosReversarCuentaMasivoConfirmacion" class="form-input" autocomplete="off">
+                        </div>
+                        <div class="auditoria-filters-footer">
+                            <button type="button" id="sihosReversarCuentaMasivoIniciar" class="auditoria-btn-primary" style="background:#c0392b;" disabled>↩️ Iniciar</button>
+                        </div>
+                    </div>
+                    <div id="sihosReversarCuentaMasivoProgreso" hidden>
+                        <p id="sihosReversarCuentaMasivoContador" aria-live="polite">Procesando 0/0… (✅ 0 ok · ⚠️ 0 con error)</p>
+                        <ul id="sihosReversarCuentaMasivoFallidos" style="max-height:200px; overflow-y:auto; list-style:none; padding:0; margin:0;"></ul>
+                        <div class="auditoria-filters-footer">
+                            <button type="button" id="sihosReversarCuentaMasivoDetener" class="auditoria-btn-primary" style="background:#c0392b;">⏹ Detener</button>
+                        </div>
+                    </div>
+                    <div id="sihosReversarCuentaMasivoResumen" hidden>
+                        <p id="sihosReversarCuentaMasivoResumenTexto" aria-live="polite"></p>
+                        <div class="auditoria-filters-footer">
+                            <button type="button" id="sihosReversarCuentaMasivoActualizar" class="auditoria-btn-primary">🔄 Actualizar página</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <script src="/js/sihos-reversar-cuenta-masivo.js?v=<?= (int)$sihosReversarCuentaMasivoJsV ?>"></script>
     <?php endif; ?>
 
     <?php if ($puedeReversarCuenta): ?>
