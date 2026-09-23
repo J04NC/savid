@@ -98,6 +98,9 @@
     });
 
     btnActualizar.addEventListener('click', function () {
+        if (typeof savidMostrarCargando === 'function') {
+            savidMostrarCargando('Actualizando página…', true);
+        }
         window.location.reload();
     });
 
