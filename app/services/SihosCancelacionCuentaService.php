@@ -485,12 +485,21 @@ class SihosCancelacionCuentaService
     }
 
     /**
-     * Primer día del mes contable (Modulo=22) que esté abierto, empezando a
-     * buscar desde el año/mes de la factura hacia adelante (tope 36 meses).
-     * No es una reconstrucción ni un cálculo retroactivo: es la misma
-     * pregunta que se le haría a SIHOS antes de digitar un comprobante hoy.
+     * Fecha para la nota de ajuste: la más cercana a $fechaFactura (nunca
+     * anterior, para no romper el orden de documentos) cuyo mes contable
+     * (Modulo=26, ver isContabilidadCerrada()) esté abierto en SIHOS —
+     * empezando a buscar desde el año/mes de $fechaFactura hacia adelante
+     * (tope 36 meses). No es una reconstrucción ni un cálculo retroactivo:
+     * es la misma pregunta que se le haría a SIHOS antes de digitar un
+     * comprobante hoy.
      *
-     * @return array{0:string,1:string,2:string}|null [fecha 'Y-m-01', codiAno, codiMes]
+     * Si el propio mes de $fechaFactura ya está abierto, la nota se registra
+     * el MISMO DÍA que $fechaFactura (nunca antes). Solo cuando ese mes está
+     * cerrado y hay que saltar a un mes posterior, se usa el día 1 de ese
+     * mes — no hay un día de referencia dentro de él, y el día 1 de un mes
+     * estrictamente posterior sigue siendo >= $fechaFactura.
+     *
+     * @return array{0:string,1:string,2:string}|null [fecha 'Y-m-d', codiAno, codiMes]
      */
     private function resolverFechaNotaContable(SihosExternalRepository $repositorioLectura, string $fechaFactura): ?array
     {
@@ -502,7 +511,7 @@ class SihosCancelacionCuentaService
             $codiMes = (string)$mes;
 
             if (!$repositorioLectura->isContabilidadCerrada($codiAno, $codiMes)) {
-                $fecha = sprintf('%04d-%02d-01', $anno, $mes);
+                $fecha = $i === 0 ? $fechaFactura : sprintf('%04d-%02d-01', $anno, $mes);
 
                 return [$fecha, $codiAno, $codiMes];
             }
