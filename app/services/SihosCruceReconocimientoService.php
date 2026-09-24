@@ -413,13 +413,11 @@ class SihosCruceReconocimientoService
 
         $codigosVinculados = array_values(array_unique([...$codigosGlosa, ...$codigosNota, ...$codigosNotaGenerica, ...$codigosDac]));
 
-        // Presupuesto: DetaPlan NO tiene referencia por línea (TipoDoRe/
-        // NumeDoRe no se usan en la práctica — verificado), así que solo se
-        // puede atribuir el presupuesto de un vinculado a una factura si ese
-        // vinculado referencia UNA sola factura distinta (ReferenciaAmbigua
-        // = false). Si referencia varias (nota consolidada), no hay forma
-        // de saber cuánto presupuesto corresponde a cada una — se deja el
-        // vinculado con su propio presupuesto sin fusionar.
+        // Presupuesto (caso simple): DetaPlan NO tiene referencia por línea
+        // (TipoDoRe/NumeDoRe no se usan en la práctica — verificado), así
+        // que cuando el vinculado referencia UNA sola factura
+        // (ReferenciaAmbigua = false) se le atribuye TODO su presupuesto sin
+        // ambigüedad posible.
         foreach ($claves as $clave) {
             [$cd] = explode('-', $clave, 2);
             if (!in_array($cd, $codigosVinculados, true) || !isset($porPresupuesto[$clave])) {
@@ -449,6 +447,63 @@ class SihosCruceReconocimientoService
             }
             $porPresupuesto[$claveFactura]['Valor'] += (float)$porPresupuesto[$clave]['Valor'];
             unset($porPresupuesto[$clave]);
+        }
+
+        // Presupuesto (caso ambiguo, nota consolidada con VARIAS facturas):
+        // se atribuye línea por línea usando la CARTERA (13/14, prefijo
+        // configurado por TipoUsua — resolvePrefijosCuentaCarteraPorTipoUsuario())
+        // como ancla, no el DetaPlan de la nota — DetaPlan no tiene
+        // referencia por línea, pero la cartera de DetaCont SÍ, y SIEMPRE
+        // está presente en la línea que referencia a cada factura sin
+        // importar contra qué cuenta se contrapartee (4312, castigo, ingreso
+        // diferido...). Confirmado con 6 notas reales (empresa 17, 2 y 3
+        // facturas cada una): la suma de las carteras atribuidas por factura
+        // siempre coincidió exacto con el total de DetaPlan de la nota. El
+        // caso simple (arriba) queda intacto — esto solo cubre lo que antes
+        // se dejaba sin fusionar.
+        $prefijosCartera = $repository->resolvePrefijosCuentaCarteraPorTipoUsuario();
+        $atribucionesPresupuesto = $repository->fetchAtribucionContabilidadVinculada(
+            $codigosVinculados,
+            $codigosFactura,
+            $fechaIni,
+            $fechaFin,
+            $prefijosCartera
+        );
+        foreach ($atribucionesPresupuesto as $fila) {
+            $claveVinculado = $fila['VinculadoCodiDocu'] . '-' . $fila['VinculadoNumeDocu'];
+            if (!isset($porPresupuesto[$claveVinculado])) {
+                continue;
+            }
+
+            $ref = $facturaReferenciada[$claveVinculado] ?? null;
+            if ($ref === null || !($ref['ReferenciaAmbigua'] ?? false)) {
+                continue;
+            }
+
+            $facturaFecha = (string)$fila['FacturaFecha'];
+            if ($facturaFecha < $fechaIni || $facturaFecha > $fechaFin) {
+                continue;
+            }
+
+            // El vinculado ya trae su Valor con el signo invertido (ver
+            // fetchPresupuestoReconocidoPorDocumento) — la porción atribuida
+            // conserva ese mismo signo.
+            $signoVinculado = ((float)$porPresupuesto[$claveVinculado]['Valor'] < 0) ? -1 : 1;
+            $valorAtribuido = $signoVinculado * abs((float)$fila['Valor']);
+
+            $claveFactura = $fila['FacturaCodiDocu'] . '-' . $fila['FacturaNumeDocu'];
+            if (!isset($porPresupuesto[$claveFactura])) {
+                $porPresupuesto[$claveFactura] = [
+                    'CodiDocu' => $fila['FacturaCodiDocu'],
+                    'NumeDocu' => $fila['FacturaNumeDocu'],
+                    'FechDocu' => $facturaFecha,
+                    'CentCost' => null,
+                    'TipoUsua' => $fila['FacturaTipoUsua'],
+                    'Valor' => 0,
+                ];
+            }
+            $porPresupuesto[$claveFactura]['Valor'] += $valorAtribuido;
+            $porPresupuesto[$claveVinculado]['Valor'] -= $valorAtribuido;
         }
 
         // Contabilidad: DetaCont SÍ tiene referencia por línea, así que se

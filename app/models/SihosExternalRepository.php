@@ -1111,32 +1111,48 @@ class SihosExternalRepository
     }
 
     /**
-     * Atribución de contabilidad (4312xx) de documentos vinculados a las
-     * facturas que referencian, LÍNEA POR LÍNEA (no por documento completo)
-     * — un documento vinculado puede referenciar VARIAS facturas distintas,
-     * una por línea (verificado con un caso real: una sola nota con 12
-     * líneas, cada una redistribuyendo 4312 a una factura diferente; sumar
-     * el total del documento a una sola factura estaba mal). Solo se
-     * atribuye cuando AMBOS documentos (el vinculado y la factura) caen
-     * dentro del rango filtrado — mismo criterio de conciliación silenciosa
-     * que el resto del módulo.
+     * Atribución de contabilidad de documentos vinculados a las facturas que
+     * referencian, LÍNEA POR LÍNEA (no por documento completo) — un
+     * documento vinculado puede referenciar VARIAS facturas distintas, una
+     * por línea (verificado con un caso real: una sola nota con 12 líneas,
+     * cada una redistribuyendo 4312 a una factura diferente; sumar el total
+     * del documento a una sola factura estaba mal). Solo se atribuye cuando
+     * AMBOS documentos (el vinculado y la factura) caen dentro del rango
+     * filtrado — mismo criterio de conciliación silenciosa que el resto del
+     * módulo.
+     *
+     * $prefijosCuenta filtra la familia de cuentas a atribuir — por defecto
+     * 4312 (ingreso), el uso original de esta función. También se reutiliza
+     * pasando los prefijos de CARTERA (resolvePrefijosCuentaCarteraPorTipoUsuario())
+     * para atribuir PRESUPUESTO de una nota que referencia varias facturas:
+     * la cartera SIEMPRE está en la línea que referencia a cada factura, sin
+     * importar contra qué cuenta se contrapartee (4312, cuenta de
+     * castigo/gasto, ingreso diferido...) — a diferencia de 4312, que varias
+     * instalaciones ni siquiera usan para este tipo de reversión. Verificado
+     * con 6 notas reales (2 y 3 facturas cada una, empresa 17): la suma de
+     * los valores de cartera atribuidos por factura siempre coincidió
+     * exacto con el total de DetaPlan de la nota.
      *
      * @param string[] $codigosVinculados
      * @param string[] $codigosFactura
+     * @param string[] $prefijosCuenta prefijos sin '%', p. ej. ['4312'] o ['13','14']
      * @return list<array{VinculadoCodiDocu:string,VinculadoNumeDocu:string,FacturaCodiDocu:string,FacturaNumeDocu:string,FacturaFecha:string,FacturaTipoUsua:?string,Valor:float}>
      */
     public function fetchAtribucionContabilidadVinculada(
         array $codigosVinculados,
         array $codigosFactura,
         string $fechaIni,
-        string $fechaFin
+        string $fechaFin,
+        array $prefijosCuenta = ['4312']
     ): array {
-        if ($codigosVinculados === [] || $codigosFactura === []) {
+        if ($codigosVinculados === [] || $codigosFactura === [] || $prefijosCuenta === []) {
             return [];
         }
 
         $phVinc = implode(',', array_fill(0, count($codigosVinculados), '?'));
         $phFact = implode(',', array_fill(0, count($codigosFactura), '?'));
+        $condicionesCuenta = implode(' OR ', array_fill(0, count($prefijosCuenta), 'dcref.CodiCont LIKE ?'));
+        $paramsCuenta = array_map(static fn (string $p): string => $p . '%', $prefijosCuenta);
 
         $sql = "
             SELECT vinc.CodiDocu AS VinculadoCodiDocu, vinc.NumeDocu AS VinculadoNumeDocu,
@@ -1146,7 +1162,7 @@ class SihosExternalRepository
             FROM EncaCont vinc
             INNER JOIN DetaCont dcref
                 ON dcref.CodiInst = vinc.CodiInst AND dcref.CodiDocu = vinc.CodiDocu AND dcref.NumeDocu = vinc.NumeDocu
-               AND dcref.CodiCont LIKE '4312%'
+               AND ({$condicionesCuenta})
             INNER JOIN EncaCont fact
                 ON fact.CodiInst = vinc.CodiInst AND fact.CodiDocu = dcref.TiDoRefe AND fact.NumeDocu = dcref.NuDoRefe
             WHERE vinc.CodiInst = ?
@@ -1158,7 +1174,7 @@ class SihosExternalRepository
             GROUP BY vinc.CodiDocu, vinc.NumeDocu, fact.CodiDocu, fact.NumeDocu, fact.FechDocu, fact.TipoUsua
         ";
         $stmt = $this->connect()->prepare($sql);
-        $stmt->execute([$this->codiInst(), ...$codigosVinculados, $fechaIni, $fechaFin, ...$codigosFactura, $fechaIni, $fechaFin]);
+        $stmt->execute([...$paramsCuenta, $this->codiInst(), ...$codigosVinculados, $fechaIni, $fechaFin, ...$codigosFactura, $fechaIni, $fechaFin]);
 
         return $stmt->fetchAll();
     }
