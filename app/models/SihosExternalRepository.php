@@ -632,26 +632,35 @@ class SihosExternalRepository
 
     /**
      * Chequeo 3c (notas de vigencia actual): notas que SÍ restan presupuesto
-     * (tienen DetaPlan) pero cuya propia contabilidad NUNCA toca la familia
-     * 4312 — el patrón "castigo de cartera" (débito a una cuenta de gasto/
-     * pérdida configurada por la institución, p. ej. CodiInst.CuenDeAn,
-     * crédito a la cartera 13/14) es válido para dar de baja un incobrable
-     * SIN afectar el ingreso ya reconocido — pero si la nota TAMBIÉN resta
-     * presupuesto, la intención es que ese ingreso deje de reconocerse, y en
-     * ese caso la contabilidad debería reversar 4312, no solo castigar
-     * cartera. Verificado con un caso real (FE-562252/NCC-8932, empresa 17):
-     * la nota debita 58901901 (CuenDeAn de esta institución) x3 y acredita
-     * 13190301 (la MISMA cuenta que usó la factura como cartera) — nunca
-     * toca 4312.
+     * (tienen DetaPlan) pero cuya propia contabilidad NUNCA reversa la cuenta
+     * de INGRESO REAL de la factura que referencian — no necesariamente
+     * 4312: algunas facturas reconocen el ingreso contra una cuenta de
+     * ingreso diferido (p. ej. 29102701, "Ingresos recibidos por anticipado
+     * Res. 058") en vez de 4312 directamente, y una nota que reversa ESA
+     * cuenta está corrigiendo bien, aunque nunca toque 4312 — verificado con
+     * un caso real (FE-568609/NCC-9053, empresa 17): la factura reconoce
+     * contra 29102701 (nunca usa 4312), y la nota SÍ debita exactamente esa
+     * misma cuenta — no debe salir aquí. El patrón "castigo de cartera" SÍ
+     * sigue detectándose: débito a una cuenta de gasto/pérdida configurada
+     * por la institución (p. ej. CodiInst.CuenDeAn), crédito a la cartera
+     * 13/14, es válido para dar de baja un incobrable SIN afectar el ingreso
+     * ya reconocido — pero si la nota TAMBIÉN resta presupuesto sin tocar la
+     * cuenta de ingreso REAL de la factura (sea 4312 o cualquier otra), es
+     * la señal real de un problema (caso FE-562252/NCC-8932: la factura sí
+     * usa 4312, la nota castiga contra 58901901 sin reversarlo).
+     *
+     * La "cuenta de ingreso real" de la factura se resuelve como cualquier
+     * cuenta propia que NO sea cartera (13/14xxx) ni cuenta de orden
+     * (8xxx) — mismo criterio de exclusión que fetchCuentasInesperadasFacturas().
      *
      * A propósito NO se agrega esta condición a
      * fetchNotasVigenciaActualIncompletas(): su fallback "cualquier cuenta
-     * que la factura también usó en su propia causación" (ver docblock) hace
-     * match por coincidencia con la cartera compartida (13xxx) en este
-     * patrón, no con el ingreso — tocar esa consulta, ya afinada contra un
-     * caso real distinto (instalaciones que cancelan contra la misma
-     * subcuenta 4312xx de la factura), arriesgaba una regresión ahí. Sección
-     * de reporte separada en su lugar.
+     * que la factura también usó en su propia causación" (ver docblock) NO
+     * excluye cartera, así que hace match por coincidencia con la cartera
+     * compartida (13xxx) en el patrón de castigo, no con el ingreso — tocar
+     * esa consulta, ya afinada contra un caso real distinto (instalaciones
+     * que cancelan contra la misma subcuenta 4312xx de la factura), arriesgaba
+     * una regresión ahí. Sección de reporte separada en su lugar.
      *
      * @param string[] $codigosNota
      * @return list<array{CodiDocu:string,NumeDocu:string,FechDocu:string,Presupuesto:float,FacturaCodiDocu:string,FacturaNumeDocu:string,FacturaFecha:string,CuentasUsadas:string}>
@@ -690,8 +699,11 @@ class SihosExternalRepository
               )
               AND NOT EXISTS (
                   SELECT 1 FROM DetaCont dc3
+                  INNER JOIN DetaCont dcf3
+                      ON dcf3.CodiInst = dc3.CodiInst AND dcf3.CodiCont = dc3.CodiCont
+                     AND dcf3.CodiCont NOT LIKE '13%' AND dcf3.CodiCont NOT LIKE '14%' AND dcf3.CodiCont NOT LIKE '8%'
                   WHERE dc3.CodiInst = nc.CodiInst AND dc3.CodiDocu = nc.CodiDocu AND dc3.NumeDocu = nc.NumeDocu
-                    AND dc3.CodiCont LIKE '4312%'
+                    AND dcf3.CodiDocu = fact.CodiDocu AND dcf3.NumeDocu = fact.NumeDocu
               )
             ORDER BY nc.FechDocu, nc.NumeDocu
         ";
