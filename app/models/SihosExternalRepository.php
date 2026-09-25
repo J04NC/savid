@@ -726,6 +726,86 @@ class SihosExternalRepository
     }
 
     /**
+     * Porciones de presupuesto de notas atribuibles a facturas de vigencia
+     * ANTERIOR (año de la factura < año de la nota) — nunca debería existir
+     * (regla de negocio confirmada por el usuario: una nota sobre factura de
+     * vigencia anterior va a gasto, no genera presupuesto). Cubre TANTO el
+     * caso simple (nota con una sola factura) COMO el de una nota
+     * consolidada con varias facturas, algunas de vigencia actual y otras
+     * anterior a la vez — no se filtra por ReferenciaAmbigua ni por que la
+     * factura esté dentro del rango del reporte (la factura vieja casi
+     * siempre está fuera de rango, por eso es "anterior").
+     *
+     * El valor atribuido usa la CARTERA como ancla (mismo criterio que
+     * fetchAtribucionContabilidadVinculada() con prefijos de cartera) — no
+     * el DetaPlan de la nota, que no tiene referencia por línea y en notas
+     * consolidadas grandes puede agrupar varias facturas en una sola línea
+     * (verificado con un caso real de 6+ facturas compartiendo rubro).
+     *
+     * @param string[] $codigosNota
+     * @param string[] $prefijosCartera
+     * @return list<array{CodiDocu:string,NumeDocu:string,FechDocu:string,FacturaCodiDocu:string,FacturaNumeDocu:string,FacturaFecha:string,FacturaTipoUsua:?string,ValorAtribuido:float,PresupuestoTotalNota:float}>
+     */
+    public function fetchPortionesNotaVigenciaAnteriorConPresupuesto(
+        array $codigosNota,
+        array $prefijosCartera,
+        string $fechaIni,
+        string $fechaFin
+    ): array {
+        if ($codigosNota === [] || $prefijosCartera === []) {
+            return [];
+        }
+
+        $ph = implode(',', array_fill(0, count($codigosNota), '?'));
+        $condicionesCartera = implode(' OR ', array_fill(0, count($prefijosCartera), 'dcref.CodiCont LIKE ?'));
+        $paramsCartera = array_map(static fn (string $p): string => $p . '%', $prefijosCartera);
+        $codiInst = $this->codiInst();
+
+        $sql = "
+            SELECT nc.CodiDocu, nc.NumeDocu, nc.FechDocu,
+                   fact.CodiDocu AS FacturaCodiDocu, fact.NumeDocu AS FacturaNumeDocu,
+                   fact.FechDocu AS FacturaFecha, fact.TipoUsua AS FacturaTipoUsua,
+                   SUM(ABS(dcref.Valor)) AS ValorAtribuido,
+                   (SELECT SUM(Valor) FROM DetaPlan dp WHERE dp.CodiInst = nc.CodiInst AND dp.CodiDocu = nc.CodiDocu AND dp.NumeDocu = nc.NumeDocu) AS PresupuestoTotalNota
+            FROM EncaCont nc
+            INNER JOIN DetaCont dcref
+                ON dcref.CodiInst = nc.CodiInst AND dcref.CodiDocu = nc.CodiDocu AND dcref.NumeDocu = nc.NumeDocu
+               AND ({$condicionesCartera})
+               AND NOT (dcref.CodiDocu = dcref.TiDoRefe AND dcref.NumeDocu = dcref.NuDoRefe)
+            INNER JOIN EncaCont fact
+                ON fact.CodiInst = nc.CodiInst AND fact.CodiDocu = dcref.TiDoRefe AND fact.NumeDocu = dcref.NuDoRefe
+            WHERE nc.CodiInst = ?
+              AND nc.CodiDocu IN ({$ph})
+              AND nc.FechDocu BETWEEN ? AND ?
+              AND nc.Anulado = 0
+              AND YEAR(fact.FechDocu) < YEAR(nc.FechDocu)
+              AND EXISTS (
+                  SELECT 1 FROM DetaPlan dp2
+                  WHERE dp2.CodiInst = nc.CodiInst AND dp2.CodiDocu = nc.CodiDocu AND dp2.NumeDocu = nc.NumeDocu
+              )
+            GROUP BY nc.CodiDocu, nc.NumeDocu, nc.FechDocu, fact.CodiDocu, fact.NumeDocu, fact.FechDocu, fact.TipoUsua
+            ORDER BY nc.FechDocu, nc.NumeDocu
+        ";
+        $stmt = $this->connect()->prepare($sql);
+        $stmt->execute([...$paramsCartera, $codiInst, ...$codigosNota, $fechaIni, $fechaFin]);
+
+        return array_map(
+            static fn (array $f): array => [
+                'CodiDocu' => $f['CodiDocu'],
+                'NumeDocu' => $f['NumeDocu'],
+                'FechDocu' => (string)$f['FechDocu'],
+                'FacturaCodiDocu' => $f['FacturaCodiDocu'],
+                'FacturaNumeDocu' => $f['FacturaNumeDocu'],
+                'FacturaFecha' => (string)$f['FacturaFecha'],
+                'FacturaTipoUsua' => $f['FacturaTipoUsua'],
+                'ValorAtribuido' => (float)$f['ValorAtribuido'],
+                'PresupuestoTotalNota' => (float)$f['PresupuestoTotalNota'],
+            ],
+            $stmt->fetchAll()
+        );
+    }
+
+    /**
      * Chequeo 5 (facturas): líneas DetaCont con cuenta fuera de lo esperado
      * (no cartera 13/14, no ingreso 4xxx, no capita pasivo, no cuenta de
      * orden 8xxx — estas últimas se excluyen por ser memo/contingencia).
@@ -988,6 +1068,88 @@ class SihosExternalRepository
         $row = $stmt->fetch();
 
         return $row === false ? null : $row;
+    }
+
+    /**
+     * Estado fresco para eliminar (o reducir) la PORCIÓN de DetaPlan de una
+     * nota atribuible a UNA factura de vigencia anterior específica — para
+     * notas consolidadas que referencian varias facturas (algunas de
+     * vigencia actual, que deben conservar su presupuesto). Re-verificado
+     * justo antes de escribir, no basta con lo que ya mostraba el reporte.
+     *
+     * La línea de DetaPlan a tocar se identifica por el RUBRO propio de la
+     * factura (su propio CodiPlan) — solo si la factura tiene exactamente
+     * UN rubro propio y la nota tiene exactamente UNA línea con ese mismo
+     * CodiPlan; si hay ambigüedad (varios rubros o ninguno coincide),
+     * ConsDeta queda null y el llamador debe rechazar la acción por
+     * seguridad en vez de adivinar — verificado con un caso real (nota
+     * consolidando 6+ facturas con rubros que no corresponden 1 a 1 por
+     * línea) donde intentar adivinar sería incorrecto.
+     *
+     * @param string[] $prefijosCartera
+     * @return array{FechDocu:string,Anulado:int,FacturaExiste:bool,ValorAtribuido:float,CodiPlan:?string,ConsDeta:?int,ValorLineaActual:?float}|null null si la nota no existe
+     */
+    public function fetchEstadoParaEliminacionPortionDetaPlan(
+        string $codiDocuNota,
+        string $numeDocuNota,
+        string $codiDocuFactura,
+        string $numeDocuFactura,
+        array $prefijosCartera
+    ): ?array {
+        $codiInst = $this->codiInst();
+
+        $stmt = $this->connect()->prepare('SELECT FechDocu, Anulado FROM EncaCont WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?');
+        $stmt->execute([$codiInst, $codiDocuNota, $numeDocuNota]);
+        $nota = $stmt->fetch();
+        if ($nota === false) {
+            return null;
+        }
+
+        $stmt = $this->connect()->prepare('SELECT 1 FROM EncaCont WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?');
+        $stmt->execute([$codiInst, $codiDocuFactura, $numeDocuFactura]);
+        $facturaExiste = $stmt->fetch() !== false;
+
+        $valorAtribuido = 0.0;
+        if ($prefijosCartera !== []) {
+            $condicionesCartera = implode(' OR ', array_fill(0, count($prefijosCartera), 'CodiCont LIKE ?'));
+            $paramsCartera = array_map(static fn (string $p): string => $p . '%', $prefijosCartera);
+            $stmt = $this->connect()->prepare(
+                "SELECT SUM(ABS(Valor)) FROM DetaCont
+                 WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ? AND TiDoRefe = ? AND NuDoRefe = ? AND ({$condicionesCartera})"
+            );
+            $stmt->execute([$codiInst, $codiDocuNota, $numeDocuNota, $codiDocuFactura, $numeDocuFactura, ...$paramsCartera]);
+            $valorAtribuido = (float)($stmt->fetchColumn() ?: 0);
+        }
+
+        $stmt = $this->connect()->prepare('SELECT DISTINCT CodiPlan FROM DetaPlan WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?');
+        $stmt->execute([$codiInst, $codiDocuFactura, $numeDocuFactura]);
+        $rubrosFactura = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+        $consDeta = null;
+        $codiPlan = null;
+        $valorLineaActual = null;
+        if (count($rubrosFactura) === 1) {
+            $codiPlan = $rubrosFactura[0];
+            $stmt = $this->connect()->prepare(
+                'SELECT ConsDeta, Valor FROM DetaPlan WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ? AND CodiPlan = ?'
+            );
+            $stmt->execute([$codiInst, $codiDocuNota, $numeDocuNota, $codiPlan]);
+            $lineas = $stmt->fetchAll();
+            if (count($lineas) === 1) {
+                $consDeta = (int)$lineas[0]['ConsDeta'];
+                $valorLineaActual = (float)$lineas[0]['Valor'];
+            }
+        }
+
+        return [
+            'FechDocu' => (string)$nota['FechDocu'],
+            'Anulado' => (int)$nota['Anulado'],
+            'FacturaExiste' => $facturaExiste,
+            'ValorAtribuido' => round($valorAtribuido, 2),
+            'CodiPlan' => $codiPlan,
+            'ConsDeta' => $consDeta,
+            'ValorLineaActual' => $valorLineaActual,
+        ];
     }
 
     /**
