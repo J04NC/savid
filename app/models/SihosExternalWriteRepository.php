@@ -172,6 +172,78 @@ class SihosExternalWriteRepository
     }
 
     /**
+     * Elimina (si $nuevoValor queda en ~0) o reduce (UPDATE) UNA línea
+     * puntual de DetaPlan, identificada por ConsDeta — para la porción de
+     * una nota consolidada atribuible a una sola factura de vigencia
+     * anterior, dejando intacto el resto del documento (otras facturas de
+     * vigencia actual que comparten esa misma línea/rubro). A diferencia de
+     * eliminarDetaPlan() (borra TODO el documento), aquí solo se toca la
+     * fila con ese ConsDeta exacto.
+     *
+     * @return array<string, mixed> fila ANTES del cambio (para auditoría), [] si no existe
+     * @throws PDOException
+     */
+    public function eliminarPortionDetaPlan(string $codiDocu, string $numeDocu, int $consDeta, float $nuevoValor, string $usuaModi): array
+    {
+        return $this->conBloqueo(
+            'detaplan:' . $codiDocu . ':' . $numeDocu,
+            function () use ($codiDocu, $numeDocu, $consDeta, $nuevoValor, $usuaModi): array {
+                return $this->eliminarPortionDetaPlanBloqueado($codiDocu, $numeDocu, $consDeta, $nuevoValor, $usuaModi);
+            }
+        );
+    }
+
+    /** @see eliminarPortionDetaPlan (se ejecuta ya con el bloqueo tomado) */
+    private function eliminarPortionDetaPlanBloqueado(string $codiDocu, string $numeDocu, int $consDeta, float $nuevoValor, string $usuaModi): array
+    {
+        $pdo = $this->connect();
+        $codiInst = (string)($this->config['codiInst'] ?? '');
+
+        $pdo->beginTransaction();
+
+        try {
+            $stmtSelect = $pdo->prepare(
+                'SELECT * FROM DetaPlan WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ? AND ConsDeta = ? FOR UPDATE'
+            );
+            $stmtSelect->execute([$codiInst, $codiDocu, $numeDocu, $consDeta]);
+            $filaAntes = $stmtSelect->fetch();
+
+            if ($filaAntes === false) {
+                $pdo->rollBack();
+
+                return [];
+            }
+
+            if ($nuevoValor <= 0.01) {
+                $stmt = $pdo->prepare(
+                    'DELETE FROM DetaPlan WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ? AND ConsDeta = ?'
+                );
+                $stmt->execute([$codiInst, $codiDocu, $numeDocu, $consDeta]);
+            } else {
+                // Igual que eliminarDetaPlan()/construirDetaPlanNotaVigenciaActual():
+                // NO toca SaldPlan/ValoUsad/SaldDisp — columnas de saldo
+                // acumulado real que SIHOS recalcula con su propio proceso de
+                // reconstrucción presupuestal.
+                $stmt = $pdo->prepare(
+                    'UPDATE DetaPlan SET Valor = ?, FechModi = CURDATE(), HoraModi = CURTIME(), UsuaModi = ?
+                     WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ? AND ConsDeta = ?'
+                );
+                $stmt->execute([$nuevoValor, $usuaModi, $codiInst, $codiDocu, $numeDocu, $consDeta]);
+            }
+
+            $pdo->commit();
+
+            return $filaAntes;
+        } catch (PDOException $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+
+            throw $e;
+        }
+    }
+
+    /**
      * Construye la única línea DetaPlan que le falta a una nota (NCF) sobre
      * una factura de vigencia actual (sección 3 del reporte), dentro de una
      * transacción. Réplica de la fórmula validada contra casos sanos reales:
