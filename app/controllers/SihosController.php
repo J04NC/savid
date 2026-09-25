@@ -498,6 +498,53 @@ class SihosController
     }
 
     /**
+     * POST ?url=sihos/cruceEliminarPortionDetaPlan — elimina o reduce SOLO
+     * la porción de DetaPlan de una nota atribuible a UNA factura de
+     * vigencia anterior específica (nota consolidada con varias facturas,
+     * algunas de vigencia actual que deben conservar su presupuesto).
+     * Mismo permiso que cruceEliminarDetaPlan ('eliminar' sobre sihos/cruce).
+     */
+    public function cruceEliminarPortionDetaPlan(): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+
+        if (!PermisoService::can('sihos/cruce', 'eliminar')) {
+            http_response_code(403);
+            echo json_encode(['ok' => false, 'message' => 'Sin permiso.'], JSON_UNESCAPED_UNICODE);
+
+            return;
+        }
+
+        $scope = $this->connectionService->buildScope($_POST);
+        $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : 0;
+        $codiDocuNota = trim((string)($_POST['codi_docu'] ?? ''));
+        $numeDocuNota = trim((string)($_POST['nume_docu'] ?? ''));
+        $codiDocuFactura = trim((string)($_POST['factura_codi_docu'] ?? ''));
+        $numeDocuFactura = trim((string)($_POST['factura_nume_docu'] ?? ''));
+
+        if ($empresaId <= 0 || $codiDocuNota === '' || $numeDocuNota === '' || $codiDocuFactura === '' || $numeDocuFactura === '') {
+            http_response_code(400);
+            echo json_encode(['ok' => false, 'message' => 'Faltan datos del documento o de la factura.'], JSON_UNESCAPED_UNICODE);
+
+            return;
+        }
+
+        $resultado = $this->eliminacionService->eliminarPortionDetaPlan(
+            $empresaId,
+            $codiDocuNota,
+            $numeDocuNota,
+            $codiDocuFactura,
+            $numeDocuFactura
+        );
+
+        if (!$resultado['ok']) {
+            http_response_code(400);
+        }
+
+        echo json_encode($resultado, JSON_UNESCAPED_UNICODE);
+    }
+
+    /**
      * POST ?url=sihos/cruceConstruirDetaPlan — construye en SIHOS la línea
      * DetaPlan que le falta a una nota (NCF) sobre una factura de la misma
      * vigencia (sección 3 del reporte). Requiere el permiso

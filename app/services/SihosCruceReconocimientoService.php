@@ -730,14 +730,30 @@ class SihosCruceReconocimientoService
             static fn (array $a, array $b): int => abs($b['diferencia']) <=> abs($a['diferencia'])
         );
 
-        // Sección 3b del reporte: mismo subconjunto de $detalle que ya
-        // habilita el botón "Eliminar DetaPlan" ahí (puedeEliminarDetaPlan),
-        // presentado aparte con selección masiva — no es una consulta
-        // nueva, es un filtro sobre lo que este método ya calculó.
-        $notasVigenciaAnteriorConPresupuesto = array_values(array_filter(
-            $detalle,
-            static fn (array $f): bool => $f['puedeEliminarDetaPlan']
-        ));
+        // Sección 3b del reporte: consulta propia (no un filtro de $detalle)
+        // — a diferencia de puedeEliminarDetaPlan (que solo cubre notas con
+        // UNA sola factura, no ambigua), esta cubre también notas
+        // consolidadas con varias facturas mezclando vigencia actual y
+        // anterior a la vez, identificando la porción exacta atribuible a
+        // cada factura de vigencia anterior por cartera. Pedido explícito
+        // del usuario tras encontrar un caso real (nota que reparte 23
+        // facturas, algunas actuales, algunas anteriores).
+        $notasVigenciaAnteriorConPresupuesto = array_map(
+            static function (array $f) use ($nombresTipoUsua): array {
+                $codiTipoUsua = $f['FacturaTipoUsua'];
+                $f['FacturaTipoUsua'] = $codiTipoUsua !== null && isset($nombresTipoUsua[$codiTipoUsua])
+                    ? $nombresTipoUsua[$codiTipoUsua]
+                    : ('Tipo ' . ($codiTipoUsua ?? 'sin dato'));
+
+                return $f;
+            },
+            $repository->fetchPortionesNotaVigenciaAnteriorConPresupuesto(
+                $codigosVinculados,
+                $prefijosCartera,
+                $fechaIni,
+                $fechaFin
+            )
+        );
 
         return [
             'detalle' => $detalle,
