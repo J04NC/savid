@@ -33,6 +33,8 @@ $assetSihosEliminarDetaPlanMasivo = BASE_PATH . '/public/js/sihos-eliminar-detap
 $sihosEliminarDetaPlanMasivoJsV = is_readable($assetSihosEliminarDetaPlanMasivo) ? (int)filemtime($assetSihosEliminarDetaPlanMasivo) : time();
 $assetSihosReversarCuentaMasivo = BASE_PATH . '/public/js/sihos-reversar-cuenta-masivo.js';
 $sihosReversarCuentaMasivoJsV = is_readable($assetSihosReversarCuentaMasivo) ? (int)filemtime($assetSihosReversarCuentaMasivo) : time();
+$assetSihosEliminarPortionDetaPlan = BASE_PATH . '/public/js/sihos-eliminar-portion-detaplan.js';
+$sihosEliminarPortionDetaPlanJsV = is_readable($assetSihosEliminarPortionDetaPlan) ? (int)filemtime($assetSihosEliminarPortionDetaPlan) : time();
 ?>
 
 <div class="module-container auditoria-page">
@@ -283,7 +285,7 @@ $sihosReversarCuentaMasivoJsV = is_readable($assetSihosReversarCuentaMasivo) ? (
                                                 <input type="checkbox" id="sihosEliminarDetaPlanMasivoSelectAll" aria-label="Seleccionar todo lo visible">
                                             </th>
                                         <?php endif; ?>
-                                        <th>Documento</th><th>Fecha</th><th>Tipo de usuario</th><th>Presupuesto</th><th>Factura</th><th>Fecha factura</th>
+                                        <th>Documento</th><th>Fecha</th><th>Tipo de usuario</th><th>Presupuesto atribuido</th><th>Factura</th><th>Fecha factura</th>
                                         <th>Opciones</th>
                                     </tr>
                                 </thead>
@@ -294,27 +296,31 @@ $sihosReversarCuentaMasivoJsV = is_readable($assetSihosReversarCuentaMasivo) ? (
                                             <td class="no-export">
                                                 <input type="checkbox" class="sihosEliminarDetaPlanMasivoCheckbox"
                                                        data-codi-docu="<?= htmlspecialchars($f['CodiDocu']) ?>"
-                                                       data-nume-docu="<?= htmlspecialchars($f['NumeDocu']) ?>">
+                                                       data-nume-docu="<?= htmlspecialchars($f['NumeDocu']) ?>"
+                                                       data-factura-codi-docu="<?= htmlspecialchars($f['FacturaCodiDocu']) ?>"
+                                                       data-factura-nume-docu="<?= htmlspecialchars($f['FacturaNumeDocu']) ?>">
                                             </td>
                                         <?php endif; ?>
                                         <td><?= htmlspecialchars($f['CodiDocu'] . '-' . $f['NumeDocu']) ?></td>
                                         <td><?= htmlspecialchars($f['FechDocu']) ?></td>
-                                        <td><?= htmlspecialchars($f['TipoUsua']) ?></td>
-                                        <td><?= sihosFormatoMoneda($f['presupuesto']) ?></td>
-                                        <td><?= htmlspecialchars($f['RelacionadoCodiDocu'] . '-' . $f['RelacionadoNumeDocu']) ?></td>
-                                        <td><?= htmlspecialchars((string)$f['RelacionadoFecha']) ?></td>
+                                        <td><?= htmlspecialchars($f['FacturaTipoUsua']) ?></td>
+                                        <td><?= sihosFormatoMoneda($f['ValorAtribuido']) ?></td>
+                                        <td><?= htmlspecialchars($f['FacturaCodiDocu'] . '-' . $f['FacturaNumeDocu']) ?></td>
+                                        <td><?= htmlspecialchars($f['FacturaFecha']) ?></td>
                                         <td>
                                             <?php if ($puedeEliminarDetaPlan): ?>
-                                                <button type="button" class="auditoria-btn-primary btnSihosEliminarDetaPlan"
+                                                <button type="button" class="auditoria-btn-primary btnSihosEliminarPortionDetaPlan"
                                                         data-empresa-id="<?= (int)$empresaId ?>"
                                                         data-codi-docu="<?= htmlspecialchars($f['CodiDocu']) ?>"
                                                         data-nume-docu="<?= htmlspecialchars($f['NumeDocu']) ?>"
-                                                        style="background:#c0392b;">🗑️ Eliminar DetaPlan</button>
+                                                        data-factura-codi-docu="<?= htmlspecialchars($f['FacturaCodiDocu']) ?>"
+                                                        data-factura-nume-docu="<?= htmlspecialchars($f['FacturaNumeDocu']) ?>"
+                                                        style="background:#c0392b;">🗑️ Eliminar porción</button>
                                             <?php endif; ?>
                                             <button type="button" class="auditoria-btn-primary btnSihosAuditarReferencias"
                                                     data-empresa-id="<?= (int)$empresaId ?>"
-                                                    data-codi-docu="<?= htmlspecialchars($f['RelacionadoCodiDocu'] ?? $f['CodiDocu']) ?>"
-                                                    data-nume-docu="<?= htmlspecialchars($f['RelacionadoNumeDocu'] ?? $f['NumeDocu']) ?>">🔍 Referencias</button>
+                                                    data-codi-docu="<?= htmlspecialchars($f['FacturaCodiDocu']) ?>"
+                                                    data-nume-docu="<?= htmlspecialchars($f['FacturaNumeDocu']) ?>">🔍 Referencias</button>
                                         </td>
                                     </tr>
                                 <?php endforeach; ?>
@@ -602,6 +608,34 @@ $sihosReversarCuentaMasivoJsV = is_readable($assetSihosReversarCuentaMasivo) ? (
             </div>
         </div>
         <script src="/js/sihos-cruce.js?v=<?= (int)$sihosCruceJsV ?>"></script>
+
+        <div id="sihosEliminarPortionDetaPlanModal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header-bar">
+                    <span>⚠️ Eliminar porción de DetaPlan en SIHOS</span>
+                    <span class="close-modal" id="sihosEliminarPortionDetaPlanCerrar" role="button" tabindex="0" aria-label="Cerrar">&times;</span>
+                </div>
+                <div style="padding:16px;">
+                    <p class="modal-form-alert">
+                        Esta acción ajusta en SIHOS el detalle presupuestal (<code>DetaPlan</code>) de
+                        <strong id="sihosEliminarPortionDetaPlanDocumento"></strong> — solo la porción atribuible a la factura
+                        de vigencia anterior <strong id="sihosEliminarPortionDetaPlanFactura"></strong>. Si esa línea es
+                        compartida con facturas de vigencia actual, se <strong>reduce</strong> por el monto exacto en vez de
+                        borrarse por completo. Es <strong>irreversible</strong> desde SAVID. Después de confirmar, debe correr
+                        la reconstrucción presupuestal en SIHOS para el período correspondiente.
+                    </p>
+                    <div class="form-group">
+                        <label for="sihosEliminarPortionDetaPlanConfirmacion">Escriba <strong id="sihosEliminarPortionDetaPlanDocumentoLabel"></strong> para confirmar</label>
+                        <input type="text" id="sihosEliminarPortionDetaPlanConfirmacion" class="form-input" autocomplete="off">
+                    </div>
+                    <div class="auditoria-filters-footer">
+                        <button type="button" id="sihosEliminarPortionDetaPlanConfirmar" class="auditoria-btn-primary" style="background:#c0392b;" disabled>🗑️ Ajustar definitivamente</button>
+                    </div>
+                    <p id="sihosEliminarPortionDetaPlanStatus" class="usuario-perm-save-status" aria-live="polite"></p>
+                </div>
+            </div>
+        </div>
+        <script src="/js/sihos-eliminar-portion-detaplan.js?v=<?= (int)$sihosEliminarPortionDetaPlanJsV ?>"></script>
 
         <div id="sihosEliminarDetaPlanMasivoModal" class="modal hidden">
             <div class="modal-content">

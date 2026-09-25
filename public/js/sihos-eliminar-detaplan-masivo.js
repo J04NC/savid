@@ -21,7 +21,7 @@
     var resumenTexto = document.getElementById('sihosEliminarDetaPlanMasivoResumenTexto');
 
     var empresaId = null;
-    var btnEjemplo = tabla.querySelector('.btnSihosEliminarDetaPlan');
+    var btnEjemplo = tabla.querySelector('.btnSihosEliminarPortionDetaPlan');
     if (btnEjemplo) empresaId = btnEjemplo.getAttribute('data-empresa-id');
 
     var detener = false;
@@ -121,9 +121,11 @@
         fd.append('empresa_id', empresaId);
         fd.append('codi_docu', item.codiDocu);
         fd.append('nume_docu', item.numeDocu);
+        fd.append('factura_codi_docu', item.facturaCodiDocu);
+        fd.append('factura_nume_docu', item.facturaNumeDocu);
 
         try {
-            var r = await fetch('?url=sihos/cruceEliminarDetaPlan', {
+            var r = await fetch('?url=sihos/cruceEliminarPortionDetaPlan', {
                 method: 'POST',
                 body: fd,
                 credentials: 'same-origin',
@@ -137,7 +139,12 @@
 
     btnIniciar.addEventListener('click', async function () {
         var items = checkboxesMarcados().map(function (cb) {
-            return { codiDocu: cb.getAttribute('data-codi-docu'), numeDocu: cb.getAttribute('data-nume-docu') };
+            return {
+                codiDocu: cb.getAttribute('data-codi-docu'),
+                numeDocu: cb.getAttribute('data-nume-docu'),
+                facturaCodiDocu: cb.getAttribute('data-factura-codi-docu'),
+                facturaNumeDocu: cb.getAttribute('data-factura-nume-docu'),
+            };
         });
 
         preInicio.hidden = true;
