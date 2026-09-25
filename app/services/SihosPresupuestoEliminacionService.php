@@ -141,6 +141,168 @@ class SihosPresupuestoEliminacionService
     }
 
     /**
+     * Elimina (o reduce) SOLO la porción del DetaPlan de una nota atribuible
+     * a UNA factura de vigencia anterior específica — para notas
+     * consolidadas que referencian varias facturas a la vez, algunas de
+     * vigencia actual (cuyo presupuesto debe quedar intacto). A diferencia
+     * de eliminarDetaPlan() (borra TODO el documento — correcto solo cuando
+     * la nota tiene una única factura), aquí se identifica y toca solo la
+     * línea de DetaPlan que le corresponde a $codiDocuFactura/$numeDocuFactura
+     * (por su rubro propio), y si esa línea vale MÁS que la porción a
+     * quitar (comparte rubro con otra(s) factura(s) de vigencia actual), se
+     * reduce en vez de borrarse — decisión explícita del usuario.
+     */
+    public function eliminarPortionDetaPlan(
+        int $empresaId,
+        string $codiDocuNota,
+        string $numeDocuNota,
+        string $codiDocuFactura,
+        string $numeDocuFactura
+    ): array {
+        $configFila = $this->configRepository->findByEmpresaId($empresaId);
+        if ($configFila === null || $configFila['host'] === '' || $configFila['base_datos'] === '') {
+            return ['ok' => false, 'message' => 'Esta empresa no tiene conexión a SIHOS configurada.'];
+        }
+
+        $codiInst = trim((string)($configFila['codi_inst'] ?? ''));
+        $usuarioEscritura = trim((string)($configFila['usuario_escritura'] ?? ''));
+        if ($codiInst === '' || $usuarioEscritura === '' || empty($configFila['password_escritura_cifrado'])) {
+            return [
+                'ok' => false,
+                'message' => 'Configure las credenciales de escritura de esta empresa en Conexión SIHOS antes de usar esta acción.',
+            ];
+        }
+
+        $repositorioLectura = new SihosExternalRepository([
+            'host' => $configFila['host'],
+            'port' => (string)$configFila['puerto'],
+            'database' => $configFila['base_datos'],
+            'username' => $configFila['usuario'],
+            'codiInst' => $codiInst,
+            'password' => SihosCredentialCipher::decrypt($configFila['password_cifrado'] ?? null),
+            'charset' => $configFila['charset'],
+        ]);
+
+        try {
+            $prefijosCartera = $repositorioLectura->resolvePrefijosCuentaCarteraPorTipoUsuario();
+            $estado = $repositorioLectura->fetchEstadoParaEliminacionPortionDetaPlan(
+                $codiDocuNota,
+                $numeDocuNota,
+                $codiDocuFactura,
+                $numeDocuFactura,
+                $prefijosCartera
+            );
+        } catch (PDOException $e) {
+            return ['ok' => false, 'message' => 'No se pudo consultar SIHOS: ' . $e->getMessage()];
+        }
+
+        if ($estado === null) {
+            return ['ok' => false, 'message' => "No se encontró la nota {$codiDocuNota}-{$numeDocuNota} en SIHOS."];
+        }
+
+        if ($estado['Anulado'] === 1) {
+            return ['ok' => false, 'message' => 'La nota está anulada, no se modifica.'];
+        }
+
+        if (!$estado['FacturaExiste']) {
+            return ['ok' => false, 'message' => "No se encontró la factura {$codiDocuFactura}-{$numeDocuFactura} en SIHOS."];
+        }
+
+        if ($estado['ValorAtribuido'] < 0.01) {
+            return [
+                'ok' => false,
+                'message' => "La nota {$codiDocuNota}-{$numeDocuNota} ya no tiene contabilidad atribuible a {$codiDocuFactura}-{$numeDocuFactura} — puede que ya se haya corregido.",
+            ];
+        }
+
+        if ($estado['ConsDeta'] === null) {
+            return [
+                'ok' => false,
+                'message' => "No se pudo identificar con certeza cuál línea de DetaPlan de {$codiDocuNota}-{$numeDocuNota} corresponde a {$codiDocuFactura}-{$numeDocuFactura} "
+                    . '(el rubro de la factura es ambiguo o no coincide con ninguna línea de la nota) — corríjalo manualmente en SIHOS.',
+            ];
+        }
+
+        $nuevoValor = round((float)$estado['ValorLineaActual'] - $estado['ValorAtribuido'], 2);
+        if ($nuevoValor < -0.01) {
+            return [
+                'ok' => false,
+                'message' => "El valor atribuido a {$codiDocuFactura}-{$numeDocuFactura} (" . number_format($estado['ValorAtribuido'], 0, ',', '.')
+                    . ') supera el de la línea de DetaPlan (' . number_format((float)$estado['ValorLineaActual'], 0, ',', '.')
+                    . ') — no se continúa por seguridad, revise manualmente en SIHOS.',
+            ];
+        }
+        $nuevoValor = max(0.0, $nuevoValor);
+
+        [$codiAno, $codiMes] = [substr($estado['FechDocu'], 0, 4), substr($estado['FechDocu'], 5, 2)];
+
+        // Mismo criterio que eliminarDetaPlan(): el período cerrado bloquea a
+        // cualquier usuario normal, pero no al superadmin.
+        try {
+            if (!PermisoService::isSuperAdminSession() && $repositorioLectura->isPresupuestoCerrado($codiAno, $codiMes)) {
+                return [
+                    'ok' => false,
+                    'message' => "El módulo Presupuesto está cerrado en SIHOS para {$codiMes}/{$codiAno}. Reábralo en SIHOS antes de continuar.",
+                ];
+            }
+        } catch (PDOException $e) {
+            return ['ok' => false, 'message' => 'No se pudo verificar el cierre del período en SIHOS: ' . $e->getMessage()];
+        }
+
+        $repositorioEscritura = new SihosExternalWriteRepository([
+            'host' => $configFila['host'],
+            'port' => (string)$configFila['puerto'],
+            'database' => $configFila['base_datos'],
+            'username' => $usuarioEscritura,
+            'codiInst' => $codiInst,
+            'password' => SihosCredentialCipher::decrypt($configFila['password_escritura_cifrado']),
+            'charset' => $configFila['charset'],
+        ]);
+
+        try {
+            $filaAntes = $repositorioEscritura->eliminarPortionDetaPlan(
+                $codiDocuNota,
+                $numeDocuNota,
+                $estado['ConsDeta'],
+                $nuevoValor,
+                $this->usuaDigiResolver->resolver((int)($_SESSION['user_id'] ?? 0), $repositorioLectura)
+            );
+        } catch (SihosOperacionEnCursoException $e) {
+            return ['ok' => false, 'message' => $e->getMessage()];
+        } catch (PDOException $e) {
+            return ['ok' => false, 'message' => 'No se pudo escribir en SIHOS: ' . $e->getMessage()];
+        }
+
+        if ($filaAntes === []) {
+            return [
+                'ok' => false,
+                'message' => "La línea de DetaPlan de {$codiDocuNota}-{$numeDocuNota} ya no existe — puede que ya se haya corregido.",
+            ];
+        }
+
+        $seElimino = $nuevoValor <= 0.01;
+        $this->registrarAuditoria(
+            $empresaId,
+            $seElimino ? 'DELETE' : 'UPDATE',
+            'sihos.DetaPlan',
+            "{$codiInst}-{$codiDocuNota}-{$numeDocuNota}-{$estado['ConsDeta']}",
+            json_encode($filaAntes, JSON_UNESCAPED_UNICODE),
+            $seElimino ? null : json_encode(['Valor' => $nuevoValor], JSON_UNESCAPED_UNICODE),
+            "Corrección de la porción de DetaPlan de {$codiDocuNota}-{$numeDocuNota} atribuible a la factura de vigencia anterior {$codiDocuFactura}-{$numeDocuFactura}"
+        );
+
+        $mensajeAccion = $seElimino
+            ? "Se eliminó la línea de DetaPlan de {$codiDocuNota}-{$numeDocuNota}"
+            : "Se redujo la línea de DetaPlan de {$codiDocuNota}-{$numeDocuNota} en " . number_format($estado['ValorAtribuido'], 0, ',', '.')
+                . ' (queda en ' . number_format($nuevoValor, 0, ',', '.') . ')';
+
+        return [
+            'ok' => true,
+            'message' => "{$mensajeAccion}, porción atribuible a {$codiDocuFactura}-{$numeDocuFactura}. Recuerde correr la reconstrucción presupuestal en SIHOS para {$codiMes}/{$codiAno}.",
+        ];
+    }
+
+    /**
      * Construye la línea DetaPlan que le falta a una nota (NCF) sobre una
      * factura de la MISMA vigencia (sección 3 del reporte). Bloquea si el
      * mes propio de la nota está cerrado en Presupuesto — mismo principio
