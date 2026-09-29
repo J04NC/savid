@@ -1356,22 +1356,30 @@ class SihosExternalRepository
     /**
      * Para facturas en rango: qué otras cuentas (fuera de cartera 13/14,
      * ingreso 4312xx, y cuenta de orden 8xxx) tocó la factura en su propia
-     * causación — NO para conciliar nada, solo para mostrar en la sección
-     * de diferencias qué cuenta real se usó cuando no es 4312 (verificado
-     * con un caso real: una factura "Otros deudores" acredita 48xx "OTROS
-     * INGRESOS" en vez de 4312, así que su contabilidad(4312) da $0 aunque
-     * sí tiene un asiento real). La diferencia se sigue mostrando igual —
-     * esto es solo trazabilidad. Incluye a propósito las cuentas de capita
-     * pasivo (a diferencia de fetchCuentasInesperadasFacturas() y
+     * causación, MÁS las de cualquier documento que la referencie (nota,
+     * glosa, DAC — vía TiDoRefe/NuDoRefe, $codigosVinculados) — NO para
+     * conciliar nada, solo para mostrar en la sección de diferencias qué
+     * cuenta real explica lo que falta cuando no es 4312 (verificado con
+     * dos casos reales: una factura "Otros deudores" que acredita 48xx
+     * "OTROS INGRESOS" directamente en su propia causación, y una factura
+     * de ingreso diferido cuyo DAC de reclasificación toca una cuenta fuera
+     * de 4312 — en ese caso la cuenta "real" está en el DAC, no en la
+     * factura). La diferencia se sigue mostrando igual — esto es solo
+     * trazabilidad. Incluye a propósito las cuentas de capita pasivo (a
+     * diferencia de fetchCuentasInesperadasFacturas() y
      * fetchFacturasSinCuentaIngreso(), donde sí deben excluirse porque ahí
      * SÍ son la cuenta esperada) — confirmado por el usuario: quiere ver
      * exactamente qué cuenta real se usó, capita incluida, sin que eso
      * cambie la diferencia calculada.
      *
+     * $codigosVinculados vacío preserva el comportamiento anterior (solo la
+     * causación propia de la factura).
+     *
      * @param string[] $codigosFactura
+     * @param string[] $codigosVinculados
      * @return array<string, list<array{CodiCont:string,Valor:float}>> indexado por "CodiDocu-NumeDocu"
      */
-    public function fetchCuentasNoIdentificadasFacturas(array $codigosFactura, string $fechaIni, string $fechaFin): array
+    public function fetchCuentasNoIdentificadasFacturas(array $codigosFactura, string $fechaIni, string $fechaFin, array $codigosVinculados = []): array
     {
         if ($codigosFactura === []) {
             return [];
@@ -1379,8 +1387,8 @@ class SihosExternalRepository
 
         $phFact = implode(',', array_fill(0, count($codigosFactura), '?'));
 
-        $sql = "
-            SELECT ec.CodiDocu, ec.NumeDocu, dc.CodiCont, SUM(dc.Valor) AS Valor
+        $sqlPropia = "
+            SELECT ec.CodiDocu, ec.NumeDocu, dc.CodiCont, dc.Valor
             FROM EncaCont ec
             INNER JOIN DetaCont dc ON dc.CodiInst = ec.CodiInst AND dc.CodiDocu = ec.CodiDocu AND dc.NumeDocu = ec.NumeDocu
             WHERE ec.CodiInst = ?
@@ -1391,10 +1399,42 @@ class SihosExternalRepository
               AND dc.CodiCont NOT LIKE '14%'
               AND dc.CodiCont NOT LIKE '4312%'
               AND dc.CodiCont NOT LIKE '8%'
-            GROUP BY ec.CodiDocu, ec.NumeDocu, dc.CodiCont
+        ";
+        $params = [$this->codiInst(), ...$codigosFactura, $fechaIni, $fechaFin];
+
+        $sqlVinculada = '';
+        if ($codigosVinculados !== []) {
+            $phVinc = implode(',', array_fill(0, count($codigosVinculados), '?'));
+            $sqlVinculada = "
+                UNION ALL
+                SELECT fact.CodiDocu, fact.NumeDocu, dcv.CodiCont, dcv.Valor
+                FROM EncaCont fact
+                INNER JOIN DetaCont dcv
+                    ON dcv.CodiInst = fact.CodiInst AND dcv.TiDoRefe = fact.CodiDocu AND dcv.NuDoRefe = fact.NumeDocu
+                   AND NOT (dcv.CodiDocu = fact.CodiDocu AND dcv.NumeDocu = fact.NumeDocu)
+                INNER JOIN EncaCont vinc
+                    ON vinc.CodiInst = dcv.CodiInst AND vinc.CodiDocu = dcv.CodiDocu AND vinc.NumeDocu = dcv.NumeDocu
+                WHERE fact.CodiInst = ?
+                  AND fact.CodiDocu IN ({$phFact})
+                  AND fact.FechDocu BETWEEN ? AND ?
+                  AND fact.Anulado = 0
+                  AND vinc.CodiDocu IN ({$phVinc})
+                  AND vinc.Anulado = 0
+                  AND dcv.CodiCont NOT LIKE '13%'
+                  AND dcv.CodiCont NOT LIKE '14%'
+                  AND dcv.CodiCont NOT LIKE '4312%'
+                  AND dcv.CodiCont NOT LIKE '8%'
+            ";
+            $params = [...$params, $this->codiInst(), ...$codigosFactura, $fechaIni, $fechaFin, ...$codigosVinculados];
+        }
+
+        $sql = "
+            SELECT CodiDocu, NumeDocu, CodiCont, SUM(Valor) AS Valor
+            FROM ({$sqlPropia}{$sqlVinculada}) combinado
+            GROUP BY CodiDocu, NumeDocu, CodiCont
         ";
         $stmt = $this->connect()->prepare($sql);
-        $stmt->execute([$this->codiInst(), ...$codigosFactura, $fechaIni, $fechaFin]);
+        $stmt->execute($params);
 
         $porFactura = [];
         while ($fila = $stmt->fetch()) {

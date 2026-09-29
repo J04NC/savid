@@ -553,12 +553,15 @@ class SihosCruceReconocimientoService
 
         // Solo para trazabilidad (no cambia ningún total ni oculta ninguna
         // diferencia): qué otra cuenta tocó la factura cuando no es 4312 —
-        // p. ej. "Otros deudores" que acredita 48xx (otros ingresos) en vez
-        // de 4312 (verificado con un caso real).
+        // propia o de cualquier documento que la referencie (p. ej. un DAC
+        // que reclasifica el ingreso diferido de la factura tocando una
+        // cuenta fuera de 4312 en una de sus líneas — verificado con un
+        // caso real).
         $cuentasNoIdentificadas = $repository->fetchCuentasNoIdentificadasFacturas(
             $codigosFactura,
             $fechaIni,
-            $fechaFin
+            $fechaFin,
+            $codigosVinculados
         );
 
         $claves = array_unique([...array_keys($porPresupuesto), ...array_keys($porContabilidad)]);
