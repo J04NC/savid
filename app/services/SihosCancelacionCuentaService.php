@@ -453,6 +453,232 @@ class SihosCancelacionCuentaService
     }
 
     /**
+     * Reclasifica la(s) cuenta(s) "fuera de lo esperado" de una nota (NCC)
+     * de vigencia ACTUAL (sección 3c) hacia la cuenta de ingreso real de la
+     * factura que referencia — a diferencia de reclasificarCuentaVigenciaAnterior()
+     * (sección 5b), aquí NO hay cuenta destino elegida por el usuario: cada
+     * línea de la nota se empareja automáticamente, por su valor exacto,
+     * con la línea de ingreso de la factura que le corresponde (ver
+     * SihosExternalRepository::fetchEstadoParaReclasificacionVigenciaActual()).
+     * Mismas 2 ramas que 5b según `isContabilidadCerrada`: mes abierto edita
+     * en sitio, mes cerrado crea una nota de ajuste nueva.
+     */
+    public function reclasificarCuentaVigenciaActual(int $empresaId, string $codiDocuNota, string $numeDocuNota): array
+    {
+        $configFila = $this->configRepository->findByEmpresaId($empresaId);
+        if ($configFila === null || $configFila['host'] === '' || $configFila['base_datos'] === '') {
+            return ['ok' => false, 'message' => 'Esta empresa no tiene conexión a SIHOS configurada.'];
+        }
+
+        $codiInst = trim((string)($configFila['codi_inst'] ?? ''));
+        $usuarioEscritura = trim((string)($configFila['usuario_escritura'] ?? ''));
+        if ($codiInst === '' || $usuarioEscritura === '' || empty($configFila['password_escritura_cifrado'])) {
+            return [
+                'ok' => false,
+                'message' => 'Configure las credenciales de escritura de esta empresa en Conexión SIHOS antes de usar esta acción.',
+            ];
+        }
+
+        $repositorioLectura = new SihosExternalRepository([
+            'host' => $configFila['host'],
+            'port' => (string)$configFila['puerto'],
+            'database' => $configFila['base_datos'],
+            'username' => $configFila['usuario'],
+            'codiInst' => $codiInst,
+            'password' => SihosCredentialCipher::decrypt($configFila['password_cifrado'] ?? null),
+            'charset' => $configFila['charset'],
+        ]);
+
+        try {
+            $estado = $repositorioLectura->fetchEstadoParaReclasificacionVigenciaActual($codiDocuNota, $numeDocuNota);
+        } catch (PDOException $e) {
+            return ['ok' => false, 'message' => 'No se pudo consultar SIHOS: ' . $e->getMessage()];
+        }
+
+        if ($estado === null) {
+            return ['ok' => false, 'message' => "No se encontró el documento {$codiDocuNota}-{$numeDocuNota} en SIHOS."];
+        }
+
+        if ($estado['Anulado'] === 1) {
+            return ['ok' => false, 'message' => 'La nota está anulada, no se modifica.'];
+        }
+
+        if ($estado['Emparejamientos'] === null) {
+            return [
+                'ok' => false,
+                'message' => "No se pudo identificar con certeza a qué cuenta de la factura corresponde cada línea de {$codiDocuNota}-{$numeDocuNota} "
+                    . "(el valor de alguna línea es ambiguo o no coincide con ninguna línea de ingreso de la factura) — corríjalo manualmente en SIHOS.",
+            ];
+        }
+
+        if ($estado['Emparejamientos'] === []) {
+            return [
+                'ok' => false,
+                'message' => "La nota {$codiDocuNota}-{$numeDocuNota} ya no tiene ninguna cuenta fuera de lo esperado por corregir — puede que ya se haya corregido.",
+            ];
+        }
+
+        $emparejamientos = $estado['Emparejamientos'];
+
+        try {
+            $maneNIIF = $repositorioLectura->fetchManeNIIF();
+        } catch (PDOException $e) {
+            return ['ok' => false, 'message' => 'No se pudo verificar la configuración NIIF de SIHOS: ' . $e->getMessage()];
+        }
+
+        if ($maneNIIF) {
+            $codigosCuenta = array_values(array_unique(array_merge(
+                array_column($emparejamientos, 'CodiContOrigen'),
+                array_column($emparejamientos, 'CodiContDestino')
+            )));
+
+            try {
+                $homologaciones = $repositorioLectura->fetchHomologacionesNIIF($codigosCuenta);
+            } catch (PDOException $e) {
+                return ['ok' => false, 'message' => 'No se pudo verificar la homologación NIIF en SIHOS: ' . $e->getMessage()];
+            }
+
+            $faltantes = array_diff($codigosCuenta, array_keys($homologaciones));
+            if ($faltantes !== []) {
+                return [
+                    'ok' => false,
+                    'message' => 'Esta institución maneja NIIF y falta homologación (HomoNIIF) para: ' . implode(', ', $faltantes)
+                        . ' — configúrela en SIHOS antes de continuar.',
+                ];
+            }
+        }
+
+        $codiAno = substr($estado['FechDocu'], 0, 4);
+        $codiMes = (string)(int)substr($estado['FechDocu'], 5, 2);
+
+        try {
+            $cerrado = $repositorioLectura->isContabilidadCerrada($codiAno, $codiMes);
+        } catch (PDOException $e) {
+            return ['ok' => false, 'message' => 'No se pudo verificar el cierre del período en SIHOS: ' . $e->getMessage()];
+        }
+
+        $repositorioEscritura = new SihosExternalWriteRepository([
+            'host' => $configFila['host'],
+            'port' => (string)$configFila['puerto'],
+            'database' => $configFila['base_datos'],
+            'username' => $usuarioEscritura,
+            'codiInst' => $codiInst,
+            'password' => SihosCredentialCipher::decrypt($configFila['password_escritura_cifrado']),
+            'charset' => $configFila['charset'],
+        ]);
+
+        if (!$cerrado) {
+            $parsEnSitio = array_map(
+                static fn (array $e): array => [
+                    'ConsDeta' => $e['ConsDeta'],
+                    'CodiContOrigen' => $e['CodiContOrigen'],
+                    'CodiContDestino' => $e['CodiContDestino'],
+                ],
+                $emparejamientos
+            );
+
+            try {
+                $resultado = $repositorioEscritura->reclasificarCuentasVigenciaActualEnSitio(
+                    $codiDocuNota,
+                    $numeDocuNota,
+                    $parsEnSitio,
+                    $codiAno,
+                    $codiMes,
+                    $maneNIIF,
+                    $this->usuaDigiResolver->resolver((int)($_SESSION['user_id'] ?? 0), $repositorioLectura)
+                );
+            } catch (SihosOperacionEnCursoException $e) {
+                return ['ok' => false, 'message' => $e->getMessage()];
+            } catch (PDOException $e) {
+                return ['ok' => false, 'message' => 'No se pudo escribir en SIHOS: ' . $e->getMessage()];
+            }
+
+            if (!$resultado['ok']) {
+                return ['ok' => false, 'message' => $resultado['motivo'] ?? 'No se pudo completar la acción en SIHOS.'];
+            }
+
+            $this->registrarAuditoriaReclasificacion(
+                $empresaId,
+                'UPDATE',
+                'sihos.DetaCont',
+                "{$codiInst}-{$codiDocuNota}-{$numeDocuNota}",
+                $resultado,
+                "Reclasificación en sitio (mes abierto) de cuenta(s) de vigencia actual en {$codiDocuNota}-{$numeDocuNota} hacia la(s) cuenta(s) de ingreso real de la factura."
+            );
+
+            return [
+                'ok' => true,
+                'message' => "Se reclasificó la nota {$codiDocuNota}-{$numeDocuNota} directamente en SIHOS (mes abierto).",
+            ];
+        }
+
+        try {
+            $fechaResuelta = $this->resolverFechaNotaContable($repositorioLectura, $estado['FechDocu']);
+        } catch (PDOException $e) {
+            return ['ok' => false, 'message' => 'No se pudo verificar el cierre de periodos en SIHOS: ' . $e->getMessage()];
+        }
+
+        if ($fechaResuelta === null) {
+            return [
+                'ok' => false,
+                'message' => 'No se encontró un mes contable abierto en SIHOS en un rango razonable — revise los cierres del módulo de Contabilidad.',
+            ];
+        }
+
+        [$fecha, $codiAnoNota, $codiMesNota] = $fechaResuelta;
+
+        try {
+            $codiDocuNotaNueva = $repositorioLectura->resolveCodigoNotaContableGenerica();
+        } catch (PDOException $e) {
+            return ['ok' => false, 'message' => 'No se pudo resolver el tipo de documento en SIHOS: ' . $e->getMessage()];
+        }
+
+        if ($codiDocuNotaNueva === null) {
+            return [
+                'ok' => false,
+                'message' => 'No se encontró el tipo de documento "Nota Contabilidad" (DocuApli=3) configurado en SIHOS para esta empresa.',
+            ];
+        }
+
+        try {
+            $resultado = $repositorioEscritura->crearNotaAjusteVigenciaActual(
+                $codiDocuNota,
+                $numeDocuNota,
+                $emparejamientos,
+                $codiDocuNotaNueva,
+                $fecha,
+                $codiAnoNota,
+                $codiMesNota,
+                $maneNIIF,
+                $this->usuaDigiResolver->resolver((int)($_SESSION['user_id'] ?? 0), $repositorioLectura)
+            );
+        } catch (SihosOperacionEnCursoException $e) {
+            return ['ok' => false, 'message' => $e->getMessage()];
+        } catch (PDOException $e) {
+            return ['ok' => false, 'message' => 'No se pudo escribir en SIHOS: ' . $e->getMessage()];
+        }
+
+        if (!$resultado['ok']) {
+            return ['ok' => false, 'message' => $resultado['motivo'] ?? 'No se pudo completar la acción en SIHOS.'];
+        }
+
+        $this->registrarAuditoriaReclasificacion(
+            $empresaId,
+            'INSERT',
+            'sihos.EncaCont',
+            "{$codiInst}-{$resultado['codiDocuNota']}-{$resultado['numeDocuNota']}",
+            $resultado,
+            "Nota de ajuste (mes cerrado) que reclasifica cuenta(s) de vigencia actual de {$codiDocuNota}-{$numeDocuNota} hacia la(s) cuenta(s) de ingreso real de la factura."
+        );
+
+        return [
+            'ok' => true,
+            'message' => "Se creó {$resultado['codiDocuNota']}-{$resultado['numeDocuNota']} en SIHOS ({$fecha}) reclasificando "
+                . number_format($resultado['valorTotal'], 0, ',', '.') . " de {$codiDocuNota}-{$numeDocuNota}.",
+        ];
+    }
+
+    /**
      * Registro manual en la auditoría de SAVID para la acción de
      * reclasificación de cuenta de vigencia anterior — parametrizado porque
      * puede ser un `UPDATE` (rama de mes abierto) o un `INSERT` (rama de
