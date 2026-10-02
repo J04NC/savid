@@ -50,11 +50,15 @@
                      (#toggleTheme), así que se deja el valor por defecto "auto"
                      (se adapta solo) en vez de fijarlo a un tema que podría no
                      coincidir con lo que el usuario eligió */ ?>
-            <div class="cf-turnstile" data-sitekey="<?= htmlspecialchars(TurnstileService::siteKey()) ?>"></div>
+            <div class="cf-turnstile"
+                 data-sitekey="<?= htmlspecialchars(TurnstileService::siteKey()) ?>"
+                 data-callback="savidTurnstileOk"
+                 data-expired-callback="savidTurnstileReset"
+                 data-error-callback="savidTurnstileReset"></div>
             <?php endif; ?>
 
             <div class="button-row">
-                <button type="submit" class="btn primary">Iniciar sesión</button>
+                <button type="submit" id="loginSubmitBtn" class="btn primary">Iniciar sesión</button>
                 <a href="?url=login/forgot" class="btn secondary">Recuperar contraseña</a>
             </div>
         </form>
