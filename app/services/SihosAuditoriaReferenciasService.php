@@ -132,6 +132,25 @@ class SihosAuditoriaReferenciasService
             $presupuestoTotal += array_sum(array_column($grupo['lineas'], 'Valor'));
         }
 
+        // Detalle contable COMPLETO de cada documento que referencia la
+        // factura (todas sus líneas, no solo la que apunta de vuelta a
+        // ella) — puramente informativo, agregado al final del modal para
+        // auditoría manual (pedido del usuario tras la investigación de
+        // FE-700567/DAC-133, donde la cuenta problemática solo era visible
+        // mirando el detalle completo del documento vinculado, no la línea
+        // puntual de referencia). No participa en ningún total.
+        $detalleContableCompleto = [];
+        foreach ($referenciadoPor as $v) {
+            $detalleContableCompleto[] = $grupoDe(
+                $v['CodiDocu'],
+                $v['NumeDocu'],
+                $v['FechDocu'],
+                $v['Estado'],
+                false,
+                $repositorio->fetchDetaContPropio($v['CodiDocu'], $v['NumeDocu'])
+            );
+        }
+
         return [
             'ok' => true,
             'codiDocu' => $codiDocu,
@@ -139,6 +158,7 @@ class SihosAuditoriaReferenciasService
             'encabezado' => $encabezado,
             'referenciasContables' => $referenciasContables,
             'referenciasPresupuestales' => $referenciasPresupuestales,
+            'detalleContableCompleto' => $detalleContableCompleto,
             'resumenPropio' => [
                 'valorTotal' => $encabezado['ValoTota'],
                 'saldo' => $saldoCartera["{$codiDocu}-{$numeDocu}"] ?? null,

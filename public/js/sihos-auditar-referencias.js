@@ -174,6 +174,14 @@
         html += '<p class="field-note">Presupuesto: <strong>' + money(j.totales.presupuesto) + '</strong> · Contabilidad: <strong>' +
             money(j.totales.contabilidad) + '</strong> · Diferencia: <strong>' + money(j.totales.diferencia) + '</strong></p>';
 
+        html += '<h4 class="auditoria-title" style="font-size:14px; margin-top:16px;">Detalle contable completo de cada documento referenciante</h4>';
+        html += '<p class="field-note">Todas las líneas de cada documento que referencia esta factura (no solo la que apunta de vuelta a ella) — solo trazabilidad, no suma a los totales de arriba.</p>';
+        if (j.detalleContableCompleto.length === 0) {
+            html += '<p class="field-note">Ningún documento referencia a este.</p>';
+        } else {
+            html += tablaReferenciasContables(j.detalleContableCompleto);
+        }
+
         contenido.innerHTML = html;
     }
 
