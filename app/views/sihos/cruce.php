@@ -35,6 +35,8 @@ $assetSihosReversarCuentaMasivo = BASE_PATH . '/public/js/sihos-reversar-cuenta-
 $sihosReversarCuentaMasivoJsV = is_readable($assetSihosReversarCuentaMasivo) ? (int)filemtime($assetSihosReversarCuentaMasivo) : time();
 $assetSihosEliminarPortionDetaPlan = BASE_PATH . '/public/js/sihos-eliminar-portion-detaplan.js';
 $sihosEliminarPortionDetaPlanJsV = is_readable($assetSihosEliminarPortionDetaPlan) ? (int)filemtime($assetSihosEliminarPortionDetaPlan) : time();
+$assetSihosReclasificarCuentaVigenciaActual = BASE_PATH . '/public/js/sihos-reclasificar-cuenta-vigencia-actual.js';
+$sihosReclasificarCuentaVigenciaActualJsV = is_readable($assetSihosReclasificarCuentaVigenciaActual) ? (int)filemtime($assetSihosReclasificarCuentaVigenciaActual) : time();
 ?>
 
 <div class="module-container auditoria-page">
@@ -118,7 +120,7 @@ $sihosEliminarPortionDetaPlanJsV = is_readable($assetSihosEliminarPortionDetaPla
                 ],
                 [
                     'titulo' => '3c. Notas de vigencia actual con presupuesto sin cancelar 4312',
-                    'subtitulo' => 'Notas (NCC) sobre facturas de la misma vigencia que restan presupuesto pero cuya contabilidad nunca toca la cuenta 4312 de la factura — solo castigan cartera (p. ej. contra la cuenta de gasto configurada en SIHOS), sin reversar el ingreso ya reconocido. Solo detección por ahora.',
+                    'subtitulo' => 'Notas (NCC) sobre facturas de la misma vigencia que restan presupuesto pero cuya contabilidad nunca toca la cuenta de ingreso real de la factura — solo castigan cartera (p. ej. contra la cuenta de gasto configurada en SIHOS), sin reversar el ingreso ya reconocido. "Reclasificar" cambia la cuenta de la nota hacia la cuenta de ingreso real de la factura, emparejando por valor exacto.',
                     'filas' => $reporte['notasSinCancelar4312'],
                     'tipo' => 'nota-sin-4312',
                 ],
@@ -269,6 +271,12 @@ $sihosEliminarPortionDetaPlanJsV = is_readable($assetSihosEliminarPortionDetaPla
                                         <td><?= htmlspecialchars($f['FacturaFecha']) ?></td>
                                         <td><?= htmlspecialchars($f['CuentasUsadas']) ?></td>
                                         <td>
+                                            <?php if ($puedeReversarCuenta): ?>
+                                                <button type="button" class="auditoria-btn-primary btnSihosReclasificarCuentaVigenciaActual"
+                                                        data-empresa-id="<?= (int)$empresaId ?>"
+                                                        data-codi-docu="<?= htmlspecialchars($f['CodiDocu']) ?>"
+                                                        data-nume-docu="<?= htmlspecialchars($f['NumeDocu']) ?>">↩️ Reclasificar cuenta</button>
+                                            <?php endif; ?>
                                             <button type="button" class="auditoria-btn-primary btnSihosAuditarReferencias"
                                                     data-empresa-id="<?= (int)$empresaId ?>"
                                                     data-codi-docu="<?= htmlspecialchars($f['FacturaCodiDocu']) ?>"
@@ -636,6 +644,34 @@ $sihosEliminarPortionDetaPlanJsV = is_readable($assetSihosEliminarPortionDetaPla
             </div>
         </div>
         <script src="/js/sihos-eliminar-portion-detaplan.js?v=<?= (int)$sihosEliminarPortionDetaPlanJsV ?>"></script>
+
+        <div id="sihosReclasificarCuentaVigenciaActualModal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header-bar">
+                    <span>⚠️ Reclasificar cuenta de vigencia actual</span>
+                    <span class="close-modal" id="sihosReclasificarCuentaVigenciaActualCerrar" role="button" tabindex="0" aria-label="Cerrar">&times;</span>
+                </div>
+                <div style="padding:16px;">
+                    <p class="modal-form-alert">
+                        Esta acción reclasifica en SIHOS la(s) cuenta(s) fuera de lo esperado de la nota
+                        <strong id="sihosReclasificarCuentaVigenciaActualDocumento"></strong> hacia la cuenta de ingreso real
+                        de la factura que referencia — cada línea se empareja automáticamente por su valor exacto, no hay
+                        cuenta a elegir. Si el mes de la nota está abierto, se edita en sitio; si ya está cerrado, se crea una
+                        Nota Contabilidad (NC) nueva que la corrige. Solo contabilidad — no afecta presupuesto. Es
+                        <strong>irreversible</strong> desde SAVID.
+                    </p>
+                    <div class="form-group">
+                        <label for="sihosReclasificarCuentaVigenciaActualConfirmacion">Escriba <strong id="sihosReclasificarCuentaVigenciaActualDocumentoLabel"></strong> para confirmar</label>
+                        <input type="text" id="sihosReclasificarCuentaVigenciaActualConfirmacion" class="form-input" autocomplete="off">
+                    </div>
+                    <div class="auditoria-filters-footer">
+                        <button type="button" id="sihosReclasificarCuentaVigenciaActualConfirmar" class="auditoria-btn-primary" style="background:#c0392b;" disabled>↩️ Reclasificar cuenta</button>
+                    </div>
+                    <p id="sihosReclasificarCuentaVigenciaActualStatus" class="usuario-perm-save-status" aria-live="polite"></p>
+                </div>
+            </div>
+        </div>
+        <script src="/js/sihos-reclasificar-cuenta-vigencia-actual.js?v=<?= (int)$sihosReclasificarCuentaVigenciaActualJsV ?>"></script>
 
         <div id="sihosEliminarDetaPlanMasivoModal" class="modal hidden">
             <div class="modal-content">
