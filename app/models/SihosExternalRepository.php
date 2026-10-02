@@ -2093,6 +2093,122 @@ class SihosExternalRepository
     }
 
     /**
+     * Re-verificación en fresco de una nota de vigencia ACTUAL detectada por
+     * fetchNotasVigenciaActualSinCancelar4312() (sección 3c): sus líneas
+     * "fuera de lo esperado" (no cartera, no cuenta de orden) que referencian
+     * la factura, emparejadas con la línea de INGRESO REAL de esa factura
+     * que tenga el mismo valor absoluto exacto — a diferencia de la sección
+     * 5b, aquí no hay una cuenta destino elegida por el usuario: el destino
+     * siempre es la cuenta que la factura ya usó para ese mismo importe
+     * (confirmado con 2 casos reales: NCC-10062 1 línea 1:1 contra
+     * FE-606797, y NCC-10172 4 líneas contra 4 cuentas distintas de
+     * FE-604372, cada una emparejada por su valor exacto).
+     *
+     * El emparejamiento se rechaza (Emparejamientos = null) si no es 1 a 1
+     * sin ambigüedad: algún valor de la nota no aparece exactamente una vez
+     * en las líneas de ingreso de la factura, o aparece repetido en algún
+     * lado — se prefiere no adivinar antes que reclasificar mal.
+     *
+     * @return array{Anulado:int,FechDocu:string,TiDoTerc:?string,NuDoTerc:?string,CodiCent:?string,FacturaCodiDocu:?string,FacturaNumeDocu:?string,Emparejamientos:?list<array{ConsDeta:int,CodiContOrigen:string,CentCost:?string,TiDoTerc:?string,NuDoTerc:?string,TiDoRefe:string,NuDoRefe:string,Valor:float,CodiContDestino:string}>}|null
+     */
+    public function fetchEstadoParaReclasificacionVigenciaActual(string $codiDocuNota, string $numeDocuNota): ?array
+    {
+        $codiInst = $this->codiInst();
+
+        $stmt = $this->connect()->prepare(
+            'SELECT Anulado, FechDocu, TiDoTerc, NuDoTerc, CodiCent FROM EncaCont
+             WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?'
+        );
+        $stmt->execute([$codiInst, $codiDocuNota, $numeDocuNota]);
+        $nota = $stmt->fetch();
+
+        if ($nota === false) {
+            return null;
+        }
+
+        $stmt = $this->connect()->prepare(
+            "SELECT dc.ConsDeta, dc.CodiCont, dc.CentCost, dc.TiDoTerc, dc.NuDoTerc, dc.Valor, dc.TiDoRefe, dc.NuDoRefe
+             FROM DetaCont dc
+             INNER JOIN EncaCont fact
+                 ON fact.CodiInst = dc.CodiInst AND fact.CodiDocu = dc.TiDoRefe AND fact.NumeDocu = dc.NuDoRefe
+             WHERE dc.CodiInst = ? AND dc.CodiDocu = ? AND dc.NumeDocu = ?
+               AND dc.CodiCont NOT LIKE '13%' AND dc.CodiCont NOT LIKE '14%' AND dc.CodiCont NOT LIKE '8%'
+               AND dc.TiDoRefe IS NOT NULL AND dc.TiDoRefe <> ''
+               AND YEAR(fact.FechDocu) = YEAR(?)
+             ORDER BY dc.ConsDeta"
+        );
+        $stmt->execute([$codiInst, $codiDocuNota, $numeDocuNota, $nota['FechDocu']]);
+        $lineasNota = $stmt->fetchAll();
+
+        $facturaCodiDocu = $lineasNota !== [] ? $lineasNota[0]['TiDoRefe'] : null;
+        $facturaNumeDocu = $lineasNota !== [] ? $lineasNota[0]['NuDoRefe'] : null;
+
+        $emparejamientos = [];
+        if ($lineasNota !== [] && $facturaCodiDocu !== null) {
+            $stmt = $this->connect()->prepare(
+                "SELECT CodiCont, Valor FROM DetaCont
+                 WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?
+                   AND CodiCont NOT LIKE '13%' AND CodiCont NOT LIKE '14%' AND CodiCont NOT LIKE '8%'"
+            );
+            $stmt->execute([$codiInst, $facturaCodiDocu, $facturaNumeDocu]);
+            $lineasFactura = $stmt->fetchAll();
+
+            // Agrupa por valor absoluto (redondeado a centavos) para
+            // detectar de una vez tanto "no hay candidato" como "hay más de
+            // uno" (ambiguo) en cualquiera de los 2 lados.
+            $porValorFactura = [];
+            foreach ($lineasFactura as $lf) {
+                $clave = number_format(abs((float)$lf['Valor']), 2, '.', '');
+                $porValorFactura[$clave][] = $lf['CodiCont'];
+            }
+            $porValorNota = [];
+            foreach ($lineasNota as $ln) {
+                $clave = number_format(abs((float)$ln['Valor']), 2, '.', '');
+                $porValorNota[$clave][] = $ln;
+            }
+
+            $ambiguo = false;
+            foreach ($porValorNota as $clave => $lineasConEseValor) {
+                $candidatos = $porValorFactura[$clave] ?? [];
+                if (count($lineasConEseValor) !== 1 || count($candidatos) !== 1) {
+                    $ambiguo = true;
+                    break;
+                }
+            }
+
+            if ($ambiguo) {
+                $emparejamientos = null;
+            } else {
+                foreach ($lineasNota as $ln) {
+                    $clave = number_format(abs((float)$ln['Valor']), 2, '.', '');
+                    $emparejamientos[] = [
+                        'ConsDeta' => (int)$ln['ConsDeta'],
+                        'CodiContOrigen' => $ln['CodiCont'],
+                        'CentCost' => $ln['CentCost'],
+                        'TiDoTerc' => $ln['TiDoTerc'],
+                        'NuDoTerc' => $ln['NuDoTerc'],
+                        'TiDoRefe' => $ln['TiDoRefe'],
+                        'NuDoRefe' => $ln['NuDoRefe'],
+                        'Valor' => (float)$ln['Valor'],
+                        'CodiContDestino' => $porValorFactura[$clave][0],
+                    ];
+                }
+            }
+        }
+
+        return [
+            'Anulado' => (int)$nota['Anulado'],
+            'FechDocu' => (string)$nota['FechDocu'],
+            'TiDoTerc' => $nota['TiDoTerc'],
+            'NuDoTerc' => $nota['NuDoTerc'],
+            'CodiCent' => $nota['CodiCent'],
+            'FacturaCodiDocu' => $facturaCodiDocu,
+            'FacturaNumeDocu' => $facturaNumeDocu,
+            'Emparejamientos' => $emparejamientos,
+        ];
+    }
+
+    /**
      * Reporte "Auditoría Glosa": universo base de glosas (EncaCont con
      * detalle en DetaGlos) con la factura que referencian (vía
      * TiDoRefe/NuDoRefe), su tercero, su administradora/EPS y su tipo de
