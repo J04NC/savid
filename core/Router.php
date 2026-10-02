@@ -217,6 +217,9 @@ class Router
             'cruceReversarCuentaInesperada',
             'cruceReclasificarCuentaVigenciaAnterior',
             'cruceConstruirDetaPlan',
+            'cruceEliminarPortionDetaPlan',
+            'cruceAuditarReferencias',
+            'cruceReclasificarCuentaVigenciaActual',
         ];
 
         /*
@@ -336,6 +339,20 @@ class Router
             && !PermisoService::can($rutaCompleta, 'ver')) {
             self::logAccesoDenegado("sin permiso 'ver' sobre {$rutaCompleta}");
             http_response_code(403);
+
+            // Mismo motivo que el bloque CSRF de arriba: un cliente que espera
+            // JSON (fetch/XHR) no debe recibir texto plano — su r.json() lanza
+            // una excepción de parseo que el front confunde con una caída de
+            // red ("Error de conexión") en vez de avisar que es un permiso.
+            if (self::requestWantsJson()) {
+                header('Content-Type: application/json; charset=utf-8');
+                exit(json_encode([
+                    'ok' => false,
+                    'success' => false,
+                    'message' => 'Acceso denegado.',
+                ], JSON_UNESCAPED_UNICODE));
+            }
+
             exit('Acceso denegado.');
         }
     }
