@@ -1248,6 +1248,257 @@ class SihosExternalWriteRepository
     }
 
     /**
+     * Rama de mes CERRADO de la sección 3c: crea una Nota Contabilidad (NC)
+     * que corrige la nota original SIN reescribir su período ya cerrado —
+     * por cada emparejamiento (línea de la nota + su cuenta destino, ver
+     * SihosExternalRepository::fetchEstadoParaReclasificacionVigenciaActual()),
+     * una línea que la cancela 1:1 (mismo CentCost, signo contrario) más una
+     * línea que aplica el mismo valor a la cuenta destino de ESE
+     * emparejamiento — mismo patrón que crearNotaAjusteVigenciaAnterior()
+     * (sección 5b) pero con un destino distinto por línea en vez de uno solo
+     * para todas. Re-verifica dentro de la transacción que cada línea sigue
+     * con el CodiCont y Valor esperados antes de usarla.
+     *
+     * @param list<array{ConsDeta:int,CodiContOrigen:string,CodiContDestino:string,CentCost:?string,TiDoTerc:?string,NuDoTerc:?string,TiDoRefe:string,NuDoRefe:string,Valor:float}> $emparejamientos
+     * @return array{ok:bool,motivo?:string,codiDocuNota?:string,numeDocuNota?:string,fecha?:string,valorTotal?:float,lineas?:list<array{CodiCont:string,Valor:float}>}
+     */
+    public function crearNotaAjusteVigenciaActual(
+        string $codiDocuNotaOrigen,
+        string $numeDocuNotaOrigen,
+        array $emparejamientos,
+        string $codiDocuNota,
+        string $fecha,
+        string $codiAno,
+        string $codiMes,
+        bool $maneNIIF,
+        string $usuaDigi
+    ): array {
+        return $this->conBloqueo(
+            'ajusteactual3c:' . $codiDocuNotaOrigen . ':' . $numeDocuNotaOrigen,
+            function () use ($codiDocuNotaOrigen, $numeDocuNotaOrigen, $emparejamientos, $codiDocuNota,
+                            $fecha, $codiAno, $codiMes, $maneNIIF, $usuaDigi): array {
+                return $this->crearNotaAjusteVigenciaActualBloqueado(
+                    $codiDocuNotaOrigen, $numeDocuNotaOrigen, $emparejamientos, $codiDocuNota,
+                    $fecha, $codiAno, $codiMes, $maneNIIF, $usuaDigi
+                );
+            }
+        );
+    }
+
+    /** @see crearNotaAjusteVigenciaActual (ya con el bloqueo tomado) */
+    private function crearNotaAjusteVigenciaActualBloqueado(
+        string $codiDocuNotaOrigen,
+        string $numeDocuNotaOrigen,
+        array $emparejamientos,
+        string $codiDocuNota,
+        string $fecha,
+        string $codiAno,
+        string $codiMes,
+        bool $maneNIIF,
+        string $usuaDigi
+    ): array {
+        set_time_limit(180);
+
+        $pdo = $this->connect();
+        $codiInst = $this->codiInst();
+
+        $pdo->beginTransaction();
+
+        try {
+            $stmt = $pdo->prepare(
+                'SELECT Anulado, TiDoTerc, NuDoTerc, CodiCent FROM EncaCont
+                 WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?'
+            );
+            $stmt->execute([$codiInst, $codiDocuNotaOrigen, $numeDocuNotaOrigen]);
+            $notaOrigen = $stmt->fetch();
+
+            if ($notaOrigen === false) {
+                $pdo->rollBack();
+
+                return ['ok' => false, 'motivo' => "La nota {$codiDocuNotaOrigen}-{$numeDocuNotaOrigen} ya no existe."];
+            }
+
+            if ((int)$notaOrigen['Anulado'] === 1) {
+                $pdo->rollBack();
+
+                return ['ok' => false, 'motivo' => 'La nota está anulada, no se corrige.'];
+            }
+
+            foreach ($emparejamientos as $par) {
+                $stmt = $pdo->prepare(
+                    'SELECT CodiCont, Valor FROM DetaCont WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ? AND ConsDeta = ?'
+                );
+                $stmt->execute([$codiInst, $codiDocuNotaOrigen, $numeDocuNotaOrigen, $par['ConsDeta']]);
+                $actual = $stmt->fetch();
+
+                if ($actual === false || $actual['CodiCont'] !== $par['CodiContOrigen']
+                    || round((float)$actual['Valor'], 2) !== round($par['Valor'], 2)) {
+                    $pdo->rollBack();
+
+                    return [
+                        'ok' => false,
+                        'motivo' => "La línea {$par['ConsDeta']} de la nota ya cambió desde que se revisó — no se aplica nada, actualice la página.",
+                    ];
+                }
+            }
+
+            $facturaCodiDocu = $emparejamientos[0]['TiDoRefe'];
+            $facturaNumeDocu = $emparejamientos[0]['NuDoRefe'];
+
+            $stmt = $pdo->prepare(
+                'SELECT dc.CodiDocu, dc.NumeDocu
+                 FROM DetaCont dc
+                 INNER JOIN EncaCont ec ON ec.CodiInst = dc.CodiInst AND ec.CodiDocu = dc.CodiDocu AND ec.NumeDocu = dc.NumeDocu
+                 WHERE dc.CodiInst = ? AND dc.TiDoRefe = ? AND dc.NuDoRefe = ?
+                   AND ec.Concepto LIKE ? AND ec.Anulado = 0
+                 LIMIT 1'
+            );
+            $stmt->execute([
+                $codiInst, $facturaCodiDocu, $facturaNumeDocu,
+                '%- nota ' . $codiDocuNotaOrigen . '-' . $numeDocuNotaOrigen,
+            ]);
+            $ajustePrevio = $stmt->fetch();
+
+            if ($ajustePrevio !== false) {
+                $pdo->rollBack();
+
+                return [
+                    'ok' => false,
+                    'motivo' => "Ya existe un ajuste para esta nota: {$ajustePrevio['CodiDocu']}-{$ajustePrevio['NumeDocu']} en SIHOS. No se crea otro.",
+                ];
+            }
+
+            $stmt = $pdo->prepare('SELECT MAX(CAST(NumeDocu AS UNSIGNED)) FROM EncaCont WHERE CodiInst = ? AND CodiDocu = ?');
+            $stmt->execute([$codiInst, $codiDocuNota]);
+            $numeDocuNota = (string)((int)$stmt->fetchColumn() + 1);
+
+            $valorTotal = round(array_sum(array_map(static fn (array $l): float => abs($l['Valor']), $emparejamientos)), 2);
+            // El formato de este texto es significativo: igual criterio que
+            // crearNotaAjusteVigenciaAnteriorBloqueado(), termina en
+            // "- nota {CodiDocu}-{NumeDocu}" para la idempotencia de arriba.
+            $concepto = "Reclasificacion vigencia actual (3c) - nota {$codiDocuNotaOrigen}-{$numeDocuNotaOrigen}";
+
+            $stmt = $pdo->prepare(
+                'INSERT INTO EncaCont
+                    (CodiInst,CodiAno,CodiDocu,NumeDocu,TipoComp,CodiCent,FechDocu,HoraDocu,Concepto,
+                     TiDoTerc,NuDoTerc,TiDoRefe,NuDoRefe,ValoTota,Causado,FechDigi,HoraDigi,UsuaDigi)
+                 VALUES (?,?,?,?,0,?,?,CURTIME(),?,?,?,?,?,?,1,CURDATE(),CURTIME(),?)'
+            );
+            $stmt->execute([
+                $codiInst, $codiAno, $codiDocuNota, $numeDocuNota, $notaOrigen['CodiCent'], $fecha, $concepto,
+                $notaOrigen['TiDoTerc'], $notaOrigen['NuDoTerc'], $facturaCodiDocu, $facturaNumeDocu, $valorTotal,
+                $usuaDigi,
+            ]);
+
+            $consDeta = 1;
+            $lineasSnapshot = [];
+            $configsCuenta = [];
+
+            foreach ($emparejamientos as $par) {
+                $cuentaOrigen = $par['CodiContOrigen'];
+                $cuentaDestino = $par['CodiContDestino'];
+                $valor = (float)$par['Valor'];
+                $centCost = $par['CentCost'] !== '' && $par['CentCost'] !== null ? $par['CentCost'] : null;
+                $tiDoRefeLinea = $par['TiDoRefe'];
+                $nuDoRefeLinea = $par['NuDoRefe'];
+
+                foreach ([$cuentaOrigen, $cuentaDestino] as $cuenta) {
+                    if (!isset($configsCuenta[$cuenta])) {
+                        $configsCuenta[$cuenta] = $this->obtenerConfigCuenta($pdo, $codiInst, $cuenta, $codiAno);
+                        if ($configsCuenta[$cuenta] === null) {
+                            $pdo->rollBack();
+
+                            return ['ok' => false, 'motivo' => "La cuenta {$cuenta} no existe en el plan de cuentas de SIHOS para el año {$codiAno}."];
+                        }
+                    }
+                }
+                $configOrigen = $configsCuenta[$cuentaOrigen];
+                $configDestino = $configsCuenta[$cuentaDestino];
+
+                $tiDoTercOrigen = (int)$configOrigen['OpciTerc'] === 1 ? $notaOrigen['TiDoTerc'] : null;
+                $nuDoTercOrigen = (int)$configOrigen['OpciTerc'] === 1 ? $notaOrigen['NuDoTerc'] : null;
+                $centCostOrigen = (int)$configOrigen['OpciCeCo'] === 1 ? $centCost : null;
+
+                $valorCancelacion = -$valor;
+                $this->insertarLineaDetaCont(
+                    $pdo, $codiDocuNota, $numeDocuNota, $consDeta, $codiAno, $cuentaOrigen, $notaOrigen['CodiCent'],
+                    $centCostOrigen, $tiDoTercOrigen, $nuDoTercOrigen, $tiDoRefeLinea, $nuDoRefeLinea, $valorCancelacion, $usuaDigi
+                );
+                $this->actualizarSaldoCuenta($pdo, $cuentaOrigen, $valorCancelacion, $codiMes, $codiAno, $tiDoTercOrigen, $nuDoTercOrigen, $centCostOrigen, $configOrigen, $usuaDigi);
+
+                if ($maneNIIF) {
+                    $stmt = $pdo->prepare('SELECT idPartNIIF FROM HomoNIIF WHERE CodiCont = ?');
+                    $stmt->execute([$cuentaOrigen]);
+                    $idPartOrigen = $stmt->fetchColumn();
+
+                    if ($idPartOrigen === false || $idPartOrigen === '') {
+                        $pdo->rollBack();
+
+                        return ['ok' => false, 'motivo' => "Falta homologación NIIF (HomoNIIF) para la cuenta {$cuentaOrigen}."];
+                    }
+
+                    $this->insertarLineaDetaNIIF(
+                        $pdo, $codiDocuNota, $numeDocuNota, $consDeta, $codiAno, (string)$idPartOrigen, $notaOrigen['CodiCent'],
+                        $centCostOrigen, $tiDoTercOrigen, $nuDoTercOrigen, $tiDoRefeLinea, $nuDoRefeLinea, $valorCancelacion, $usuaDigi
+                    );
+                    $this->actualizarSaldoNIIF($pdo, (string)$idPartOrigen, $valorCancelacion, $codiMes, $codiAno, $tiDoTercOrigen, $nuDoTercOrigen, $usuaDigi);
+                }
+
+                $lineasSnapshot[] = ['CodiCont' => $cuentaOrigen, 'Valor' => $valorCancelacion];
+                $consDeta++;
+
+                $tiDoTercDestino = (int)$configDestino['OpciTerc'] === 1 ? $notaOrigen['TiDoTerc'] : null;
+                $nuDoTercDestino = (int)$configDestino['OpciTerc'] === 1 ? $notaOrigen['NuDoTerc'] : null;
+                $centCostDestino = (int)$configDestino['OpciCeCo'] === 1 ? $centCost : null;
+
+                $this->insertarLineaDetaCont(
+                    $pdo, $codiDocuNota, $numeDocuNota, $consDeta, $codiAno, $cuentaDestino, $notaOrigen['CodiCent'],
+                    $centCostDestino, $tiDoTercDestino, $nuDoTercDestino, $tiDoRefeLinea, $nuDoRefeLinea, $valor, $usuaDigi
+                );
+                $this->actualizarSaldoCuenta($pdo, $cuentaDestino, $valor, $codiMes, $codiAno, $tiDoTercDestino, $nuDoTercDestino, $centCostDestino, $configDestino, $usuaDigi);
+
+                if ($maneNIIF) {
+                    $stmt = $pdo->prepare('SELECT idPartNIIF FROM HomoNIIF WHERE CodiCont = ?');
+                    $stmt->execute([$cuentaDestino]);
+                    $idPartDestino = $stmt->fetchColumn();
+
+                    if ($idPartDestino === false || $idPartDestino === '') {
+                        $pdo->rollBack();
+
+                        return ['ok' => false, 'motivo' => "Falta homologación NIIF (HomoNIIF) para la cuenta {$cuentaDestino}."];
+                    }
+
+                    $this->insertarLineaDetaNIIF(
+                        $pdo, $codiDocuNota, $numeDocuNota, $consDeta, $codiAno, (string)$idPartDestino, $notaOrigen['CodiCent'],
+                        $centCostDestino, $tiDoTercDestino, $nuDoTercDestino, $tiDoRefeLinea, $nuDoRefeLinea, $valor, $usuaDigi
+                    );
+                    $this->actualizarSaldoNIIF($pdo, (string)$idPartDestino, $valor, $codiMes, $codiAno, $tiDoTercDestino, $nuDoTercDestino, $usuaDigi);
+                }
+
+                $lineasSnapshot[] = ['CodiCont' => $cuentaDestino, 'Valor' => $valor];
+                $consDeta++;
+            }
+
+            $pdo->commit();
+
+            return [
+                'ok' => true,
+                'codiDocuNota' => $codiDocuNota,
+                'numeDocuNota' => $numeDocuNota,
+                'fecha' => $fecha,
+                'valorTotal' => $valorTotal,
+                'lineas' => $lineasSnapshot,
+            ];
+        } catch (PDOException $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+
+            throw $e;
+        }
+    }
+
+    /**
      * Concluye por aceptación EPS/EAPB una glosa "en curso" cuya factura
      * referenciada ya está en saldo $0 (hallazgo del reporte de Auditoría
      * Glosa) — ver SihosGlosaConclusionService::concluirAceptacionEps() y
