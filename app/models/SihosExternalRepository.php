@@ -1121,23 +1121,61 @@ class SihosExternalRepository
             $valorAtribuido = (float)($stmt->fetchColumn() ?: 0);
         }
 
-        $stmt = $this->connect()->prepare('SELECT DISTINCT CodiPlan FROM DetaPlan WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?');
-        $stmt->execute([$codiInst, $codiDocuFactura, $numeDocuFactura]);
-        $rubrosFactura = $stmt->fetchAll(PDO::FETCH_COLUMN);
-
         $consDeta = null;
         $codiPlan = null;
         $valorLineaActual = null;
-        if (count($rubrosFactura) === 1) {
-            $codiPlan = $rubrosFactura[0];
+
+        // Caso simple: la nota referencia una sola factura (no es una nota
+        // consolidada). En ese caso, cualquier línea de DetaPlan de la nota
+        // le pertenece ÍNTEGRAMENTE a esa factura, sin importar su CodiPlan
+        // — algunas instituciones (verificado en Roldanillo, CodiInst
+        // 766220170901) usan un rubro dedicado "Vigencia anterior" para
+        // estas correcciones, distinto del rubro con el que se facturó
+        // originalmente (caso real: GLC-91239 sobre FE-346362, rubro de la
+        // nota 11020500109020203 "Vigencia anterior" vs rubro propio de la
+        // factura 11020500109020202 "No Capitado" — exigir que coincidan
+        // rechazaba un caso de una sola línea sin ninguna ambigüedad real).
+        $stmt = $this->connect()->prepare(
+            'SELECT COUNT(DISTINCT TiDoRefe, NuDoRefe) FROM DetaCont
+             WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ? AND TiDoRefe IS NOT NULL AND TiDoRefe <> \'\''
+        );
+        $stmt->execute([$codiInst, $codiDocuNota, $numeDocuNota]);
+        $facturasReferenciadas = (int)$stmt->fetchColumn();
+
+        if ($facturasReferenciadas === 1) {
             $stmt = $this->connect()->prepare(
-                'SELECT ConsDeta, Valor FROM DetaPlan WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ? AND CodiPlan = ?'
+                'SELECT ConsDeta, CodiPlan, Valor FROM DetaPlan WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?'
             );
-            $stmt->execute([$codiInst, $codiDocuNota, $numeDocuNota, $codiPlan]);
+            $stmt->execute([$codiInst, $codiDocuNota, $numeDocuNota]);
             $lineas = $stmt->fetchAll();
             if (count($lineas) === 1) {
                 $consDeta = (int)$lineas[0]['ConsDeta'];
+                $codiPlan = $lineas[0]['CodiPlan'];
                 $valorLineaActual = (float)$lineas[0]['Valor'];
+            }
+        }
+
+        // Nota consolidada (varias facturas) o caso no resuelto arriba:
+        // única heurística disponible es emparejar por el mismo CodiPlan con
+        // el que se facturó, cuando tanto la factura como la nota tienen
+        // exactamente una línea con ese rubro — si es ambiguo, se deja sin
+        // resolver (null) y el llamador rechaza la acción.
+        if ($consDeta === null) {
+            $stmt = $this->connect()->prepare('SELECT DISTINCT CodiPlan FROM DetaPlan WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?');
+            $stmt->execute([$codiInst, $codiDocuFactura, $numeDocuFactura]);
+            $rubrosFactura = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+            if (count($rubrosFactura) === 1) {
+                $codiPlan = $rubrosFactura[0];
+                $stmt = $this->connect()->prepare(
+                    'SELECT ConsDeta, Valor FROM DetaPlan WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ? AND CodiPlan = ?'
+                );
+                $stmt->execute([$codiInst, $codiDocuNota, $numeDocuNota, $codiPlan]);
+                $lineas = $stmt->fetchAll();
+                if (count($lineas) === 1) {
+                    $consDeta = (int)$lineas[0]['ConsDeta'];
+                    $valorLineaActual = (float)$lineas[0]['Valor'];
+                }
             }
         }
 
