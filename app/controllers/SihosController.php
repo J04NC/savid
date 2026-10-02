@@ -665,6 +665,46 @@ class SihosController
     }
 
     /**
+     * POST ?url=sihos/cruceReclasificarCuentaVigenciaActual — reclasifica
+     * la(s) cuenta(s) "fuera de lo esperado" de una nota de vigencia ACTUAL
+     * (sección 3c) hacia la cuenta de ingreso real de la factura —
+     * automático, sin cuenta destino elegida por el usuario (ver
+     * SihosCancelacionCuentaService::reclasificarCuentaVigenciaActual()).
+     * Mismo permiso que la acción gemela de 5b.
+     */
+    public function cruceReclasificarCuentaVigenciaActual(): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+
+        if (!PermisoService::can('sihos/cruce', 'nota_ajuste')) {
+            http_response_code(403);
+            echo json_encode(['ok' => false, 'message' => 'Sin permiso.'], JSON_UNESCAPED_UNICODE);
+
+            return;
+        }
+
+        $scope = $this->connectionService->buildScope($_POST);
+        $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : 0;
+        $codiDocu = trim((string)($_POST['codi_docu'] ?? ''));
+        $numeDocu = trim((string)($_POST['nume_docu'] ?? ''));
+
+        if ($empresaId <= 0 || $codiDocu === '' || $numeDocu === '') {
+            http_response_code(400);
+            echo json_encode(['ok' => false, 'message' => 'Faltan datos del documento.'], JSON_UNESCAPED_UNICODE);
+
+            return;
+        }
+
+        $resultado = $this->cancelacionCuentaService->reclasificarCuentaVigenciaActual($empresaId, $codiDocu, $numeDocu);
+
+        if (!$resultado['ok']) {
+            http_response_code(400);
+        }
+
+        echo json_encode($resultado, JSON_UNESCAPED_UNICODE);
+    }
+
+    /**
      * GET ?url=sihos/cruceAuditarReferencias&empresa_id=N&codi_docu=X&nume_docu=Y
      * — modal "Auditar referencias" del reporte de cruce: trazabilidad de
      * solo lectura de un documento puntual (contabilidad + presupuesto,
