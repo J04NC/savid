@@ -665,9 +665,13 @@ class SihosExternalWriteRepository
      * cuenta nueva con los mismos helpers ya validados para la sección 5a
      * (`actualizarSaldoCuenta`/`actualizarSaldoNIIF`).
      *
-     * Es auto-idempotente: tras el cambio, la línea deja de calzar con
-     * `CodiCont LIKE '4312%'`, así que una segunda llamada sobre el mismo
-     * documento no encuentra nada que corregir y se rechaza sola.
+     * Es auto-idempotente: tras el cambio, la línea pasa a estar dentro de
+     * la familia de vigencia anterior ($prefijoVigenciaAnterior, p. ej.
+     * "58"), así que una segunda llamada sobre el mismo documento no
+     * encuentra nada que corregir y se rechaza sola — igual que antes
+     * cuando el filtro era `CodiCont LIKE '4312%'` fijo, generalizado para
+     * no asumir que la cuenta original siempre es 4312 (caso real:
+     * NCC-8957 usaba 48082701 "otros ingresos").
      *
      * @return array{ok:bool,motivo?:string,lineasAntes?:list<array{ConsDeta:int,CodiCont:string,Valor:float}>,lineasDespues?:list<array{ConsDeta:int,CodiCont:string,Valor:float}>}
      */
@@ -678,13 +682,14 @@ class SihosExternalWriteRepository
         string $codiAno,
         string $codiMes,
         bool $maneNIIF,
-        string $usuaDigi
+        string $usuaDigi,
+        string $prefijoVigenciaAnterior
     ): array {
         return $this->conBloqueo(
             'reclasifica:' . $codiDocuNota . ':' . $numeDocuNota,
-            function () use ($codiDocuNota, $numeDocuNota, $cuentaDestino, $codiAno, $codiMes, $maneNIIF, $usuaDigi): array {
+            function () use ($codiDocuNota, $numeDocuNota, $cuentaDestino, $codiAno, $codiMes, $maneNIIF, $usuaDigi, $prefijoVigenciaAnterior): array {
                 return $this->reclasificarCuentaEnSitioBloqueado(
-                    $codiDocuNota, $numeDocuNota, $cuentaDestino, $codiAno, $codiMes, $maneNIIF, $usuaDigi
+                    $codiDocuNota, $numeDocuNota, $cuentaDestino, $codiAno, $codiMes, $maneNIIF, $usuaDigi, $prefijoVigenciaAnterior
                 );
             }
         );
@@ -698,7 +703,8 @@ class SihosExternalWriteRepository
         string $codiAno,
         string $codiMes,
         bool $maneNIIF,
-        string $usuaDigi
+        string $usuaDigi,
+        string $prefijoVigenciaAnterior
     ): array {
         set_time_limit(180);
 
@@ -708,23 +714,29 @@ class SihosExternalWriteRepository
         $pdo->beginTransaction();
 
         try {
-            $stmt = $pdo->prepare(
-                "SELECT dc.ConsDeta, dc.CodiCont, dc.CentCost, dc.TiDoTerc, dc.NuDoTerc, dc.Valor
+            $sql = "SELECT dc.ConsDeta, dc.CodiCont, dc.CentCost, dc.TiDoTerc, dc.NuDoTerc, dc.Valor
                  FROM DetaCont dc
                  INNER JOIN EncaCont fact ON fact.CodiInst = dc.CodiInst AND fact.CodiDocu = dc.TiDoRefe AND fact.NumeDocu = dc.NuDoRefe
                  INNER JOIN EncaCont nc ON nc.CodiInst = dc.CodiInst AND nc.CodiDocu = dc.CodiDocu AND nc.NumeDocu = dc.NumeDocu
                  WHERE dc.CodiInst = ? AND dc.CodiDocu = ? AND dc.NumeDocu = ?
-                   AND dc.CodiCont LIKE '4312%' AND dc.TiDoRefe IS NOT NULL AND dc.TiDoRefe <> ''
-                   AND YEAR(fact.FechDocu) < YEAR(nc.FechDocu)
-                 ORDER BY dc.ConsDeta"
-            );
-            $stmt->execute([$codiInst, $codiDocuNota, $numeDocuNota]);
+                   AND dc.CodiCont NOT LIKE '13%' AND dc.CodiCont NOT LIKE '14%' AND dc.CodiCont NOT LIKE '8%'
+                   AND dc.TiDoRefe IS NOT NULL AND dc.TiDoRefe <> ''
+                   AND YEAR(fact.FechDocu) < YEAR(nc.FechDocu)";
+            $params = [$codiInst, $codiDocuNota, $numeDocuNota];
+            if ($prefijoVigenciaAnterior !== '') {
+                $sql .= ' AND dc.CodiCont NOT LIKE ?';
+                $params[] = $prefijoVigenciaAnterior . '%';
+            }
+            $sql .= ' ORDER BY dc.ConsDeta';
+
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($params);
             $lineas = $stmt->fetchAll();
 
             if ($lineas === []) {
                 $pdo->rollBack();
 
-                return ['ok' => false, 'motivo' => 'La nota ya no tiene líneas 4312 de vigencia anterior por corregir — puede que ya se haya corregido.'];
+                return ['ok' => false, 'motivo' => 'La nota ya no tiene ninguna cuenta de vigencia anterior por corregir — puede que ya se haya corregido.'];
             }
 
             $lineasAntes = [];
@@ -825,15 +837,16 @@ class SihosExternalWriteRepository
         string $codiAno,
         string $codiMes,
         bool $maneNIIF,
-        string $usuaDigi
+        string $usuaDigi,
+        string $prefijoVigenciaAnterior
     ): array {
         return $this->conBloqueo(
             'ajusteanterior:' . $codiDocuNotaOrigen . ':' . $numeDocuNotaOrigen,
             function () use ($codiDocuNotaOrigen, $numeDocuNotaOrigen, $cuentaDestino, $codiDocuNota,
-                            $fecha, $codiAno, $codiMes, $maneNIIF, $usuaDigi): array {
+                            $fecha, $codiAno, $codiMes, $maneNIIF, $usuaDigi, $prefijoVigenciaAnterior): array {
                 return $this->crearNotaAjusteVigenciaAnteriorBloqueado(
                     $codiDocuNotaOrigen, $numeDocuNotaOrigen, $cuentaDestino, $codiDocuNota,
-                    $fecha, $codiAno, $codiMes, $maneNIIF, $usuaDigi
+                    $fecha, $codiAno, $codiMes, $maneNIIF, $usuaDigi, $prefijoVigenciaAnterior
                 );
             }
         );
@@ -849,7 +862,8 @@ class SihosExternalWriteRepository
         string $codiAno,
         string $codiMes,
         bool $maneNIIF,
-        string $usuaDigi
+        string $usuaDigi,
+        string $prefijoVigenciaAnterior
     ): array {
         set_time_limit(180);
 
@@ -878,23 +892,29 @@ class SihosExternalWriteRepository
                 return ['ok' => false, 'motivo' => 'La nota está anulada, no se corrige.'];
             }
 
-            $stmt = $pdo->prepare(
-                "SELECT dc.ConsDeta, dc.CodiCont, dc.CentCost, dc.Valor, dc.TiDoRefe, dc.NuDoRefe
+            $sqlLineas = "SELECT dc.ConsDeta, dc.CodiCont, dc.CentCost, dc.Valor, dc.TiDoRefe, dc.NuDoRefe
                  FROM DetaCont dc
                  INNER JOIN EncaCont fact ON fact.CodiInst = dc.CodiInst AND fact.CodiDocu = dc.TiDoRefe AND fact.NumeDocu = dc.NuDoRefe
                  INNER JOIN EncaCont nc ON nc.CodiInst = dc.CodiInst AND nc.CodiDocu = dc.CodiDocu AND nc.NumeDocu = dc.NumeDocu
                  WHERE dc.CodiInst = ? AND dc.CodiDocu = ? AND dc.NumeDocu = ?
-                   AND dc.CodiCont LIKE '4312%' AND dc.TiDoRefe IS NOT NULL AND dc.TiDoRefe <> ''
-                   AND YEAR(fact.FechDocu) < YEAR(nc.FechDocu)
-                 ORDER BY dc.ConsDeta"
-            );
-            $stmt->execute([$codiInst, $codiDocuNotaOrigen, $numeDocuNotaOrigen]);
+                   AND dc.CodiCont NOT LIKE '13%' AND dc.CodiCont NOT LIKE '14%' AND dc.CodiCont NOT LIKE '8%'
+                   AND dc.TiDoRefe IS NOT NULL AND dc.TiDoRefe <> ''
+                   AND YEAR(fact.FechDocu) < YEAR(nc.FechDocu)";
+            $paramsLineas = [$codiInst, $codiDocuNotaOrigen, $numeDocuNotaOrigen];
+            if ($prefijoVigenciaAnterior !== '') {
+                $sqlLineas .= ' AND dc.CodiCont NOT LIKE ?';
+                $paramsLineas[] = $prefijoVigenciaAnterior . '%';
+            }
+            $sqlLineas .= ' ORDER BY dc.ConsDeta';
+
+            $stmt = $pdo->prepare($sqlLineas);
+            $stmt->execute($paramsLineas);
             $lineas4312 = $stmt->fetchAll();
 
             if ($lineas4312 === []) {
                 $pdo->rollBack();
 
-                return ['ok' => false, 'motivo' => 'La nota ya no tiene líneas 4312 de vigencia anterior por corregir — puede que ya se haya corregido.'];
+                return ['ok' => false, 'motivo' => 'La nota ya no tiene ninguna cuenta de vigencia anterior por corregir — puede que ya se haya corregido.'];
             }
 
             // Siempre 1 factura por nota (confirmado con datos reales) — la

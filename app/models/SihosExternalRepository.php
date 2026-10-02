@@ -2004,15 +2004,25 @@ class SihosExternalRepository
     /**
      * Re-verificación en fresco (justo antes de escribir) de una nota de
      * vigencia anterior: su propio estado (Anulado, FechDocu, tercero,
-     * sede) y todas sus líneas 4312 ACTUALES sobre facturas de vigencia
-     * anterior — mismo criterio que fetchCuentasInesperadasNotasVigenciaAnterior()
-     * pero para un documento puntual, sin depender del snapshot del
-     * reporte. Devuelve null si la nota ya no existe.
+     * sede) y todas sus líneas ACTUALES "fuera de lo esperado" sobre
+     * facturas de vigencia anterior — mismo criterio que
+     * fetchCuentasInesperadasNotasVigenciaAnterior() (excluye cartera 13%/
+     * 14%/cuenta de orden 8%/la familia de vigencia anterior ya configurada
+     * vía $prefijoVigenciaAnterior) pero para un documento puntual, sin
+     * depender del snapshot del reporte. Generalizado: antes exigía
+     * `CodiCont LIKE '4312%'`, pero algunas instituciones usan otra cuenta
+     * (verificado con un caso real: NCC-8957 usa 48082701 "otros ingresos"
+     * en vez de 4312 — con el filtro viejo esta nota nunca se podía
+     * reclasificar, el sistema decía "ya no tiene líneas 4312" aunque la
+     * línea seguía ahí). Devuelve null si la nota ya no existe.
      *
-     * @return array{Anulado:int,FechDocu:string,TiDoTerc:?string,NuDoTerc:?string,CodiCent:?string,Lineas4312:list<array{ConsDeta:int,CodiCont:string,CentCost:?string,TiDoTerc:?string,NuDoTerc:?string,Valor:float}>}|null
+     * @return array{Anulado:int,FechDocu:string,TiDoTerc:?string,NuDoTerc:?string,CodiCent:?string,LineasPorCorregir:list<array{ConsDeta:int,CodiCont:string,CentCost:?string,TiDoTerc:?string,NuDoTerc:?string,Valor:float}>}|null
      */
-    public function fetchEstadoParaReclasificacionVigenciaAnterior(string $codiDocuNota, string $numeDocuNota): ?array
-    {
+    public function fetchEstadoParaReclasificacionVigenciaAnterior(
+        string $codiDocuNota,
+        string $numeDocuNota,
+        string $prefijoVigenciaAnterior
+    ): ?array {
         $codiInst = $this->codiInst();
 
         $stmt = $this->connect()->prepare(
@@ -2031,22 +2041,27 @@ class SihosExternalRepository
         // DetaCont del mismo documento para resolverlo. Verificado: hacerlo
         // así (como sí hace, sin problema, fetchCuentasInesperadasNotasVigenciaAnterior()
         // porque ahí un SELECT DISTINCT lo absorbe) multiplicaba cada línea
-        // 4312 por la cantidad de líneas con referencia del documento — acá
+        // por la cantidad de líneas con referencia del documento — acá
         // habría duplicado la reclasificación.
-        $stmt = $this->connect()->prepare(
-            "SELECT dc.ConsDeta, dc.CodiCont, dc.CentCost, dc.TiDoTerc, dc.NuDoTerc, dc.Valor, dc.TiDoRefe, dc.NuDoRefe
+        $sql = "SELECT dc.ConsDeta, dc.CodiCont, dc.CentCost, dc.TiDoTerc, dc.NuDoTerc, dc.Valor, dc.TiDoRefe, dc.NuDoRefe
              FROM DetaCont dc
              INNER JOIN EncaCont fact
                  ON fact.CodiInst = dc.CodiInst AND fact.CodiDocu = dc.TiDoRefe AND fact.NumeDocu = dc.NuDoRefe
              WHERE dc.CodiInst = ? AND dc.CodiDocu = ? AND dc.NumeDocu = ?
-               AND dc.CodiCont LIKE '4312%'
+               AND dc.CodiCont NOT LIKE '13%' AND dc.CodiCont NOT LIKE '14%' AND dc.CodiCont NOT LIKE '8%'
                AND dc.TiDoRefe IS NOT NULL AND dc.TiDoRefe <> ''
-               AND YEAR(fact.FechDocu) < YEAR(?)
-             ORDER BY dc.ConsDeta"
-        );
-        $stmt->execute([$codiInst, $codiDocuNota, $numeDocuNota, $nota['FechDocu']]);
+               AND YEAR(fact.FechDocu) < YEAR(?)";
+        $params = [$codiInst, $codiDocuNota, $numeDocuNota, $nota['FechDocu']];
+        if ($prefijoVigenciaAnterior !== '') {
+            $sql .= ' AND dc.CodiCont NOT LIKE ?';
+            $params[] = $prefijoVigenciaAnterior . '%';
+        }
+        $sql .= ' ORDER BY dc.ConsDeta';
+
+        $stmt = $this->connect()->prepare($sql);
+        $stmt->execute($params);
         $filasLineas = $stmt->fetchAll();
-        $lineas4312 = array_map(
+        $lineasPorCorregir = array_map(
             static fn (array $fila): array => [
                 'ConsDeta' => (int)$fila['ConsDeta'],
                 'CodiCont' => $fila['CodiCont'],
@@ -2073,7 +2088,7 @@ class SihosExternalRepository
             'FacturaCodiDocu' => $facturaCodiDocu,
             'FacturaNumeDocu' => $facturaNumeDocu,
             'CodiCent' => $nota['CodiCent'],
-            'Lineas4312' => $lineas4312,
+            'LineasPorCorregir' => $lineasPorCorregir,
         ];
     }
 

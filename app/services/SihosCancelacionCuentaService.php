@@ -233,7 +233,21 @@ class SihosCancelacionCuentaService
         ]);
 
         try {
-            $estado = $repositorioLectura->fetchEstadoParaReclasificacionVigenciaAnterior($codiDocuNota, $numeDocuNota);
+            $cuentasInstitucion = $repositorioLectura->fetchCuentasInstitucion();
+        } catch (PDOException $e) {
+            return ['ok' => false, 'message' => 'No se pudo consultar la configuración de SIHOS: ' . $e->getMessage()];
+        }
+
+        // Familia de cuentas de vigencia anterior (prefijo de 2 dígitos,
+        // p. ej. "58") — se usa para excluir de "fuera de lo esperado"
+        // cualquier línea que ya esté en una cuenta de esta familia (mismo
+        // criterio que SihosCruceReconocimientoService::buildReporteInterno()
+        // al llamar fetchCuentasInesperadasNotasVigenciaAnterior()).
+        $cuentaAceptacionGlosaAnterior = trim((string)($cuentasInstitucion['CuenGlos'] ?? ''));
+        $prefijoVigenciaAnterior = $cuentaAceptacionGlosaAnterior !== '' ? substr($cuentaAceptacionGlosaAnterior, 0, 2) : '';
+
+        try {
+            $estado = $repositorioLectura->fetchEstadoParaReclasificacionVigenciaAnterior($codiDocuNota, $numeDocuNota, $prefijoVigenciaAnterior);
         } catch (PDOException $e) {
             return ['ok' => false, 'message' => 'No se pudo consultar SIHOS: ' . $e->getMessage()];
         }
@@ -246,17 +260,11 @@ class SihosCancelacionCuentaService
             return ['ok' => false, 'message' => 'La nota está anulada, no se modifica.'];
         }
 
-        if ($estado['Lineas4312'] === []) {
+        if ($estado['LineasPorCorregir'] === []) {
             return [
                 'ok' => false,
-                'message' => "La nota {$codiDocuNota}-{$numeDocuNota} ya no tiene líneas 4312 de vigencia anterior por corregir — puede que ya se haya corregido.",
+                'message' => "La nota {$codiDocuNota}-{$numeDocuNota} ya no tiene ninguna cuenta de vigencia anterior por corregir — puede que ya se haya corregido.",
             ];
-        }
-
-        try {
-            $cuentasInstitucion = $repositorioLectura->fetchCuentasInstitucion();
-        } catch (PDOException $e) {
-            return ['ok' => false, 'message' => 'No se pudo consultar la configuración de SIHOS: ' . $e->getMessage()];
         }
 
         $cuentasValidas = array_values(array_unique(array_filter([
@@ -272,7 +280,7 @@ class SihosCancelacionCuentaService
             ];
         }
 
-        $cuentasACorregir = array_values(array_unique(array_column($estado['Lineas4312'], 'CodiCont')));
+        $cuentasACorregir = array_values(array_unique(array_column($estado['LineasPorCorregir'], 'CodiCont')));
 
         foreach ($cuentasACorregir as $cuenta) {
             try {
@@ -349,7 +357,8 @@ class SihosCancelacionCuentaService
                     $codiAno,
                     $codiMes,
                     $maneNIIF,
-                    $this->usuaDigiResolver->resolver((int)($_SESSION['user_id'] ?? 0), $repositorioLectura)
+                    $this->usuaDigiResolver->resolver((int)($_SESSION['user_id'] ?? 0), $repositorioLectura),
+                    $prefijoVigenciaAnterior
                 );
             } catch (SihosOperacionEnCursoException $e) {
                 return ['ok' => false, 'message' => $e->getMessage()];
@@ -367,7 +376,7 @@ class SihosCancelacionCuentaService
                 'sihos.DetaCont',
                 "{$codiInst}-{$codiDocuNota}-{$numeDocuNota}",
                 $resultado,
-                "Reclasificación en sitio (mes abierto) de cuenta(s) 4312 de vigencia anterior en {$codiDocuNota}-{$numeDocuNota} hacia {$cuentaDestino}."
+                "Reclasificación en sitio (mes abierto) de cuenta(s) de vigencia anterior en {$codiDocuNota}-{$numeDocuNota} hacia {$cuentaDestino}."
             );
 
             return [
@@ -414,7 +423,8 @@ class SihosCancelacionCuentaService
                 $codiAnoNota,
                 $codiMesNota,
                 $maneNIIF,
-                $this->usuaDigiResolver->resolver((int)($_SESSION['user_id'] ?? 0), $repositorioLectura)
+                $this->usuaDigiResolver->resolver((int)($_SESSION['user_id'] ?? 0), $repositorioLectura),
+                $prefijoVigenciaAnterior
             );
         } catch (SihosOperacionEnCursoException $e) {
             return ['ok' => false, 'message' => $e->getMessage()];
@@ -432,7 +442,7 @@ class SihosCancelacionCuentaService
             'sihos.EncaCont',
             "{$codiInst}-{$resultado['codiDocuNota']}-{$resultado['numeDocuNota']}",
             $resultado,
-            "Nota de ajuste (mes cerrado) que reclasifica cuenta(s) 4312 de vigencia anterior de {$codiDocuNota}-{$numeDocuNota} hacia {$cuentaDestino}."
+            "Nota de ajuste (mes cerrado) que reclasifica cuenta(s) de vigencia anterior de {$codiDocuNota}-{$numeDocuNota} hacia {$cuentaDestino}."
         );
 
         return [
