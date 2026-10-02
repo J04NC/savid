@@ -95,7 +95,14 @@
         return clases;
     }
 
-    function tablaReferenciasContables(grupos) {
+    /**
+     * mostrarReferencia: agrega una columna "Documento referencia" con el
+     * TiDoRefe/NuDoRefe de cada línea — solo tiene sentido en el detalle
+     * contable completo, donde un mismo documento puede tener líneas que
+     * referencian documentos distintos; las demás tablas ya muestran un
+     * documento a la vez agrupado por la referencia puntual que se pidió.
+     */
+    function tablaReferenciasContables(grupos, mostrarReferencia) {
         if (!grupos.some(function (g) { return g.lineas.length > 0; })) {
             return '<p class="field-note">Sin líneas contables.</p>';
         }
@@ -116,6 +123,7 @@
                     credito = '<span style="color:#ef5350">' + money(Math.abs(l.Valor)) + '</span>';
                     totalCredito += Math.abs(l.Valor);
                 }
+                var referencia = l.TiDoRefe ? (escapeHtml(l.TiDoRefe) + '-' + escapeHtml(l.NuDoRefe)) : '—';
                 filas += '<tr' + clases[i] + '>' +
                     '<td>' + documento + '</td>' +
                     '<td>' + fecha(g.FechDocu) + '</td>' +
@@ -123,13 +131,17 @@
                     '<td>' + nombreCuenta(l.CodiCont, l.NombCuen) + '</td>' +
                     '<td style="text-align:right">' + debito + '</td>' +
                     '<td style="text-align:right">' + credito + '</td>' +
+                    (mostrarReferencia ? '<td>' + referencia + '</td>' : '') +
                     '<td>' + (idx === 0 ? estado : '') + '</td>' +
                     '</tr>';
             });
         });
         filas += '<tr><td colspan="4" style="text-align:right"><strong>Total</strong></td><td style="text-align:right"><strong>' +
-            money(totalDebito) + '</strong></td><td style="text-align:right"><strong>' + money(totalCredito) + '</strong></td><td></td></tr>';
-        return '<table class="seguridad-table no-datatable"><thead><tr><th>Documento</th><th>Fecha</th><th>Tercero</th><th>Cuenta</th><th>Débito</th><th>Crédito</th><th>Estado</th></tr></thead><tbody>' + filas + '</tbody></table>';
+            money(totalDebito) + '</strong></td><td style="text-align:right"><strong>' + money(totalCredito) + '</strong></td>' +
+            (mostrarReferencia ? '<td></td>' : '') + '<td></td></tr>';
+        var thReferencia = mostrarReferencia ? '<th>Documento referencia</th>' : '';
+        return '<table class="seguridad-table no-datatable"><thead><tr><th>Documento</th><th>Fecha</th><th>Tercero</th><th>Cuenta</th><th>Débito</th><th>Crédito</th>' +
+            thReferencia + '<th>Estado</th></tr></thead><tbody>' + filas + '</tbody></table>';
     }
 
     /** Misma idea que tablaReferenciasContables(), para las líneas de presupuesto (DetaPlan). */
@@ -179,7 +191,7 @@
         if (j.detalleContableCompleto.length === 0) {
             html += '<p class="field-note">Ningún documento referencia a este.</p>';
         } else {
-            html += tablaReferenciasContables(j.detalleContableCompleto);
+            html += tablaReferenciasContables(j.detalleContableCompleto, true);
         }
 
         contenido.innerHTML = html;
