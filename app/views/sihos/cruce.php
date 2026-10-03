@@ -37,6 +37,8 @@ $assetSihosEliminarPortionDetaPlan = BASE_PATH . '/public/js/sihos-eliminar-port
 $sihosEliminarPortionDetaPlanJsV = is_readable($assetSihosEliminarPortionDetaPlan) ? (int)filemtime($assetSihosEliminarPortionDetaPlan) : time();
 $assetSihosReclasificarCuentaVigenciaActual = BASE_PATH . '/public/js/sihos-reclasificar-cuenta-vigencia-actual.js';
 $sihosReclasificarCuentaVigenciaActualJsV = is_readable($assetSihosReclasificarCuentaVigenciaActual) ? (int)filemtime($assetSihosReclasificarCuentaVigenciaActual) : time();
+$assetSihosReclasificarCuentaVigenciaActualMasivo = BASE_PATH . '/public/js/sihos-reclasificar-cuenta-vigencia-actual-masivo.js';
+$sihosReclasificarCuentaVigenciaActualMasivoJsV = is_readable($assetSihosReclasificarCuentaVigenciaActualMasivo) ? (int)filemtime($assetSihosReclasificarCuentaVigenciaActualMasivo) : time();
 ?>
 
 <div class="module-container auditoria-page">
@@ -123,6 +125,7 @@ $sihosReclasificarCuentaVigenciaActualJsV = is_readable($assetSihosReclasificarC
                     'subtitulo' => 'Notas (NCC) sobre facturas de la misma vigencia que restan presupuesto pero cuya contabilidad nunca toca la cuenta de ingreso real de la factura — solo castigan cartera (p. ej. contra la cuenta de gasto configurada en SIHOS), sin reversar el ingreso ya reconocido. "Reclasificar" cambia la cuenta de la nota hacia la cuenta de ingreso real de la factura, emparejando por valor exacto.',
                     'filas' => $reporte['notasSinCancelar4312'],
                     'tipo' => 'nota-sin-4312',
+                    'accionReclasificarVigenciaActualMasivo' => true,
                 ],
                 [
                     'titulo' => '4. Glosas de vigencia actual incompletas',
@@ -179,6 +182,11 @@ $sihosReclasificarCuentaVigenciaActualJsV = is_readable($assetSihosReclasificarC
                             ↩️ Crear notas de ajuste (0)
                         </button>
                     <?php endif; ?>
+                    <?php if (($seccion['accionReclasificarVigenciaActualMasivo'] ?? false) && $puedeReversarCuenta): ?>
+                        <button type="button" id="btnSihosReclasificarCuentaVigenciaActualMasivo" class="auditoria-btn-primary" disabled>
+                            ▶️ Reclasificar seleccionadas (0)
+                        </button>
+                    <?php endif; ?>
                 </div>
 
                 <?php if ($seccion['filas'] === []): ?>
@@ -190,7 +198,8 @@ $sihosReclasificarCuentaVigenciaActualJsV = is_readable($assetSihosReclasificarC
                         $muestraSeleccionReclasificar = ($seccion['accionReclasificar'] ?? false) && $puedeReversarCuenta;
                         $muestraSeleccionEliminarDetaPlan = ($seccion['accionEliminarDetaPlanMasivo'] ?? false) && $puedeEliminarDetaPlan;
                         $muestraSeleccionReversar = ($seccion['accionReversarCuentaMasivo'] ?? false) && $puedeReversarCuenta;
-                        $tablaId = $muestraSeleccionMasiva ? 'sihosConstruirDetaPlanTable' : ($muestraSeleccionReclasificar ? 'sihosReclasificarCuentaTable' : ($muestraSeleccionEliminarDetaPlan ? 'sihosEliminarDetaPlanMasivoTable' : ($muestraSeleccionReversar ? 'sihosReversarCuentaMasivoTable' : '')));
+                        $muestraSeleccionReclasificarVigenciaActual = ($seccion['accionReclasificarVigenciaActualMasivo'] ?? false) && $puedeReversarCuenta;
+                        $tablaId = $muestraSeleccionMasiva ? 'sihosConstruirDetaPlanTable' : ($muestraSeleccionReclasificar ? 'sihosReclasificarCuentaTable' : ($muestraSeleccionEliminarDetaPlan ? 'sihosEliminarDetaPlanMasivoTable' : ($muestraSeleccionReversar ? 'sihosReversarCuentaMasivoTable' : ($muestraSeleccionReclasificarVigenciaActual ? 'sihosReclasificarCuentaVigenciaActualMasivoTable' : ''))));
                         ?>
                         <table class="seguridad-table" <?= $tablaId !== '' ? 'id="' . $tablaId . '"' : '' ?>>
                             <?php if ($seccion['tipo'] === 'factura'): ?>
@@ -260,10 +269,27 @@ $sihosReclasificarCuentaVigenciaActualJsV = is_readable($assetSihosReclasificarC
                                 <?php endforeach; ?>
                                 </tbody>
                             <?php elseif ($seccion['tipo'] === 'nota-sin-4312'): ?>
-                                <thead><tr><th>Documento</th><th>Fecha</th><th>Presupuesto</th><th>Factura</th><th>Fecha factura</th><th>Cuenta(s) usada(s)</th><th>Opciones</th></tr></thead>
+                                <thead>
+                                    <tr>
+                                        <?php if ($muestraSeleccionReclasificarVigenciaActual): ?>
+                                            <th class="no-dt-filter no-dt-order no-export" aria-label="Selección">
+                                                <input type="checkbox" id="sihosReclasificarCuentaVigenciaActualSelectAll" aria-label="Seleccionar todo lo visible">
+                                            </th>
+                                        <?php endif; ?>
+                                        <th>Documento</th><th>Fecha</th><th>Presupuesto</th><th>Factura</th><th>Fecha factura</th><th>Cuenta(s) usada(s)</th><th>Opciones</th>
+                                    </tr>
+                                </thead>
                                 <tbody>
                                 <?php foreach ($seccion['filas'] as $f): ?>
                                     <tr>
+                                        <?php if ($muestraSeleccionReclasificarVigenciaActual): ?>
+                                            <td class="no-export">
+                                                <input type="checkbox" class="sihosReclasificarCuentaVigenciaActualCheckbox"
+                                                       data-codi-docu="<?= htmlspecialchars($f['CodiDocu']) ?>"
+                                                       data-nume-docu="<?= htmlspecialchars($f['NumeDocu']) ?>"
+                                                       data-empresa-id="<?= (int)$empresaId ?>">
+                                            </td>
+                                        <?php endif; ?>
                                         <td><?= htmlspecialchars($f['CodiDocu'] . '-' . $f['NumeDocu']) ?></td>
                                         <td><?= htmlspecialchars($f['FechDocu']) ?></td>
                                         <td><?= sihosFormatoMoneda($f['Presupuesto']) ?></td>
@@ -672,6 +698,47 @@ $sihosReclasificarCuentaVigenciaActualJsV = is_readable($assetSihosReclasificarC
             </div>
         </div>
         <script src="/js/sihos-reclasificar-cuenta-vigencia-actual.js?v=<?= (int)$sihosReclasificarCuentaVigenciaActualJsV ?>"></script>
+
+        <div id="sihosReclasificarCuentaVigenciaActualMasivoModal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header-bar">
+                    <span>↩️ Reclasificar cuenta de vigencia actual — selección masiva</span>
+                    <span class="close-modal" id="sihosReclasificarCuentaVigenciaActualMasivoCerrar" role="button" tabindex="0" aria-label="Cerrar">&times;</span>
+                </div>
+                <div style="padding:16px;">
+                    <div id="sihosReclasificarCuentaVigenciaActualMasivoPreInicio">
+                        <p class="modal-form-alert">
+                            Esto reclasificará en SIHOS las cuentas fuera de lo esperado de
+                            <strong id="sihosReclasificarCuentaVigenciaActualMasivoConteo">0</strong> documento(s), uno por uno —
+                            cada línea se empareja automáticamente con la cuenta de ingreso real de su factura, sin cuenta a
+                            elegir. Cada uno es <strong>irreversible</strong> desde SAVID. No cierre esta ventana mientras esté
+                            en proceso — si se interrumpe, puede volver a correr la selección restante después sin duplicar nada.
+                        </p>
+                        <div class="form-group">
+                            <label for="sihosReclasificarCuentaVigenciaActualMasivoConfirmacion">Escriba <strong>RECLASIFICAR</strong> para confirmar</label>
+                            <input type="text" id="sihosReclasificarCuentaVigenciaActualMasivoConfirmacion" class="form-input" autocomplete="off">
+                        </div>
+                        <div class="auditoria-filters-footer">
+                            <button type="button" id="sihosReclasificarCuentaVigenciaActualMasivoIniciar" class="auditoria-btn-primary" disabled>▶️ Iniciar</button>
+                        </div>
+                    </div>
+                    <div id="sihosReclasificarCuentaVigenciaActualMasivoProgreso" hidden>
+                        <p id="sihosReclasificarCuentaVigenciaActualMasivoContador" aria-live="polite">Procesando 0/0… (✅ 0 ok · ⚠️ 0 con error)</p>
+                        <ul id="sihosReclasificarCuentaVigenciaActualMasivoFallidos" style="max-height:200px; overflow-y:auto; list-style:none; padding:0; margin:0;"></ul>
+                        <div class="auditoria-filters-footer">
+                            <button type="button" id="sihosReclasificarCuentaVigenciaActualMasivoDetener" class="auditoria-btn-primary" style="background:#c0392b;">⏹ Detener</button>
+                        </div>
+                    </div>
+                    <div id="sihosReclasificarCuentaVigenciaActualMasivoResumen" hidden>
+                        <p id="sihosReclasificarCuentaVigenciaActualMasivoResumenTexto" aria-live="polite"></p>
+                        <div class="auditoria-filters-footer">
+                            <button type="button" id="sihosReclasificarCuentaVigenciaActualMasivoActualizar" class="auditoria-btn-primary">🔄 Actualizar página</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <script src="/js/sihos-reclasificar-cuenta-vigencia-actual-masivo.js?v=<?= (int)$sihosReclasificarCuentaVigenciaActualMasivoJsV ?>"></script>
 
         <div id="sihosEliminarDetaPlanMasivoModal" class="modal hidden">
             <div class="modal-content">
