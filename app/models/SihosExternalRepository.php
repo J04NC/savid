@@ -726,6 +726,73 @@ class SihosExternalRepository
     }
 
     /**
+     * Notas detectadas por fetchNotasVigenciaActualSinCancelar4312() (sección
+     * 3c) que YA tienen una nota de ajuste activa que las corrige — creada
+     * por SihosExternalWriteRepository::crearNotaAjusteVigenciaActual() (rama
+     * de mes cerrado, que crea un documento NUEVO en vez de editar la nota
+     * original, así que esta sigue "viéndose mal" para siempre si no se
+     * excluye explícitamente). Mismo criterio que
+     * fetchClavesConAjustePrevioNotasVigenciaAnterior() (sección 5b): la nota
+     * de ajuste referencia la FACTURA, no la nota que corrige, así que se
+     * identifica por el sufijo `Concepto` "- nota {CodiDocu}-{NumeDocu}" —
+     * sin filtrar por CodiCont, porque una sola nota de ajuste 3c corrige de
+     * una vez TODAS las cuentas fuera de lo esperado de la nota original
+     * (verificado con caso real: NC-1084 corrige en un solo documento las 3
+     * líneas 58901901 de NCC-8932).
+     *
+     * @param list<array{CodiDocu:string,NumeDocu:string,FacturaCodiDocu:string,FacturaNumeDocu:string}> $filas
+     * @return array<string, true> indexado por "{CodiDocu}-{NumeDocu}"
+     */
+    public function fetchClavesConAjustePrevioNotasVigenciaActual(array $filas): array
+    {
+        if ($filas === []) {
+            return [];
+        }
+
+        $paresUnicos = [];
+        foreach ($filas as $f) {
+            $clave = $f['FacturaCodiDocu'] . '|' . $f['FacturaNumeDocu'];
+            $paresUnicos[$clave] = [$f['FacturaCodiDocu'], $f['FacturaNumeDocu']];
+        }
+        $paresUnicos = array_values($paresUnicos);
+
+        $condiciones = implode(' OR ', array_fill(0, count($paresUnicos), '(dc.TiDoRefe = ? AND dc.NuDoRefe = ?)'));
+        $params = [$this->codiInst()];
+        foreach ($paresUnicos as [$cd, $nd]) {
+            $params[] = $cd;
+            $params[] = $nd;
+        }
+
+        $stmt = $this->connect()->prepare(
+            "SELECT DISTINCT dc.TiDoRefe AS FacturaCodiDocu, dc.NuDoRefe AS FacturaNumeDocu, ec.Concepto
+             FROM DetaCont dc
+             INNER JOIN EncaCont ec ON ec.CodiInst = dc.CodiInst AND ec.CodiDocu = dc.CodiDocu AND ec.NumeDocu = dc.NumeDocu
+             WHERE dc.CodiInst = ?
+               AND ({$condiciones})
+               AND ec.Anulado = 0
+               AND ec.Concepto LIKE '%- nota %'"
+        );
+        $stmt->execute($params);
+        $filasCorregidas = $stmt->fetchAll();
+
+        $claves = [];
+        foreach ($filas as $f) {
+            $sufijo = '- nota ' . $f['CodiDocu'] . '-' . $f['NumeDocu'];
+            foreach ($filasCorregidas as $fc) {
+                if ($fc['FacturaCodiDocu'] === $f['FacturaCodiDocu']
+                    && $fc['FacturaNumeDocu'] === $f['FacturaNumeDocu']
+                    && str_ends_with((string)$fc['Concepto'], $sufijo)
+                ) {
+                    $claves[$f['CodiDocu'] . '-' . $f['NumeDocu']] = true;
+                    break;
+                }
+            }
+        }
+
+        return $claves;
+    }
+
+    /**
      * Porciones de presupuesto de notas atribuibles a facturas de vigencia
      * ANTERIOR (año de la factura < año de la nota) — nunca debería existir
      * (regla de negocio confirmada por el usuario: una nota sobre factura de

@@ -251,6 +251,19 @@ class SihosCruceReconocimientoService
             ));
             $cuentasInesperadasNotas = [...$cuentasInesperadasNotasActual, ...$cuentasInesperadasNotasAnterior];
 
+            // Sección 3c: excluye notas que ya tienen una nota de ajuste
+            // activa que las corrige (rama de mes cerrado de
+            // reclasificarCuentaVigenciaActual() crea un documento NUEVO, la
+            // nota original nunca deja de "verse mal" por sí sola — caso real
+            // que lo expuso: NCC-8932, ya corregida por NC-1084, seguía
+            // apareciendo aquí sin este filtro).
+            $notasSinCancelar4312 = $repository->fetchNotasVigenciaActualSinCancelar4312($codigosNota, $fechaIni, $fechaFin);
+            $clavesConAjuste3c = $repository->fetchClavesConAjustePrevioNotasVigenciaActual($notasSinCancelar4312);
+            $notasSinCancelar4312 = array_values(array_filter(
+                $notasSinCancelar4312,
+                static fn (array $f): bool => !isset($clavesConAjuste3c[$f['CodiDocu'] . '-' . $f['NumeDocu']])
+            ));
+
             return [
                 'ok' => true,
                 'codigosFactura' => $codigosFactura,
@@ -270,7 +283,7 @@ class SihosCruceReconocimientoService
                 ),
                 'notasIncompletas' => $repository->fetchNotasVigenciaActualIncompletas($codigosNota, $fechaIni, $fechaFin),
                 'glosasIncompletas' => $repository->fetchNotasVigenciaActualIncompletas($codigosGlosa, $fechaIni, $fechaFin),
-                'notasSinCancelar4312' => $repository->fetchNotasVigenciaActualSinCancelar4312($codigosNota, $fechaIni, $fechaFin),
+                'notasSinCancelar4312' => $notasSinCancelar4312,
                 'cuentasInesperadasFacturas' => $cuentasInesperadasFacturas,
                 'cuentasInesperadasNotas' => $cuentasInesperadasNotas,
                 'cuentasInesperadasGlosas' => $repository->fetchCuentasInesperadasNotasVigenciaActual(
