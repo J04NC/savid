@@ -527,9 +527,15 @@ class SihosCancelacionCuentaService
         }
 
         if ($maneNIIF) {
+            $codigosDestino = [];
+            foreach ($emparejamientos as $e) {
+                foreach ($e['Destinos'] as $destino) {
+                    $codigosDestino[] = $destino['CodiCont'];
+                }
+            }
             $codigosCuenta = array_values(array_unique(array_merge(
                 array_column($emparejamientos, 'CodiContOrigen'),
-                array_column($emparejamientos, 'CodiContDestino')
+                $codigosDestino
             )));
 
             try {
@@ -568,20 +574,11 @@ class SihosCancelacionCuentaService
         ]);
 
         if (!$cerrado) {
-            $parsEnSitio = array_map(
-                static fn (array $e): array => [
-                    'ConsDeta' => $e['ConsDeta'],
-                    'CodiContOrigen' => $e['CodiContOrigen'],
-                    'CodiContDestino' => $e['CodiContDestino'],
-                ],
-                $emparejamientos
-            );
-
             try {
                 $resultado = $repositorioEscritura->reclasificarCuentasVigenciaActualEnSitio(
                     $codiDocuNota,
                     $numeDocuNota,
-                    $parsEnSitio,
+                    $emparejamientos,
                     $codiAno,
                     $codiMes,
                     $maneNIIF,
