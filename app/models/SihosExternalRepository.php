@@ -2171,11 +2171,24 @@ class SihosExternalRepository
      * cuenta de ingresos aún no se vea referenciada, como puede pasar con
      * las facturas tipo capita":
      *
-     * - Factura con UNA sola cuenta de ingreso (capita — aún reconocido
-     *   contra una cuenta diferida/global, sin desglosar por servicio): toda
-     *   línea de la nota va hacia esa única cuenta, sin exigir coincidencia
-     *   de valor — no hay ninguna ambigüedad que resolver (verificado:
-     *   NCC-8963/FE-564456, NCC-8979/FE-565790, NCC-8714/FE-548419).
+     * - Factura con UNA sola cuenta de ingreso:
+     *   - Si NINGÚN documento vinculado ya debita esa misma cuenta (no hay
+     *     distribución todavía — típico de capita reconocida contra una
+     *     cuenta diferida/global, p. ej. 29102701, o de una factura simple
+     *     cuya única cuenta ya es la específica): toda línea de la nota va
+     *     directo hacia esa cuenta, mismo valor — no hay ninguna ambigüedad
+     *     que resolver (verificado: NCC-8979/FE-565790, NCC-8714/FE-548419).
+     *   - Si YA existe un documento vinculado (p. ej. un DAC de liquidación
+     *     de capita) que debita esa misma cuenta — la distribución ya
+     *     ocurrió y esa cuenta quedó consumida para esta factura, así que un
+     *     débito nuevo ahí quedaría huérfano, nada lo reconciliaría nunca.
+     *     La corrección se reparte PROPORCIONAL contra las demás cuentas de
+     *     ESE documento (sus créditos), por su peso — ahí es donde quedó el
+     *     ingreso real tras distribuir (caso real que lo expuso y quedó mal
+     *     con la versión anterior: NCC-8963/FE-564456, distribuida por
+     *     DAC-447 en 19 cuentas — la corrección NC-1104 generada antes de
+     *     este fix dejó un débito huérfano en 29102701 y tuvo que borrarse).
+     *     Si hay más de un documento candidato, ambiguo — se rechaza.
      * - Factura con VARIAS cuentas de ingreso (ya desglosada por servicio):
      *   cada línea de la nota se empareja con la cuenta que tenga el mismo
      *   valor absoluto exacto (confirmado con NCC-10062 1 línea 1:1 contra
@@ -2183,7 +2196,15 @@ class SihosExternalRepository
      *   FE-604372) — se rechaza (Emparejamientos = null) si no es 1 a 1 sin
      *   ambigüedad: se prefiere no adivinar antes que reclasificar mal.
      *
-     * @return array{Anulado:int,FechDocu:string,TiDoTerc:?string,NuDoTerc:?string,CodiCent:?string,FacturaCodiDocu:?string,FacturaNumeDocu:?string,Emparejamientos:?list<array{ConsDeta:int,CodiContOrigen:string,CentCost:?string,TiDoTerc:?string,NuDoTerc:?string,TiDoRefe:string,NuDoRefe:string,Valor:float,CodiContDestino:string}>}|null
+     * Regla de negocio confirmada por el usuario: "las notas que afecten una
+     * factura dentro de la misma vigencia deben afectar la cuenta de
+     * ingresos que tenga en referencia la factura, a menos que la cuenta de
+     * ingresos aún no se vea referenciada, como puede pasar con las
+     * facturas tipo capita" — y, aclarado después: una vez que SÍ hay
+     * distribución, el ingreso real ya no vive en la cuenta diferida sino en
+     * las cuentas específicas que generó esa distribución.
+     *
+     * @return array{Anulado:int,FechDocu:string,TiDoTerc:?string,NuDoTerc:?string,CodiCent:?string,FacturaCodiDocu:?string,FacturaNumeDocu:?string,Emparejamientos:?list<array{ConsDeta:int,CodiContOrigen:string,TiDoTerc:?string,NuDoTerc:?string,TiDoRefe:string,NuDoRefe:string,Valor:float,Destinos:list<array{CodiCont:string,Valor:float,CentCost:?string}>}>}|null
      */
     public function fetchEstadoParaReclasificacionVigenciaActual(string $codiDocuNota, string $numeDocuNota): ?array
     {
@@ -2229,28 +2250,90 @@ class SihosExternalRepository
             $cuentasFacturaUnicas = array_values(array_unique(array_column($lineasFactura, 'CodiCont')));
 
             if (count($cuentasFacturaUnicas) === 1) {
-                // Caso capita: la factura reconoce el ingreso contra una
-                // sola cuenta (típicamente diferida, p. ej. 29102701 — aún
-                // no referenciada contra 4312 específico por servicio). No
-                // hay ninguna ambigüedad que resolver con el valor: solo
-                // existe un destino posible, así que toda línea "fuera de lo
-                // esperado" de la nota va hacia esa única cuenta tal cual
-                // (regla confirmada por el usuario: "las notas... deben
-                // afectar la cuenta de ingresos que tenga en referencia la
-                // factura, a menos que la cuenta aún no se vea referenciada
-                // como puede pasar con las facturas tipo capita").
-                foreach ($lineasNota as $ln) {
-                    $emparejamientos[] = [
-                        'ConsDeta' => (int)$ln['ConsDeta'],
-                        'CodiContOrigen' => $ln['CodiCont'],
-                        'CentCost' => $ln['CentCost'],
-                        'TiDoTerc' => $ln['TiDoTerc'],
-                        'NuDoTerc' => $ln['NuDoTerc'],
-                        'TiDoRefe' => $ln['TiDoRefe'],
-                        'NuDoRefe' => $ln['NuDoRefe'],
-                        'Valor' => (float)$ln['Valor'],
-                        'CodiContDestino' => $cuentasFacturaUnicas[0],
-                    ];
+                $cuentaIngreso = $cuentasFacturaUnicas[0];
+
+                // ¿Ya existe un documento vinculado (no la factura misma)
+                // que debite esta misma cuenta? Eso es la señal de que ya
+                // hubo una distribución (p. ej. liquidación de capita).
+                $stmt = $this->connect()->prepare(
+                    "SELECT DISTINCT dc.CodiDocu, dc.NumeDocu
+                     FROM DetaCont dc
+                     WHERE dc.CodiInst = ? AND dc.TiDoRefe = ? AND dc.NuDoRefe = ? AND dc.CodiCont = ? AND dc.Valor > 0
+                       AND NOT (dc.CodiDocu = ? AND dc.NumeDocu = ?)"
+                );
+                $stmt->execute([$codiInst, $facturaCodiDocu, $facturaNumeDocu, $cuentaIngreso, $facturaCodiDocu, $facturaNumeDocu]);
+                $documentosDistribucion = $stmt->fetchAll();
+
+                if (count($documentosDistribucion) > 1) {
+                    // Más de un documento distribuye la misma cuenta: no se
+                    // puede saber sin ambigüedad cuál repartir.
+                    $emparejamientos = null;
+                } elseif (count($documentosDistribucion) === 1) {
+                    $distribucion = $documentosDistribucion[0];
+                    $stmt = $this->connect()->prepare(
+                        "SELECT CodiCont, Valor, CentCost FROM DetaCont
+                         WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ? AND CodiCont <> ?"
+                    );
+                    $stmt->execute([$codiInst, $distribucion['CodiDocu'], $distribucion['NumeDocu'], $cuentaIngreso]);
+                    $lineasDistribucion = $stmt->fetchAll();
+                    $pesoTotal = array_sum(array_map(static fn (array $l): float => abs((float)$l['Valor']), $lineasDistribucion));
+
+                    if ($lineasDistribucion === [] || $pesoTotal <= 0.0) {
+                        // Documento de distribución sin líneas de crédito
+                        // utilizables — no hay cómo repartir, ambiguo.
+                        $emparejamientos = null;
+                    } else {
+                        foreach ($lineasNota as $ln) {
+                            $valorNota = (float)$ln['Valor'];
+                            $destinos = [];
+                            $acumulado = 0.0;
+                            $n = count($lineasDistribucion);
+                            foreach ($lineasDistribucion as $i => $ld) {
+                                $peso = abs((float)$ld['Valor']) / $pesoTotal;
+                                // La última línea absorbe el residuo de
+                                // redondeo para que la suma cuadre exacto.
+                                $valorDestino = ($i === $n - 1)
+                                    ? round($valorNota - $acumulado, 2)
+                                    : round($valorNota * $peso, 2);
+                                $acumulado += $valorDestino;
+                                $destinos[] = [
+                                    'CodiCont' => $ld['CodiCont'],
+                                    'Valor' => $valorDestino,
+                                    'CentCost' => $ld['CentCost'],
+                                ];
+                            }
+                            $emparejamientos[] = [
+                                'ConsDeta' => (int)$ln['ConsDeta'],
+                                'CodiContOrigen' => $ln['CodiCont'],
+                                'TiDoTerc' => $ln['TiDoTerc'],
+                                'NuDoTerc' => $ln['NuDoTerc'],
+                                'TiDoRefe' => $ln['TiDoRefe'],
+                                'NuDoRefe' => $ln['NuDoRefe'],
+                                'Valor' => $valorNota,
+                                'Destinos' => $destinos,
+                            ];
+                        }
+                    }
+                } else {
+                    // Sin distribución todavía: toda línea de la nota va
+                    // directo hacia la única cuenta de ingreso de la
+                    // factura, con el mismo CentCost que ya traía la línea.
+                    foreach ($lineasNota as $ln) {
+                        $emparejamientos[] = [
+                            'ConsDeta' => (int)$ln['ConsDeta'],
+                            'CodiContOrigen' => $ln['CodiCont'],
+                            'TiDoTerc' => $ln['TiDoTerc'],
+                            'NuDoTerc' => $ln['NuDoTerc'],
+                            'TiDoRefe' => $ln['TiDoRefe'],
+                            'NuDoRefe' => $ln['NuDoRefe'],
+                            'Valor' => (float)$ln['Valor'],
+                            'Destinos' => [[
+                                'CodiCont' => $cuentaIngreso,
+                                'Valor' => (float)$ln['Valor'],
+                                'CentCost' => $ln['CentCost'],
+                            ]],
+                        ];
+                    }
                 }
             } else {
                 // Factura con varias cuentas de ingreso ya desglosadas: la
@@ -2287,13 +2370,16 @@ class SihosExternalRepository
                         $emparejamientos[] = [
                             'ConsDeta' => (int)$ln['ConsDeta'],
                             'CodiContOrigen' => $ln['CodiCont'],
-                            'CentCost' => $ln['CentCost'],
                             'TiDoTerc' => $ln['TiDoTerc'],
                             'NuDoTerc' => $ln['NuDoTerc'],
                             'TiDoRefe' => $ln['TiDoRefe'],
                             'NuDoRefe' => $ln['NuDoRefe'],
                             'Valor' => (float)$ln['Valor'],
-                            'CodiContDestino' => $porValorFactura[$clave][0],
+                            'Destinos' => [[
+                                'CodiCont' => $porValorFactura[$clave][0],
+                                'Valor' => (float)$ln['Valor'],
+                                'CentCost' => $ln['CentCost'],
+                            ]],
                         ];
                     }
                 }
