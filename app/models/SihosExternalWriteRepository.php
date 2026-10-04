@@ -1098,16 +1098,23 @@ class SihosExternalWriteRepository
     /**
      * Rama de mes ABIERTO de la sección 3c: reclasifica en sitio, línea por
      * línea, cada "cuenta fuera de lo esperado" de una nota de vigencia
-     * actual hacia la cuenta de ingreso real de la factura que le
-     * corresponde por valor — a diferencia de reclasificarCuentaEnSitio()
-     * (sección 5b), cada línea puede tener una cuenta destino DISTINTA (ver
+     * actual hacia la(s) cuenta(s) de ingreso real que le corresponde(n) —
+     * a diferencia de reclasificarCuentaEnSitio() (sección 5b), cada línea
+     * de la nota puede repartirse hacia VARIAS cuentas destino, cada una con
+     * su propio CentCost (ver
      * SihosExternalRepository::fetchEstadoParaReclasificacionVigenciaActual()).
-     * Re-verifica dentro de la transacción que cada línea sigue teniendo
-     * exactamente el CodiCont esperado antes de tocarla — si alguna cambió
-     * desde que se calculó el emparejamiento, se rechaza TODA la acción sin
-     * aplicar nada (más seguro que aplicar parcialmente).
+     * Por eso ya no es un simple `UPDATE CodiCont`: cada línea original se
+     * BORRA y se insertan sus líneas destino nuevas (con nuevo `ConsDeta`,
+     * tomado del máximo actual del documento + 1 en adelante) — sigue siendo
+     * "editar en sitio" en el sentido de que no se crea un documento nuevo,
+     * solo cambia el detalle del mismo.
      *
-     * @param list<array{ConsDeta:int,CodiContOrigen:string,CodiContDestino:string}> $emparejamientos
+     * Re-verifica dentro de la transacción que cada línea sigue teniendo
+     * exactamente el CodiCont y Valor esperados antes de tocarla — si alguna
+     * cambió desde que se calculó el emparejamiento, se rechaza TODA la
+     * acción sin aplicar nada (más seguro que aplicar parcialmente).
+     *
+     * @param list<array{ConsDeta:int,CodiContOrigen:string,Valor:float,Destinos:list<array{CodiCont:string,Valor:float,CentCost:?string}>}> $emparejamientos
      * @return array{ok:bool,motivo?:string,lineasAntes?:list<array{ConsDeta:int,CodiCont:string,Valor:float}>,lineasDespues?:list<array{ConsDeta:int,CodiCont:string,Valor:float}>}
      */
     public function reclasificarCuentasVigenciaActualEnSitio(
@@ -1147,17 +1154,28 @@ class SihosExternalWriteRepository
         $pdo->beginTransaction();
 
         try {
+            $stmt = $pdo->prepare('SELECT CodiCent FROM EncaCont WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?');
+            $stmt->execute([$codiInst, $codiDocuNota, $numeDocuNota]);
+            $notaRow = $stmt->fetch();
+            if ($notaRow === false) {
+                $pdo->rollBack();
+
+                return ['ok' => false, 'motivo' => "La nota {$codiDocuNota}-{$numeDocuNota} ya no existe."];
+            }
+            $codiCentNota = $notaRow['CodiCent'];
+
             $lineasActuales = [];
             foreach ($emparejamientos as $par) {
                 $stmt = $pdo->prepare(
-                    'SELECT CodiCont, CentCost, TiDoTerc, NuDoTerc, Valor
+                    'SELECT CodiCont, CentCost, TiDoTerc, NuDoTerc, Valor, TiDoRefe, NuDoRefe
                      FROM DetaCont WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ? AND ConsDeta = ?
                      FOR UPDATE'
                 );
                 $stmt->execute([$codiInst, $codiDocuNota, $numeDocuNota, $par['ConsDeta']]);
                 $linea = $stmt->fetch();
 
-                if ($linea === false || $linea['CodiCont'] !== $par['CodiContOrigen']) {
+                if ($linea === false || $linea['CodiCont'] !== $par['CodiContOrigen']
+                    || round((float)$linea['Valor'], 2) !== round($par['Valor'], 2)) {
                     $pdo->rollBack();
 
                     return [
@@ -1169,49 +1187,84 @@ class SihosExternalWriteRepository
                 $lineasActuales[$par['ConsDeta']] = $linea;
             }
 
+            $stmt = $pdo->prepare('SELECT MAX(ConsDeta) FROM DetaCont WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?');
+            $stmt->execute([$codiInst, $codiDocuNota, $numeDocuNota]);
+            $siguienteConsDeta = (int)$stmt->fetchColumn() + 1;
+
             $lineasAntes = [];
             $lineasDespues = [];
+            $configsCuenta = [];
 
             foreach ($emparejamientos as $par) {
                 $consDeta = $par['ConsDeta'];
                 $linea = $lineasActuales[$consDeta];
                 $cuentaVieja = $par['CodiContOrigen'];
-                $cuentaDestino = $par['CodiContDestino'];
                 $valor = (float)$linea['Valor'];
-                $centCost = $linea['CentCost'] !== '' ? $linea['CentCost'] : null;
+                $centCostVieja = $linea['CentCost'] !== '' ? $linea['CentCost'] : null;
                 $tiDoTerc = $linea['TiDoTerc'] !== '' ? $linea['TiDoTerc'] : null;
                 $nuDoTerc = $linea['NuDoTerc'] !== '' ? $linea['NuDoTerc'] : null;
+                $tiDoRefeLinea = $linea['TiDoRefe'];
+                $nuDoRefeLinea = $linea['NuDoRefe'];
 
-                $configVieja = $this->obtenerConfigCuenta($pdo, $codiInst, $cuentaVieja, $codiAno);
-                $configNueva = $this->obtenerConfigCuenta($pdo, $codiInst, $cuentaDestino, $codiAno);
-
-                if ($configVieja === null || $configNueva === null) {
+                if (!isset($configsCuenta[$cuentaVieja])) {
+                    $configsCuenta[$cuentaVieja] = $this->obtenerConfigCuenta($pdo, $codiInst, $cuentaVieja, $codiAno);
+                }
+                $configVieja = $configsCuenta[$cuentaVieja];
+                if ($configVieja === null) {
                     $pdo->rollBack();
 
-                    return [
-                        'ok' => false,
-                        'motivo' => "La cuenta {$cuentaVieja} o {$cuentaDestino} no existe en el plan de cuentas de SIHOS para el año {$codiAno}.",
-                    ];
+                    return ['ok' => false, 'motivo' => "La cuenta {$cuentaVieja} no existe en el plan de cuentas de SIHOS para el año {$codiAno}."];
                 }
 
                 $lineasAntes[] = ['ConsDeta' => $consDeta, 'CodiCont' => $cuentaVieja, 'Valor' => $valor];
 
-                $stmt = $pdo->prepare(
-                    'UPDATE DetaCont SET CodiCont = ? WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ? AND ConsDeta = ?'
-                );
-                $stmt->execute([$cuentaDestino, $codiInst, $codiDocuNota, $numeDocuNota, $consDeta]);
-
-                $this->actualizarSaldoCuenta($pdo, $cuentaVieja, -$valor, $codiMes, $codiAno, $tiDoTerc, $nuDoTerc, $centCost, $configVieja, $usuaDigi);
-                $this->actualizarSaldoCuenta($pdo, $cuentaDestino, $valor, $codiMes, $codiAno, $tiDoTerc, $nuDoTerc, $centCost, $configNueva, $usuaDigi);
-
+                $idPartViejo = null;
                 if ($maneNIIF) {
-                    $stmt = $pdo->prepare(
-                        'SELECT idPartNIIF FROM DetaNIIF WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ? AND ConsDeta = ?'
-                    );
+                    $stmt = $pdo->prepare('SELECT idPartNIIF FROM DetaNIIF WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ? AND ConsDeta = ?');
                     $stmt->execute([$codiInst, $codiDocuNota, $numeDocuNota, $consDeta]);
-                    $idPartViejo = $stmt->fetchColumn();
+                    $valorNIIF = $stmt->fetchColumn();
+                    $idPartViejo = ($valorNIIF !== false && $valorNIIF !== '') ? (string)$valorNIIF : null;
+                }
 
-                    if ($idPartViejo !== false && $idPartViejo !== '') {
+                $pdo->prepare('DELETE FROM DetaCont WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ? AND ConsDeta = ?')
+                    ->execute([$codiInst, $codiDocuNota, $numeDocuNota, $consDeta]);
+                if ($maneNIIF) {
+                    $pdo->prepare('DELETE FROM DetaNIIF WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ? AND ConsDeta = ?')
+                        ->execute([$codiInst, $codiDocuNota, $numeDocuNota, $consDeta]);
+                }
+
+                $this->actualizarSaldoCuenta($pdo, $cuentaVieja, -$valor, $codiMes, $codiAno, $tiDoTerc, $nuDoTerc, $centCostVieja, $configVieja, $usuaDigi);
+                if ($maneNIIF && $idPartViejo !== null) {
+                    $this->actualizarSaldoNIIF($pdo, $idPartViejo, -$valor, $codiMes, $codiAno, $tiDoTerc, $nuDoTerc, $usuaDigi);
+                }
+
+                foreach ($par['Destinos'] as $destino) {
+                    $cuentaDestino = $destino['CodiCont'];
+                    $valorDestino = (float)$destino['Valor'];
+                    $centCostDestino = $destino['CentCost'] !== '' && $destino['CentCost'] !== null ? $destino['CentCost'] : null;
+
+                    if (!isset($configsCuenta[$cuentaDestino])) {
+                        $configsCuenta[$cuentaDestino] = $this->obtenerConfigCuenta($pdo, $codiInst, $cuentaDestino, $codiAno);
+                    }
+                    $configDestino = $configsCuenta[$cuentaDestino];
+                    if ($configDestino === null) {
+                        $pdo->rollBack();
+
+                        return ['ok' => false, 'motivo' => "La cuenta {$cuentaDestino} no existe en el plan de cuentas de SIHOS para el año {$codiAno}."];
+                    }
+
+                    $tiDoTercDestino = (int)$configDestino['OpciTerc'] === 1 ? $tiDoTerc : null;
+                    $nuDoTercDestino = (int)$configDestino['OpciTerc'] === 1 ? $nuDoTerc : null;
+                    $centCostDestinoFinal = (int)$configDestino['OpciCeCo'] === 1 ? $centCostDestino : null;
+
+                    $nuevoConsDeta = $siguienteConsDeta++;
+                    $this->insertarLineaDetaCont(
+                        $pdo, $codiDocuNota, $numeDocuNota, $nuevoConsDeta, $codiAno, $cuentaDestino, $codiCentNota,
+                        $centCostDestinoFinal, $tiDoTercDestino, $nuDoTercDestino, $tiDoRefeLinea, $nuDoRefeLinea, $valorDestino, $usuaDigi
+                    );
+                    $this->actualizarSaldoCuenta($pdo, $cuentaDestino, $valorDestino, $codiMes, $codiAno, $tiDoTercDestino, $nuDoTercDestino, $centCostDestinoFinal, $configDestino, $usuaDigi);
+
+                    if ($maneNIIF) {
                         $stmt = $pdo->prepare('SELECT idPartNIIF FROM HomoNIIF WHERE CodiCont = ?');
                         $stmt->execute([$cuentaDestino]);
                         $idPartNuevo = $stmt->fetchColumn();
@@ -1222,17 +1275,15 @@ class SihosExternalWriteRepository
                             return ['ok' => false, 'motivo' => "Falta homologación NIIF (HomoNIIF) para la cuenta {$cuentaDestino}."];
                         }
 
-                        $stmt = $pdo->prepare(
-                            'UPDATE DetaNIIF SET idPartNIIF = ? WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ? AND ConsDeta = ?'
+                        $this->insertarLineaDetaNIIF(
+                            $pdo, $codiDocuNota, $numeDocuNota, $nuevoConsDeta, $codiAno, (string)$idPartNuevo, $codiCentNota,
+                            $centCostDestinoFinal, $tiDoTercDestino, $nuDoTercDestino, $tiDoRefeLinea, $nuDoRefeLinea, $valorDestino, $usuaDigi
                         );
-                        $stmt->execute([$idPartNuevo, $codiInst, $codiDocuNota, $numeDocuNota, $consDeta]);
-
-                        $this->actualizarSaldoNIIF($pdo, (string)$idPartViejo, -$valor, $codiMes, $codiAno, $tiDoTerc, $nuDoTerc, $usuaDigi);
-                        $this->actualizarSaldoNIIF($pdo, (string)$idPartNuevo, $valor, $codiMes, $codiAno, $tiDoTerc, $nuDoTerc, $usuaDigi);
+                        $this->actualizarSaldoNIIF($pdo, (string)$idPartNuevo, $valorDestino, $codiMes, $codiAno, $tiDoTercDestino, $nuDoTercDestino, $usuaDigi);
                     }
-                }
 
-                $lineasDespues[] = ['ConsDeta' => $consDeta, 'CodiCont' => $cuentaDestino, 'Valor' => $valor];
+                    $lineasDespues[] = ['ConsDeta' => $nuevoConsDeta, 'CodiCont' => $cuentaDestino, 'Valor' => $valorDestino];
+                }
             }
 
             $pdo->commit();
@@ -1259,7 +1310,13 @@ class SihosExternalWriteRepository
      * para todas. Re-verifica dentro de la transacción que cada línea sigue
      * con el CodiCont y Valor esperados antes de usarla.
      *
-     * @param list<array{ConsDeta:int,CodiContOrigen:string,CodiContDestino:string,CentCost:?string,TiDoTerc:?string,NuDoTerc:?string,TiDoRefe:string,NuDoRefe:string,Valor:float}> $emparejamientos
+     * Cada emparejamiento puede repartirse hacia VARIAS cuentas destino
+     * (cada una con su propio CentCost) en vez de una sola — por cada línea
+     * de la nota original: 1 línea de cancelación + 1 línea por cada cuenta
+     * en `Destinos` (ver
+     * SihosExternalRepository::fetchEstadoParaReclasificacionVigenciaActual()).
+     *
+     * @param list<array{ConsDeta:int,CodiContOrigen:string,TiDoTerc:?string,NuDoTerc:?string,TiDoRefe:string,NuDoRefe:string,Valor:float,Destinos:list<array{CodiCont:string,Valor:float,CentCost:?string}>}> $emparejamientos
      * @return array{ok:bool,motivo?:string,codiDocuNota?:string,numeDocuNota?:string,fecha?:string,valorTotal?:float,lineas?:list<array{CodiCont:string,Valor:float}>}
      */
     public function crearNotaAjusteVigenciaActual(
@@ -1396,28 +1453,30 @@ class SihosExternalWriteRepository
 
             foreach ($emparejamientos as $par) {
                 $cuentaOrigen = $par['CodiContOrigen'];
-                $cuentaDestino = $par['CodiContDestino'];
                 $valor = (float)$par['Valor'];
-                $centCost = $par['CentCost'] !== '' && $par['CentCost'] !== null ? $par['CentCost'] : null;
                 $tiDoRefeLinea = $par['TiDoRefe'];
                 $nuDoRefeLinea = $par['NuDoRefe'];
 
-                foreach ([$cuentaOrigen, $cuentaDestino] as $cuenta) {
-                    if (!isset($configsCuenta[$cuenta])) {
-                        $configsCuenta[$cuenta] = $this->obtenerConfigCuenta($pdo, $codiInst, $cuenta, $codiAno);
-                        if ($configsCuenta[$cuenta] === null) {
-                            $pdo->rollBack();
+                if (!isset($configsCuenta[$cuentaOrigen])) {
+                    $configsCuenta[$cuentaOrigen] = $this->obtenerConfigCuenta($pdo, $codiInst, $cuentaOrigen, $codiAno);
+                    if ($configsCuenta[$cuentaOrigen] === null) {
+                        $pdo->rollBack();
 
-                            return ['ok' => false, 'motivo' => "La cuenta {$cuenta} no existe en el plan de cuentas de SIHOS para el año {$codiAno}."];
-                        }
+                        return ['ok' => false, 'motivo' => "La cuenta {$cuentaOrigen} no existe en el plan de cuentas de SIHOS para el año {$codiAno}."];
                     }
                 }
                 $configOrigen = $configsCuenta[$cuentaOrigen];
-                $configDestino = $configsCuenta[$cuentaDestino];
+
+                // Cancela la línea original 1:1 — el CentCost de la
+                // cancelación es el de la PRIMERA línea de Destinos solo
+                // como referencia informativa si la cuenta lo exige; el
+                // origen real de ese CentCost es la línea de la nota, que
+                // fetchEstadoParaReclasificacionVigenciaActual() ya replicó
+                // en cada Destino cuando no hay reparto (caso 1 a 1).
+                $centCostOrigen = (int)$configOrigen['OpciCeCo'] === 1 ? ($par['Destinos'][0]['CentCost'] ?? null) : null;
 
                 $tiDoTercOrigen = (int)$configOrigen['OpciTerc'] === 1 ? $notaOrigen['TiDoTerc'] : null;
                 $nuDoTercOrigen = (int)$configOrigen['OpciTerc'] === 1 ? $notaOrigen['NuDoTerc'] : null;
-                $centCostOrigen = (int)$configOrigen['OpciCeCo'] === 1 ? $centCost : null;
 
                 $valorCancelacion = -$valor;
                 $this->insertarLineaDetaCont(
@@ -1447,36 +1506,52 @@ class SihosExternalWriteRepository
                 $lineasSnapshot[] = ['CodiCont' => $cuentaOrigen, 'Valor' => $valorCancelacion];
                 $consDeta++;
 
-                $tiDoTercDestino = (int)$configDestino['OpciTerc'] === 1 ? $notaOrigen['TiDoTerc'] : null;
-                $nuDoTercDestino = (int)$configDestino['OpciTerc'] === 1 ? $notaOrigen['NuDoTerc'] : null;
-                $centCostDestino = (int)$configDestino['OpciCeCo'] === 1 ? $centCost : null;
+                foreach ($par['Destinos'] as $destino) {
+                    $cuentaDestino = $destino['CodiCont'];
+                    $valorDestino = (float)$destino['Valor'];
+                    $centCostDestinoBruto = $destino['CentCost'] !== '' && $destino['CentCost'] !== null ? $destino['CentCost'] : null;
 
-                $this->insertarLineaDetaCont(
-                    $pdo, $codiDocuNota, $numeDocuNota, $consDeta, $codiAno, $cuentaDestino, $notaOrigen['CodiCent'],
-                    $centCostDestino, $tiDoTercDestino, $nuDoTercDestino, $tiDoRefeLinea, $nuDoRefeLinea, $valor, $usuaDigi
-                );
-                $this->actualizarSaldoCuenta($pdo, $cuentaDestino, $valor, $codiMes, $codiAno, $tiDoTercDestino, $nuDoTercDestino, $centCostDestino, $configDestino, $usuaDigi);
+                    if (!isset($configsCuenta[$cuentaDestino])) {
+                        $configsCuenta[$cuentaDestino] = $this->obtenerConfigCuenta($pdo, $codiInst, $cuentaDestino, $codiAno);
+                        if ($configsCuenta[$cuentaDestino] === null) {
+                            $pdo->rollBack();
 
-                if ($maneNIIF) {
-                    $stmt = $pdo->prepare('SELECT idPartNIIF FROM HomoNIIF WHERE CodiCont = ?');
-                    $stmt->execute([$cuentaDestino]);
-                    $idPartDestino = $stmt->fetchColumn();
+                            return ['ok' => false, 'motivo' => "La cuenta {$cuentaDestino} no existe en el plan de cuentas de SIHOS para el año {$codiAno}."];
+                        }
+                    }
+                    $configDestino = $configsCuenta[$cuentaDestino];
 
-                    if ($idPartDestino === false || $idPartDestino === '') {
-                        $pdo->rollBack();
+                    $tiDoTercDestino = (int)$configDestino['OpciTerc'] === 1 ? $notaOrigen['TiDoTerc'] : null;
+                    $nuDoTercDestino = (int)$configDestino['OpciTerc'] === 1 ? $notaOrigen['NuDoTerc'] : null;
+                    $centCostDestino = (int)$configDestino['OpciCeCo'] === 1 ? $centCostDestinoBruto : null;
 
-                        return ['ok' => false, 'motivo' => "Falta homologación NIIF (HomoNIIF) para la cuenta {$cuentaDestino}."];
+                    $this->insertarLineaDetaCont(
+                        $pdo, $codiDocuNota, $numeDocuNota, $consDeta, $codiAno, $cuentaDestino, $notaOrigen['CodiCent'],
+                        $centCostDestino, $tiDoTercDestino, $nuDoTercDestino, $tiDoRefeLinea, $nuDoRefeLinea, $valorDestino, $usuaDigi
+                    );
+                    $this->actualizarSaldoCuenta($pdo, $cuentaDestino, $valorDestino, $codiMes, $codiAno, $tiDoTercDestino, $nuDoTercDestino, $centCostDestino, $configDestino, $usuaDigi);
+
+                    if ($maneNIIF) {
+                        $stmt = $pdo->prepare('SELECT idPartNIIF FROM HomoNIIF WHERE CodiCont = ?');
+                        $stmt->execute([$cuentaDestino]);
+                        $idPartDestino = $stmt->fetchColumn();
+
+                        if ($idPartDestino === false || $idPartDestino === '') {
+                            $pdo->rollBack();
+
+                            return ['ok' => false, 'motivo' => "Falta homologación NIIF (HomoNIIF) para la cuenta {$cuentaDestino}."];
+                        }
+
+                        $this->insertarLineaDetaNIIF(
+                            $pdo, $codiDocuNota, $numeDocuNota, $consDeta, $codiAno, (string)$idPartDestino, $notaOrigen['CodiCent'],
+                            $centCostDestino, $tiDoTercDestino, $nuDoTercDestino, $tiDoRefeLinea, $nuDoRefeLinea, $valorDestino, $usuaDigi
+                        );
+                        $this->actualizarSaldoNIIF($pdo, (string)$idPartDestino, $valorDestino, $codiMes, $codiAno, $tiDoTercDestino, $nuDoTercDestino, $usuaDigi);
                     }
 
-                    $this->insertarLineaDetaNIIF(
-                        $pdo, $codiDocuNota, $numeDocuNota, $consDeta, $codiAno, (string)$idPartDestino, $notaOrigen['CodiCent'],
-                        $centCostDestino, $tiDoTercDestino, $nuDoTercDestino, $tiDoRefeLinea, $nuDoRefeLinea, $valor, $usuaDigi
-                    );
-                    $this->actualizarSaldoNIIF($pdo, (string)$idPartDestino, $valor, $codiMes, $codiAno, $tiDoTercDestino, $nuDoTercDestino, $usuaDigi);
+                    $lineasSnapshot[] = ['CodiCont' => $cuentaDestino, 'Valor' => $valorDestino];
+                    $consDeta++;
                 }
-
-                $lineasSnapshot[] = ['CodiCont' => $cuentaDestino, 'Valor' => $valor];
-                $consDeta++;
             }
 
             $pdo->commit();
