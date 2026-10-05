@@ -6,7 +6,7 @@
     <title>Login | Savid</title>
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
     <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-    <link rel="stylesheet" href="/css/login.css">
+    <link rel="stylesheet" href="/css/login.css?v=<?= (int)@filemtime(BASE_PATH . '/public/css/login.css') ?>">
     <?php if (TurnstileService::habilitado()): ?>
     <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
     <?php endif; ?>
@@ -75,6 +75,6 @@
     </div>
 </div>
 
-<script src="/js/login.js"></script>
+<script src="/js/login.js?v=<?= (int)@filemtime(BASE_PATH . '/public/js/login.js') ?>"></script>
 </body>
 </html>
