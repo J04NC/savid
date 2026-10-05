@@ -26,8 +26,12 @@ class SessionManager {
             // acceso exclusivo por empresa). Con un dominio como
             // ".savid.com.co" en localhost/desarrollo el navegador rechaza
             // la cookie entera, por eso queda detrás de una env var.
+            // Solo se aplica si el host actual cuelga de ese dominio; por IP
+            // (192.168.x.x) el navegador descartaría la cookie y el login fallaría.
             $cookieDomain = trim((string)(getenv('SESSION_COOKIE_DOMAIN') ?: ''));
-            if ($cookieDomain !== '') {
+            $host = strtolower(preg_replace('/:\d+$/', '', (string)($_SERVER['HTTP_HOST'] ?? '')));
+            $baseDomain = strtolower(ltrim($cookieDomain, '.'));
+            if ($baseDomain !== '' && ($host === $baseDomain || str_ends_with($host, '.' . $baseDomain))) {
                 $options['cookie_domain'] = $cookieDomain;
             }
 
