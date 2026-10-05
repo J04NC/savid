@@ -29,16 +29,7 @@ document.addEventListener("DOMContentLoaded", function() {
     if (submitBtn && turnstileBox) {
         submitBtn.disabled = true;
 
-        // Falla abierto si Turnstile no llega a responder (script bloqueado,
-        // caída de Cloudflare, etc.) — mismo criterio que TurnstileService::verify()
-        // en el servidor: un antibot no puede ser el único motivo de que nadie
-        // pueda entrar a SAVID.
-        const failOpenTimer = setTimeout(function() {
-            submitBtn.disabled = false;
-        }, 8000);
-
         window.savidTurnstileOk = function() {
-            clearTimeout(failOpenTimer);
             submitBtn.disabled = false;
         };
 
