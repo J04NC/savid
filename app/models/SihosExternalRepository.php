@@ -2239,11 +2239,14 @@ class SihosExternalRepository
         $facturaNumeDocu = $lineasNota !== [] ? $lineasNota[0]['NuDoRefe'] : null;
 
         $emparejamientos = [];
-        if ($lineasNota !== [] && $facturaCodiDocu !== null) {
+        if ($lineasNota !== [] && $facturaCodiDocu !== null && $this->haySaldoClase3EnFactura($codiInst, $facturaCodiDocu, $facturaNumeDocu, $codiDocuNota, $numeDocuNota)) {
+            $emparejamientos = null;
+        } elseif ($lineasNota !== [] && $facturaCodiDocu !== null) {
             $stmt = $this->connect()->prepare(
                 "SELECT CodiCont, Valor FROM DetaCont
                  WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?
-                   AND CodiCont NOT LIKE '13%' AND CodiCont NOT LIKE '14%' AND CodiCont NOT LIKE '8%'"
+                   AND CodiCont NOT LIKE '13%' AND CodiCont NOT LIKE '14%' AND CodiCont NOT LIKE '8%'
+                   AND CodiCont NOT LIKE '3%'"
             );
             $stmt->execute([$codiInst, $facturaCodiDocu, $facturaNumeDocu]);
             $lineasFactura = $stmt->fetchAll();
@@ -2396,6 +2399,40 @@ class SihosExternalRepository
             'FacturaNumeDocu' => $facturaNumeDocu,
             'Emparejamientos' => $emparejamientos,
         ];
+    }
+
+    /**
+     * Saldo neto de clase 3 que la factura todavía tiene después de sus notas
+     * posteriores (excluyendo la nota en análisis y las anuladas). Si queda
+     * saldo, la factura no está 100% en cuentas de ingreso y no se puede
+     * elegir una cuenta de destino sin adivinar.
+     */
+    private function haySaldoClase3EnFactura(string $codiInst, string $codiDocuFactura, string $numeDocuFactura, string $codiDocuNota, string $numeDocuNota): bool
+    {
+        $stmt = $this->connect()->prepare(
+            "SELECT dc.CodiCont, SUM(dc.Valor) AS Neto
+             FROM DetaCont dc
+             LEFT JOIN EncaCont ec ON ec.CodiInst = dc.CodiInst AND ec.CodiDocu = dc.CodiDocu AND ec.NumeDocu = dc.NumeDocu
+             WHERE dc.CodiInst = ? AND dc.CodiCont LIKE '3%'
+               AND (
+                    (dc.CodiDocu = ? AND dc.NumeDocu = ?)
+                 OR (dc.TiDoRefe = ? AND dc.NuDoRefe = ? AND ec.Anulado = 0 AND NOT (dc.CodiDocu = ? AND dc.NumeDocu = ?))
+               )
+             GROUP BY dc.CodiCont"
+        );
+        $stmt->execute([
+            $codiInst,
+            $codiDocuFactura, $numeDocuFactura,
+            $codiDocuFactura, $numeDocuFactura, $codiDocuNota, $numeDocuNota,
+        ]);
+
+        foreach ($stmt->fetchAll() as $fila) {
+            if (abs((float)$fila['Neto']) >= 0.005) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
