@@ -2243,7 +2243,8 @@ class SihosExternalRepository
             $stmt = $this->connect()->prepare(
                 "SELECT CodiCont, Valor FROM DetaCont
                  WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?
-                   AND CodiCont NOT LIKE '13%' AND CodiCont NOT LIKE '14%' AND CodiCont NOT LIKE '8%'"
+                   AND CodiCont NOT LIKE '13%' AND CodiCont NOT LIKE '14%' AND CodiCont NOT LIKE '8%'
+                   AND CodiCont NOT LIKE '3%'"
             );
             $stmt->execute([$codiInst, $facturaCodiDocu, $facturaNumeDocu]);
             $lineasFactura = $stmt->fetchAll();
