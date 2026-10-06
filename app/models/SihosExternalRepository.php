@@ -2235,13 +2235,51 @@ class SihosExternalRepository
         $stmt->execute([$codiInst, $codiDocuNota, $numeDocuNota, $nota['FechDocu']]);
         $lineasNota = $stmt->fetchAll();
 
-        $facturaCodiDocu = $lineasNota !== [] ? $lineasNota[0]['TiDoRefe'] : null;
-        $facturaNumeDocu = $lineasNota !== [] ? $lineasNota[0]['NuDoRefe'] : null;
+        $grupos = [];
+        foreach ($lineasNota as $ln) {
+            $grupos[$ln['TiDoRefe'] . '|' . $ln['NuDoRefe']][] = $ln;
+        }
 
         $emparejamientos = [];
-        if ($lineasNota !== [] && $facturaCodiDocu !== null && $this->haySaldoClase3EnFactura($codiInst, $facturaCodiDocu, $facturaNumeDocu, $codiDocuNota, $numeDocuNota)) {
+        foreach ($grupos as $grupo) {
+            $porFactura = $this->emparejarLineasDeFactura($codiInst, $codiDocuNota, $numeDocuNota, $grupo);
+            if ($porFactura === null) {
+                $emparejamientos = null;
+                break;
+            }
+            $emparejamientos = array_merge($emparejamientos, $porFactura);
+        }
+
+        return [
+            'Anulado' => (int)$nota['Anulado'],
+            'FechDocu' => (string)$nota['FechDocu'],
+            'TiDoTerc' => $nota['TiDoTerc'],
+            'NuDoTerc' => $nota['NuDoTerc'],
+            'CodiCent' => $nota['CodiCent'],
+            'FacturaCodiDocu' => $lineasNota !== [] ? $lineasNota[0]['TiDoRefe'] : null,
+            'FacturaNumeDocu' => $lineasNota !== [] ? $lineasNota[0]['NuDoRefe'] : null,
+            'Emparejamientos' => $emparejamientos,
+        ];
+    }
+
+    /**
+     * Empareja las líneas de una nota que referencian UNA misma factura contra
+     * sus cuentas de ingreso. Una NCC puede consolidar varias facturas, y cada
+     * grupo se resuelve solo contra las cuentas de su propia factura.
+     *
+     * @param list<array<string,mixed>> $lineasNota
+     * @return list<array<string,mixed>>|null
+     */
+    private function emparejarLineasDeFactura(string $codiInst, string $codiDocuNota, string $numeDocuNota, array $lineasNota): ?array
+    {
+        $facturaCodiDocu = $lineasNota[0]['TiDoRefe'];
+        $facturaNumeDocu = $lineasNota[0]['NuDoRefe'];
+
+
+        $emparejamientos = [];
+        if ($this->haySaldoClase3EnFactura($codiInst, $facturaCodiDocu, $facturaNumeDocu, $codiDocuNota, $numeDocuNota)) {
             $emparejamientos = null;
-        } elseif ($lineasNota !== [] && $facturaCodiDocu !== null) {
+        } else {
             $stmt = $this->connect()->prepare(
                 "SELECT CodiCont, Valor FROM DetaCont
                  WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?
@@ -2389,16 +2427,7 @@ class SihosExternalRepository
             }
         }
 
-        return [
-            'Anulado' => (int)$nota['Anulado'],
-            'FechDocu' => (string)$nota['FechDocu'],
-            'TiDoTerc' => $nota['TiDoTerc'],
-            'NuDoTerc' => $nota['NuDoTerc'],
-            'CodiCent' => $nota['CodiCent'],
-            'FacturaCodiDocu' => $facturaCodiDocu,
-            'FacturaNumeDocu' => $facturaNumeDocu,
-            'Emparejamientos' => $emparejamientos,
-        ];
+        return $emparejamientos;
     }
 
     /**
