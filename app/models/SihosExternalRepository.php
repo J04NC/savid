@@ -2281,7 +2281,7 @@ class SihosExternalRepository
             $emparejamientos = null;
         } else {
             $stmt = $this->connect()->prepare(
-                "SELECT CodiCont, Valor FROM DetaCont
+                "SELECT CodiCont, Valor, CentCost FROM DetaCont
                  WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?
                    AND CodiCont NOT LIKE '13%' AND CodiCont NOT LIKE '14%' AND CodiCont NOT LIKE '8%'
                    AND CodiCont NOT LIKE '3%'"
@@ -2358,35 +2358,49 @@ class SihosExternalRepository
                 } else {
                     // Sin distribución todavía: toda línea de la nota va
                     // directo hacia la única cuenta de ingreso de la
-                    // factura, con el mismo CentCost que ya traía la línea.
-                    foreach ($lineasNota as $ln) {
-                        $emparejamientos[] = [
-                            'ConsDeta' => (int)$ln['ConsDeta'],
-                            'CodiContOrigen' => $ln['CodiCont'],
-                            'TiDoTerc' => $ln['TiDoTerc'],
-                            'NuDoTerc' => $ln['NuDoTerc'],
-                            'TiDoRefe' => $ln['TiDoRefe'],
-                            'NuDoRefe' => $ln['NuDoRefe'],
-                            'Valor' => (float)$ln['Valor'],
-                            'Destinos' => [[
-                                'CodiCont' => $cuentaIngreso,
+                    // factura, con el centro de costo que la factura tenga
+                    // en esa cuenta — nunca el de la nota, porque no se
+                    // puede cancelar en la factura un centro de costo que
+                    // ella no tiene. Si esa cuenta aparece en la factura con
+                    // más de un centro de costo distinto, no hay forma de
+                    // saber cuál usar sin mirar el valor, así que se
+                    // rechaza.
+                    $centCostsFactura = array_values(array_unique(array_column($lineasFactura, 'CentCost')));
+
+                    if (count($centCostsFactura) > 1) {
+                        $emparejamientos = null;
+                    } else {
+                        $centCostDestino = $centCostsFactura[0] ?? null;
+                        foreach ($lineasNota as $ln) {
+                            $emparejamientos[] = [
+                                'ConsDeta' => (int)$ln['ConsDeta'],
+                                'CodiContOrigen' => $ln['CodiCont'],
+                                'TiDoTerc' => $ln['TiDoTerc'],
+                                'NuDoTerc' => $ln['NuDoTerc'],
+                                'TiDoRefe' => $ln['TiDoRefe'],
+                                'NuDoRefe' => $ln['NuDoRefe'],
                                 'Valor' => (float)$ln['Valor'],
-                                'CentCost' => $ln['CentCost'],
-                            ]],
-                        ];
+                                'Destinos' => [[
+                                    'CodiCont' => $cuentaIngreso,
+                                    'Valor' => (float)$ln['Valor'],
+                                    'CentCost' => $centCostDestino,
+                                ]],
+                            ];
+                        }
                     }
                 }
             } else {
                 // Factura con varias cuentas de ingreso ya desglosadas: la
                 // única forma de saber cuál le corresponde a cada línea de
-                // la nota es el valor exacto — agrupa por valor absoluto
-                // (redondeado a centavos) para detectar de una vez tanto "no
-                // hay candidato" como "hay más de uno" (ambiguo) en
-                // cualquiera de los 2 lados.
+                // la nota es el valor exacto. Si varias líneas comparten el
+                // mismo valor, se desambigua primero por centro de costo
+                // igual; lo que quede, si sobra exactamente una de cada
+                // lado, se empareja por eliminación. Si sigue sobrando más
+                // de una, es ambiguo de verdad.
                 $porValorFactura = [];
                 foreach ($lineasFactura as $lf) {
                     $clave = number_format(abs((float)$lf['Valor']), 2, '.', '');
-                    $porValorFactura[$clave][] = $lf['CodiCont'];
+                    $porValorFactura[$clave][] = $lf;
                 }
                 $porValorNota = [];
                 foreach ($lineasNota as $ln) {
@@ -2394,10 +2408,49 @@ class SihosExternalRepository
                     $porValorNota[$clave][] = $ln;
                 }
 
+                $normCc = static fn ($cc): string => trim((string)($cc ?? ''));
+
+                $destinoPorConsDeta = [];
                 $ambiguo = false;
-                foreach ($porValorNota as $clave => $lineasConEseValor) {
-                    $candidatos = $porValorFactura[$clave] ?? [];
-                    if (count($lineasConEseValor) !== 1 || count($candidatos) !== 1) {
+                foreach ($porValorNota as $clave => $notasDelValor) {
+                    $facturasDelValor = $porValorFactura[$clave] ?? [];
+                    if (count($notasDelValor) !== count($facturasDelValor)) {
+                        $ambiguo = true;
+                        break;
+                    }
+
+                    // Pase 1: empareja por (valor ya igual, mismo centro de
+                    // costo), solo cuando ese centro de costo es único de
+                    // cada lado dentro de este grupo de valor.
+                    $porCcNota = [];
+                    foreach ($notasDelValor as $i => $ln) {
+                        $porCcNota[$normCc($ln['CentCost'])][] = $i;
+                    }
+                    $porCcFactura = [];
+                    foreach ($facturasDelValor as $j => $lf) {
+                        $porCcFactura[$normCc($lf['CentCost'])][] = $j;
+                    }
+
+                    $usadosNota = [];
+                    $usadosFactura = [];
+                    foreach ($porCcNota as $cc => $idxsNota) {
+                        $idxsFactura = $porCcFactura[$cc] ?? [];
+                        if (count($idxsNota) === 1 && count($idxsFactura) === 1) {
+                            $destinoPorConsDeta[(int)$notasDelValor[$idxsNota[0]]['ConsDeta']] = $facturasDelValor[$idxsFactura[0]];
+                            $usadosNota[] = $idxsNota[0];
+                            $usadosFactura[] = $idxsFactura[0];
+                        }
+                    }
+
+                    // Pase 2: lo que no se emparejó por centro de costo, si
+                    // sobra exactamente una línea de cada lado, se empareja
+                    // por eliminación (ya sabemos que el valor coincide).
+                    $sobranNota = array_values(array_diff(array_keys($notasDelValor), $usadosNota));
+                    $sobranFactura = array_values(array_diff(array_keys($facturasDelValor), $usadosFactura));
+
+                    if (count($sobranNota) === 1 && count($sobranFactura) === 1) {
+                        $destinoPorConsDeta[(int)$notasDelValor[$sobranNota[0]]['ConsDeta']] = $facturasDelValor[$sobranFactura[0]];
+                    } elseif (count($sobranNota) > 0) {
                         $ambiguo = true;
                         break;
                     }
@@ -2407,7 +2460,7 @@ class SihosExternalRepository
                     $emparejamientos = null;
                 } else {
                     foreach ($lineasNota as $ln) {
-                        $clave = number_format(abs((float)$ln['Valor']), 2, '.', '');
+                        $destino = $destinoPorConsDeta[(int)$ln['ConsDeta']];
                         $emparejamientos[] = [
                             'ConsDeta' => (int)$ln['ConsDeta'],
                             'CodiContOrigen' => $ln['CodiCont'],
@@ -2417,16 +2470,15 @@ class SihosExternalRepository
                             'NuDoRefe' => $ln['NuDoRefe'],
                             'Valor' => (float)$ln['Valor'],
                             'Destinos' => [[
-                                'CodiCont' => $porValorFactura[$clave][0],
+                                'CodiCont' => $destino['CodiCont'],
                                 'Valor' => (float)$ln['Valor'],
-                                'CentCost' => $ln['CentCost'],
+                                'CentCost' => $destino['CentCost'],
                             ]],
                         ];
                     }
                 }
             }
         }
-
         return $emparejamientos;
     }
 
