@@ -241,6 +241,7 @@ $sihosConcluirGlosaJsV = is_readable($assetSihosConcluirGlosa) ? (int)filemtime(
                             <th style="text-align:right;">Valor glosa</th>
                             <th style="text-align:right;">En curso (calc.)</th>
                             <th style="text-align:right;">Días</th>
+                            <th style="text-align:right;">Nro. anotaciones</th>
                             <th style="text-align:right;">Cuenta 8333</th>
                             <th style="text-align:right;">Cuenta 8333 NIIF</th>
                             <th style="text-align:right;">En curso (SIHOS)</th>

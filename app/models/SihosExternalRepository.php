@@ -2584,7 +2584,8 @@ class SihosExternalRepository
                    SUM(CASE WHEN ag.TipoDeta = '2' AND ag.TipoCond = 2 THEN ag.ValoAcep ELSE 0 END)
                      + SUM(CASE WHEN ag.TipoDeta = '2' AND ag.TipoCond = 1 THEN ag.ValoRech ELSE 0 END)
                      + SUM(CASE WHEN ag.TipoDeta = '1' AND ag.TipoCond = 1 THEN ag.ValoRech ELSE 0 END) AS AcepEPS,
-                   MAX(ag.FechAnot) AS UltimaFechaAnot
+                   MAX(ag.FechAnot) AS UltimaFechaAnot,
+                   COUNT(*) AS NumAnotaciones
             FROM AnotGlos ag
             WHERE ag.CodiInst = ?
               AND ag.CodiDocu IN ({$phCodigos})
@@ -2601,6 +2602,13 @@ class SihosExternalRepository
                 'AcepIPS' => (float)$fila['AcepIPS'],
                 'AcepEPS' => (float)$fila['AcepEPS'],
                 'UltimaFechaAnot' => $fila['UltimaFechaAnot'],
+                // Total de anotaciones (AnotGlos) de la glosa, sean de
+                // aceptación IPS/EPS, rechazo o informativas — sin filtrar
+                // por TipoCond/TipoDeta, solo las mismas condiciones
+                // Causado/Anulado/FechAnot<=corte que el resto de esta
+                // consulta (pedido del usuario 2026-10-07, columna "Nro.
+                // Anotaciones" en sihos/auditoriaGlosa).
+                'NumAnotaciones' => (int)$fila['NumAnotaciones'],
             ];
         }
 

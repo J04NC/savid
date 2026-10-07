@@ -335,7 +335,7 @@ class SihosController
             fwrite($out, "\xEF\xBB\xBF");
             fputcsv($out, [
                 'Tipo usuario', 'Tercero', 'Administradora', 'Fecha glosa', 'Glosa', 'Factura',
-                'Saldo cartera', 'Valor glosa', 'En curso (calc.)', 'Dias', 'Cuenta 8333',
+                'Saldo cartera', 'Valor glosa', 'En curso (calc.)', 'Dias', 'Nro. anotaciones', 'Cuenta 8333',
                 'Cuenta 8333 NIIF', 'En curso (SIHOS)', 'Acep. IPS', 'Acep. EPS',
             ], ';');
 

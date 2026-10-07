@@ -180,10 +180,11 @@ class SihosAuditoriaGlosaService
                 $claveGlosa = $fila['CodiDocu'] . '-' . $fila['NumeDocu'];
                 $claveFactura = $fila['TiDoRefe'] . '-' . $fila['NuDoRefe'];
 
-                $anot = $anotaciones[$claveGlosa] ?? ['AcepIPS' => 0.0, 'AcepEPS' => 0.0, 'UltimaFechaAnot' => null];
+                $anot = $anotaciones[$claveGlosa] ?? ['AcepIPS' => 0.0, 'AcepEPS' => 0.0, 'UltimaFechaAnot' => null, 'NumAnotaciones' => 0];
                 $valorGlosa = (float)$fila['Valor'];
                 $acepIPS = $anot['AcepIPS'];
                 $acepEPS = $anot['AcepEPS'];
+                $numAnotaciones = $anot['NumAnotaciones'];
                 $enCurso = round($valorGlosa - $acepIPS - $acepEPS, 2);
 
                 if ($soloEnCurso && abs($enCurso) < 0.005) {
@@ -228,6 +229,7 @@ class SihosAuditoriaGlosaService
                     'Refe' => $fila['TiDoRefe'] . $fila['NuDoRefe'],
                     'Saldo' => $saldo,
                     'Dias' => $diasEnCurso,
+                    'NumAnotaciones' => $numAnotaciones,
                     'Valor' => $valorGlosa,
                     'EnCurso' => $enCurso,
                     'Valor8333' => $valor8333,
@@ -339,15 +341,16 @@ class SihosAuditoriaGlosaService
         7 => 'Valor',
         8 => 'EnCurso',
         9 => 'Dias',
-        10 => 'Valor8333',
-        11 => 'Valor8333niif',
-        12 => 'ValorDF',
-        13 => 'AcepIPS',
-        14 => 'AcepEPS',
+        10 => 'NumAnotaciones',
+        11 => 'Valor8333',
+        12 => 'Valor8333niif',
+        13 => 'ValorDF',
+        14 => 'AcepIPS',
+        15 => 'AcepEPS',
     ];
 
     private const COLUMNAS_NUMERICAS = [
-        'NumeDocu', 'Saldo', 'Valor', 'EnCurso', 'Dias', 'Valor8333', 'Valor8333niif', 'ValorDF', 'AcepIPS', 'AcepEPS',
+        'NumeDocu', 'Saldo', 'Valor', 'EnCurso', 'Dias', 'NumAnotaciones', 'Valor8333', 'Valor8333niif', 'ValorDF', 'AcepIPS', 'AcepEPS',
     ];
 
     /**
@@ -459,6 +462,7 @@ class SihosAuditoriaGlosaService
             self::formatoMoneda($fila['Valor']),
             self::formatoMoneda($fila['EnCurso']),
             (string)(int)$fila['Dias'],
+            (string)(int)$fila['NumAnotaciones'],
             self::formatoMoneda($fila['Valor8333']),
             self::formatoMoneda($fila['Valor8333niif']),
             self::formatoMoneda($fila['ValorDF']),
@@ -493,6 +497,7 @@ class SihosAuditoriaGlosaService
                 $fila['Valor'],
                 $fila['EnCurso'],
                 $fila['Dias'],
+                $fila['NumAnotaciones'],
                 $fila['Valor8333'],
                 $fila['Valor8333niif'],
                 $fila['ValorDF'],
