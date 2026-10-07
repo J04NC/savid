@@ -333,6 +333,16 @@ class SihosController
 
             $out = fopen('php://output', 'w');
             fwrite($out, "\xEF\xBB\xBF");
+            // "sep=;" como primera línea: Excel la reconoce como directiva de
+            // delimitador explícita al abrir por doble clic, sin importar el
+            // separador de lista regional configurado en Windows (que de
+            // otro modo puede ser coma, no punto y coma, y hace que Excel
+            // "amontone" toda la fila en una sola celda a partir del primer
+            // campo con una coma real dentro, como un nombre de
+            // administradora). El archivo sigue siendo CSV válido con ';'
+            // para cualquier otro consumidor — esta línea es ignorada por
+            // fgetcsv/parsers estándar, es una convención propia de Excel.
+            fwrite($out, "sep=;\r\n");
             fputcsv($out, [
                 'Tipo usuario', 'Tercero', 'Administradora', 'Fecha glosa', 'Glosa', 'Factura',
                 'Saldo cartera', 'Valor glosa', 'En curso (calc.)', 'Dias', 'Nro. anotaciones', 'Cuenta 8333',
