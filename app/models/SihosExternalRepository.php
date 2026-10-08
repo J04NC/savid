@@ -4430,10 +4430,42 @@ where e.CodiInst=:codiInst";
     }
 
     /**
+     * Nombres de centro de costo (CentCost.NombCent) — catálogo sin
+     * CodiInst (no está particionado por institución, verificado con datos
+     * reales). Usado solo del lado contable (DetaCont) del modal "Auditar
+     * referencias"; del lado presupuestal (DetaPlan) ese campo siempre
+     * queda en 0, no aporta nada (confirmado por el usuario).
+     *
+     * @param list<?string> $codigosCentCost
+     * @return array<string,string> CodiCent => NombCent
+     */
+    private function resolverNombresCentrosCosto(array $codigosCentCost): array
+    {
+        $codigosCentCost = array_values(array_unique(array_filter(
+            $codigosCentCost,
+            static fn (?string $c): bool => $c !== null && trim($c) !== ''
+        )));
+        if ($codigosCentCost === []) {
+            return [];
+        }
+
+        $in = implode(',', array_fill(0, count($codigosCentCost), '?'));
+        $stmt = $this->connect()->prepare("SELECT CodiCent, NombCent FROM CentCost WHERE CodiCent IN ($in)");
+        $stmt->execute($codigosCentCost);
+
+        $resultado = [];
+        foreach ($stmt->fetchAll() as $f) {
+            $resultado[$f['CodiCent']] = (string)$f['NombCent'];
+        }
+
+        return $resultado;
+    }
+
+    /**
      * Líneas DetaCont propias de un documento puntual (auditoría de
      * referencias) — sin límite de fecha.
      *
-     * @return list<array{ConsDeta:int,CodiCont:string,NombCuen:?string,Valor:float,CentCost:?string,TiDoTerc:?string,NuDoTerc:?string,NombTerc:?string,TiDoRefe:?string,NuDoRefe:?string}>
+     * @return list<array{ConsDeta:int,CodiCont:string,NombCuen:?string,Valor:float,CentCost:?string,NombCent:?string,TiDoTerc:?string,NuDoTerc:?string,NombTerc:?string,TiDoRefe:?string,NuDoRefe:?string}>
      */
     public function fetchDetaContPropio(string $codiDocu, string $numeDocu): array
     {
@@ -4450,9 +4482,10 @@ where e.CodiInst=:codiInst";
             static fn (array $f): array => ['tipo' => $f['TiDoTerc'], 'numero' => $f['NuDoTerc']],
             $filas
         ));
+        $nombresCentrosCosto = $this->resolverNombresCentrosCosto(array_column($filas, 'CentCost'));
 
         return array_map(
-            static function (array $f) use ($nombresCuentas, $nombresTerceros): array {
+            static function (array $f) use ($nombresCuentas, $nombresTerceros, $nombresCentrosCosto): array {
                 $claveTercero = $f['TiDoTerc'] . '-' . $f['NuDoTerc'];
 
                 return [
@@ -4461,6 +4494,7 @@ where e.CodiInst=:codiInst";
                     'NombCuen' => $nombresCuentas[$f['CodiCont']] ?? null,
                     'Valor' => (float)$f['Valor'],
                     'CentCost' => $f['CentCost'],
+                    'NombCent' => $nombresCentrosCosto[$f['CentCost']] ?? null,
                     'TiDoTerc' => $f['TiDoTerc'],
                     'NuDoTerc' => $f['NuDoTerc'],
                     'NombTerc' => $nombresTerceros[$claveTercero] ?? null,
@@ -4515,7 +4549,7 @@ where e.CodiInst=:codiInst";
      * Sin límite de fecha; búsqueda por índice exacto TiDoRefe/NuDoRefe,
      * normalmente pocos documentos vinculados.
      *
-     * @return list<array{CodiDocu:string,NumeDocu:string,FechDocu:string,TipoUsua:?string,ValoTota:float,Anulado:int,Causado:int,lineas:list<array{ConsDeta:int,CodiCont:string,NombCuen:?string,Valor:float,TiDoTerc:?string,NuDoTerc:?string,NombTerc:?string}>,presupuesto:list<array{ConsDeta:int,CodiPlan:string,NombPlan:?string,Valor:float,CentCost:?string}>}>
+     * @return list<array{CodiDocu:string,NumeDocu:string,FechDocu:string,TipoUsua:?string,ValoTota:float,Anulado:int,Causado:int,lineas:list<array{ConsDeta:int,CodiCont:string,NombCuen:?string,Valor:float,CentCost:?string,NombCent:?string,TiDoTerc:?string,NuDoTerc:?string,NombTerc:?string}>,presupuesto:list<array{ConsDeta:int,CodiPlan:string,NombPlan:?string,Valor:float,CentCost:?string}>}>
      */
     public function fetchDocumentosQueReferencian(string $codiDocu, string $numeDocu): array
     {
@@ -4527,7 +4561,7 @@ where e.CodiInst=:codiInst";
         // una "corrección", es la línea original). Mismo criterio ya usado
         // en fetchClavesConAjustePrevio().
         $stmt = $this->connect()->prepare(
-            'SELECT dc.ConsDeta, dc.CodiCont, dc.Valor, dc.TiDoTerc, dc.NuDoTerc,
+            'SELECT dc.ConsDeta, dc.CodiCont, dc.Valor, dc.CentCost, dc.TiDoTerc, dc.NuDoTerc,
                     ec.CodiDocu, ec.NumeDocu, ec.FechDocu, ec.TipoUsua, ec.ValoTota, ec.Anulado, ec.Causado
              FROM DetaCont dc
              INNER JOIN EncaCont ec ON ec.CodiInst = dc.CodiInst AND ec.CodiDocu = dc.CodiDocu AND ec.NumeDocu = dc.NumeDocu
@@ -4558,6 +4592,7 @@ where e.CodiInst=:codiInst";
                 'ConsDeta' => (int)$f['ConsDeta'],
                 'CodiCont' => $f['CodiCont'],
                 'Valor' => (float)$f['Valor'],
+                'CentCost' => $f['CentCost'],
                 'TiDoTerc' => $f['TiDoTerc'],
                 'NuDoTerc' => $f['NuDoTerc'],
             ];
@@ -4598,10 +4633,12 @@ where e.CodiInst=:codiInst";
         // (por línea de presupuesto), resueltos en batch.
         $todosLosCodigosCuenta = [];
         $todosLosCodigosRubro = [];
+        $todosLosCodigosCentCost = [];
         $paresTercero = [];
         foreach ($porDocumento as $vinculado) {
             foreach ($vinculado['lineas'] as $linea) {
                 $todosLosCodigosCuenta[] = $linea['CodiCont'];
+                $todosLosCodigosCentCost[] = $linea['CentCost'];
                 $paresTercero[] = ['tipo' => $linea['TiDoTerc'], 'numero' => $linea['NuDoTerc']];
             }
             foreach ($vinculado['presupuesto'] as $p) {
@@ -4611,10 +4648,12 @@ where e.CodiInst=:codiInst";
         $nombresCuentas = $this->resolverNombresCuentas($todosLosCodigosCuenta);
         $nombresRubros = $this->resolverNombresRubros($todosLosCodigosRubro);
         $nombresTerceros = $this->resolverNombresTerceros($paresTercero);
+        $nombresCentrosCosto = $this->resolverNombresCentrosCosto($todosLosCodigosCentCost);
 
         foreach ($porDocumento as $clave => &$vinculado) {
             foreach ($vinculado['lineas'] as &$linea) {
                 $linea['NombCuen'] = $nombresCuentas[$linea['CodiCont']] ?? null;
+                $linea['NombCent'] = $nombresCentrosCosto[$linea['CentCost']] ?? null;
                 $claveTercero = $linea['TiDoTerc'] . '-' . $linea['NuDoTerc'];
                 $linea['NombTerc'] = $nombresTerceros[$claveTercero] ?? null;
             }

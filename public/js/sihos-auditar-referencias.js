@@ -51,6 +51,13 @@
         return texto;
     }
 
+    function centroCosto(codiCent, nombCent) {
+        if (!codiCent) return '—';
+        var texto = escapeHtml(codiCent);
+        if (nombCent) texto += ' - ' + escapeHtml(nombCent);
+        return texto;
+    }
+
     function resumen(j) {
         var e = j.encabezado;
         var r = j.resumenPropio;
@@ -129,6 +136,7 @@
                     '<td>' + fecha(g.FechDocu) + '</td>' +
                     '<td>' + nombreTercero(l.TiDoTerc, l.NuDoTerc, l.NombTerc) + '</td>' +
                     '<td>' + nombreCuenta(l.CodiCont, l.NombCuen) + '</td>' +
+                    '<td>' + centroCosto(l.CentCost, l.NombCent) + '</td>' +
                     '<td style="text-align:right">' + debito + '</td>' +
                     '<td style="text-align:right">' + credito + '</td>' +
                     (mostrarReferencia ? '<td>' + referencia + '</td>' : '') +
@@ -136,11 +144,11 @@
                     '</tr>';
             });
         });
-        filas += '<tr><td colspan="4" style="text-align:right"><strong>Total</strong></td><td style="text-align:right"><strong>' +
+        filas += '<tr><td colspan="5" style="text-align:right"><strong>Total</strong></td><td style="text-align:right"><strong>' +
             money(totalDebito) + '</strong></td><td style="text-align:right"><strong>' + money(totalCredito) + '</strong></td>' +
             (mostrarReferencia ? '<td></td>' : '') + '<td></td></tr>';
         var thReferencia = mostrarReferencia ? '<th>Documento referencia</th>' : '';
-        return '<table class="seguridad-table no-datatable"><thead><tr><th>Documento</th><th>Fecha</th><th>Tercero</th><th>Cuenta</th><th>Débito</th><th>Crédito</th>' +
+        return '<table class="seguridad-table no-datatable"><thead><tr><th>Documento</th><th>Fecha</th><th>Tercero</th><th>Cuenta</th><th>Centro de costo</th><th>Débito</th><th>Crédito</th>' +
             thReferencia + '<th>Estado</th></tr></thead><tbody>' + filas + '</tbody></table>';
     }
 
