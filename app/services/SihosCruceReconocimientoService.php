@@ -368,6 +368,21 @@ class SihosCruceReconocimientoService
         string $fechaFin
     ): array {
         $codigosNotaGenerica = $repository->resolveCodigosDocumentoPorAplicacion(self::DOCU_APLI_NOTA_GENERICA);
+        // Variante SIN exigir ManePres=1, solo para el universo de
+        // documentos que pueden atribuir CONTABILIDAD (no presupuesto) —
+        // "Nota Contabilidad" (p. ej. CodiDocu='NC') suele tener ManePres=0
+        // a propósito (correcciones puramente contables, nunca tocan
+        // DetaPlan: ver crearNotaAjusteVigenciaActual() de la sección 3c y
+        // crearNotaAjusteVigenciaAnterior() de la 5b). Con el filtro
+        // ManePres=1 de $codigosNotaGenerica, esos documentos quedaban
+        // fuera de la atribución de contabilidad y de "Cuenta real" más
+        // abajo, mostrando cada corrección como una fila aparte sin
+        // netearse contra su factura — verificado con datos reales: 688 de
+        // 801 facturas en "Detalle de diferencias a revisar" tenían al
+        // menos un NC referenciándolas, cada NC apareciendo también como su
+        // propia fila fantasma con presupuesto=0 y su contabilidad entera
+        // como "diferencia".
+        $codigosNotaGenericaContable = $repository->resolveCodigosDocumentoPorAplicacionContable(self::DOCU_APLI_NOTA_GENERICA);
         $codigosDac = $repository->resolveCodigosDocumentoPorAplicacion(self::DOCU_APLI_DAC);
         $codigosReconocimientoTesoreria = $repository->resolveCodigosDocumentoPorAplicacionSinFiltroPresupuesto(
             self::DOCU_APLI_RECONOCIMIENTO_TESORERIA
@@ -425,6 +440,10 @@ class SihosCruceReconocimientoService
         );
 
         $codigosVinculados = array_values(array_unique([...$codigosGlosa, ...$codigosNota, ...$codigosNotaGenerica, ...$codigosDac]));
+        // Usada SOLO para atribución de contabilidad y "Cuenta real" (ver
+        // docblock de resolveCodigosDocumentoPorAplicacionContable()) — la
+        // atribución de presupuesto más abajo sigue usando $codigosVinculados.
+        $codigosVinculadosContabilidad = array_values(array_unique([...$codigosGlosa, ...$codigosNota, ...$codigosNotaGenericaContable, ...$codigosDac]));
 
         // Presupuesto (caso simple): DetaPlan NO tiene referencia por línea
         // (TipoDoRe/NumeDoRe no se usan en la práctica — verificado), así
@@ -527,7 +546,7 @@ class SihosCruceReconocimientoService
         // vinculado (para no contarlo dos veces); lo que no se atribuyó a
         // ninguna factura en rango se queda como saldo propio del vinculado.
         $atribucionesContabilidad = $repository->fetchAtribucionContabilidadVinculada(
-            $codigosVinculados,
+            $codigosVinculadosContabilidad,
             $codigosFactura,
             $fechaIni,
             $fechaFin
@@ -574,7 +593,7 @@ class SihosCruceReconocimientoService
             $codigosFactura,
             $fechaIni,
             $fechaFin,
-            $codigosVinculados
+            $codigosVinculadosContabilidad
         );
 
         $claves = array_unique([...array_keys($porPresupuesto), ...array_keys($porContabilidad)]);

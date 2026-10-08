@@ -131,6 +131,40 @@ class SihosExternalRepository
     }
 
     /**
+     * Igual que resolveCodigosDocumentoPorAplicacion() pero exigiendo SOLO
+     * ManeCont=1 (no ManePres=1) — para el universo de documentos que
+     * pueden atribuir CONTABILIDAD a una factura, no presupuesto. Necesario
+     * porque "Nota Contabilidad" (DocuApli=3, p. ej. CodiDocu='NC') suele
+     * tener ManePres=0 a propósito (son correcciones puramente contables,
+     * nunca tocan DetaPlan) — con el filtro ManePres=1 original, esos
+     * documentos quedaban invisibles para la atribución de contabilidad y
+     * para "Cuenta real" en buildDiferenciasPresupuestoContabilidad(),
+     * dejando diferencias ya corregidas (p. ej. por la reclasificación de la
+     * sección 3c) mostrándose como pendientes para siempre. Verificado con
+     * datos reales: NC (empresa 17) tiene ManeCont=1, ManePres=0 — y el 86%
+     * de las facturas en el "Detalle de diferencias a revisar" (688 de 801)
+     * tienen al menos un documento NC referenciándolas.
+     *
+     * @param int[] $docuAplis
+     * @return string[]
+     */
+    public function resolveCodigosDocumentoPorAplicacionContable(array $docuAplis): array
+    {
+        if ($docuAplis === []) {
+            return [];
+        }
+
+        $ph = implode(',', array_fill(0, count($docuAplis), '?'));
+        $stmt = $this->connect()->prepare(
+            "SELECT DISTINCT CodiDocu FROM MaesDocu
+             WHERE DocuApli IN ({$ph}) AND ManeCont = 1 AND CodiInst = ?"
+        );
+        $stmt->execute([...$docuAplis, $this->codiInst()]);
+
+        return array_column($stmt->fetchAll(), 'CodiDocu');
+    }
+
+    /**
      * MAPA DE ESQUEMA — desglose por ítem de una glosa (cargo/medicamento/
      * insumo puntual), investigado en vivo el 2026-09-16 porque no existe
      * documentación ni código fuente confiable de esto (el mirror local en
