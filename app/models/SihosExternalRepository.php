@@ -2327,16 +2327,27 @@ class SihosExternalRepository
             if (count($cuentasFacturaUnicas) === 1) {
                 $cuentaIngreso = $cuentasFacturaUnicas[0];
 
-                // ¿Ya existe un documento vinculado (no la factura misma)
-                // que debite esta misma cuenta? Eso es la señal de que ya
-                // hubo una distribución (p. ej. liquidación de capita).
+                // ¿Ya existe un documento vinculado (no la factura misma, ni
+                // esta nota) que debite esta misma cuenta? Eso es la señal de
+                // que ya hubo una distribución (p. ej. liquidación de
+                // capita). Excluir también la propia nota es obligatorio: si
+                // esta función ya se corrió antes sobre ella, sus líneas
+                // quedaron en la cuenta de ingreso real referenciando la
+                // factura con Valor>0 — sin esta exclusión, una segunda
+                // corrida se detecta a sí misma como "distribución" y reparte
+                // sus propias líneas de cartera de vuelta sobre sí misma.
                 $stmt = $this->connect()->prepare(
                     "SELECT DISTINCT dc.CodiDocu, dc.NumeDocu
                      FROM DetaCont dc
                      WHERE dc.CodiInst = ? AND dc.TiDoRefe = ? AND dc.NuDoRefe = ? AND dc.CodiCont = ? AND dc.Valor > 0
+                       AND NOT (dc.CodiDocu = ? AND dc.NumeDocu = ?)
                        AND NOT (dc.CodiDocu = ? AND dc.NumeDocu = ?)"
                 );
-                $stmt->execute([$codiInst, $facturaCodiDocu, $facturaNumeDocu, $cuentaIngreso, $facturaCodiDocu, $facturaNumeDocu]);
+                $stmt->execute([
+                    $codiInst, $facturaCodiDocu, $facturaNumeDocu, $cuentaIngreso,
+                    $facturaCodiDocu, $facturaNumeDocu,
+                    $codiDocuNota, $numeDocuNota,
+                ]);
                 $documentosDistribucion = $stmt->fetchAll();
 
                 if (count($documentosDistribucion) > 1) {
