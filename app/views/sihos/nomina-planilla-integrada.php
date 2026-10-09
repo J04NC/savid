@@ -5,9 +5,13 @@
 /** @var ?array $archivoInfo */
 /** @var string $codiAno */
 /** @var string $codiMes */
+/** @var bool $puedeGuardar */
+
+$assetSihosPlanillaIntegrada = BASE_PATH . '/public/js/sihos-nomina-planilla-integrada-correccion.js';
+$sihosPlanillaIntegradaJsV = is_readable($assetSihosPlanillaIntegrada) ? (int)filemtime($assetSihosPlanillaIntegrada) : time();
 ?>
 
-<div class="module-container auditoria-page">
+<div class="module-container auditoria-page" data-sihos-planilla-integrada data-puede-guardar="<?= $puedeGuardar ? '1' : '0' ?>">
 
     <div class="crud-toolbar auditoria-toolbar">
         <div class="auditoria-toolbar-title">
@@ -95,11 +99,20 @@
 
             $totalConceptosEmpleado = 0;
             $totalDiferenciasEmpleado = 0;
+            $totalAplicablesValor = 0;
+            $totalAplicablesTercero = 0;
             foreach ($empleados as $emp) {
                 foreach ($emp['conceptos'] as $c) {
                     $totalConceptosEmpleado++;
                     if ($c['estado'] === 'diferencia') {
                         $totalDiferenciasEmpleado++;
+                    }
+                    $hayLineaAbierta = count(array_filter($c['lineas_sihos'], static fn (array $l): bool => !$l['causado'])) > 0;
+                    if ($c['concepto'] === 'arl' && $c['estado'] === 'diferencia' && $hayLineaAbierta) {
+                        $totalAplicablesValor++;
+                    }
+                    if ($c['tercero_estado'] === 'diferencia' && $c['tercero_archivo_nit'] !== null && $hayLineaAbierta) {
+                        $totalAplicablesTercero++;
                     }
                 }
             }
@@ -119,10 +132,16 @@
 
             <p class="field-note">
                 <?= count($empleados) ?> empleado(s), <?= $totalConceptosEmpleado ?> comparaciones de concepto —
-                <?= $totalDiferenciasEmpleado ?> con diferencia frente a SIHOS.
+                <?= $totalDiferenciasEmpleado ?> con diferencia de valor frente a SIHOS
+                (<?= $totalAplicablesValor ?> de ARL se pueden corregir directamente aquí)
+                y <?= $totalAplicablesTercero ?> con diferencia de tercero (AFP/EPS/CCF/ARL) corregibles aquí.
                 Las diferencias de unos $100 por concepto son el margen de redondeo normal entre PILA y SIHOS ya
                 documentado; diferencias mayores, o marcadas como inconsistencia interna del archivo, merecen revisión
-                aparte.
+                aparte. Las correcciones de valor de ARL y de tercero son las dos únicas que esta pantalla aplica
+                en SIHOS — pensión/salud/CCF/SENA/ICBF por valor se corrigen desde
+                <a href="?url=sihos/nominaPilaCorreccion&empresa_id=<?= (int)$empresaId ?>">Corrección Nómina (PILA)</a>.
+                Solo se pueden corregir nóminas que aún estén preliminares (sin confirmar/causar) en SIHOS; cuando hay
+                más de una línea sin confirmar para el mismo concepto, se elige automáticamente la de mayor valor.
             </p>
 
             <div class="crud-toolbar auditoria-toolbar" style="margin-top:8px;margin-bottom:0;">
@@ -179,56 +198,108 @@
                 </div>
             </div>
 
-            <?php foreach ($empleados as $emp): ?>
-                <div class="crud-toolbar auditoria-toolbar" style="margin-top:14px;margin-bottom:0;padding-bottom:6px;border-bottom:1px solid var(--border-color, #444);">
-                    <div class="auditoria-toolbar-title">
-                        <h4 class="auditoria-title" style="font-size:14px;">
-                            <?= htmlspecialchars($emp['tipo_docu']) ?> <?= htmlspecialchars($emp['no_id']) ?>
-                            <?php if ($emp['nombre']): ?> — <?= htmlspecialchars($emp['nombre']) ?><?php endif; ?>
-                        </h4>
+            <form id="sihosPlanillaIntegradaCorreccionForm" data-codi-ano="<?= htmlspecialchars($codiAno) ?>" data-codi-mes="<?= htmlspecialchars($codiMes) ?>" data-empresa-id="<?= (int)$empresaId ?>">
+
+                <?php foreach ($empleados as $emp): ?>
+                    <div class="crud-toolbar auditoria-toolbar" style="margin-top:14px;margin-bottom:0;padding-bottom:6px;border-bottom:1px solid var(--border-color, #444);">
+                        <div class="auditoria-toolbar-title">
+                            <h4 class="auditoria-title" style="font-size:14px;">
+                                <?= htmlspecialchars($emp['tipo_docu']) ?> <?= htmlspecialchars($emp['no_id']) ?>
+                                <?php if ($emp['nombre']): ?> — <?= htmlspecialchars($emp['nombre']) ?><?php endif; ?>
+                            </h4>
+                        </div>
                     </div>
-                </div>
-                <div style="overflow:auto;">
-                    <table class="seguridad-table no-datatable" style="white-space:nowrap;width:100%;">
-                        <tbody>
-                            <?php foreach ($emp['conceptos'] as $c): ?>
-                                <?php $et = $etiquetasEstado[$c['estado']]; ?>
-                                <tr>
-                                    <td style="width:90px;"><strong><?= htmlspecialchars($nombreConcepto[$c['concepto']] ?? $c['concepto']) ?></strong></td>
-                                    <td>archivo $<?= number_format($c['suma_archivo'], 0, ',', '.') ?></td>
-                                    <td><?= $c['suma_sihos'] !== null ? 'SIHOS $' . number_format($c['suma_sihos'], 0, ',', '.') : 'sin registro en SIHOS' ?></td>
-                                    <td><?= $c['diferencia'] !== null ? 'diferencia $' . number_format($c['diferencia'], 0, ',', '.') : '' ?></td>
-                                    <td class="sihos-correccion-estado">
-                                        <span style="color:<?= $et['color'] ?>;"><?= $et['texto'] ?></span>
-                                        <?php if ($c['lineas_sihos'] !== []): ?>
-                                            <details style="display:inline;">
-                                                <summary style="display:inline;cursor:pointer;color:var(--link-color,#5aa9ff);">Ver registros en SIHOS</summary>
-                                                <div style="margin-top:6px;padding:8px;background:rgba(255,255,255,0.03);border-radius:6px;">
-                                                    <ul style="margin:0;padding:0 0 0 18px;">
-                                                        <?php foreach ($c['lineas_sihos'] as $linea): ?>
-                                                            <li>
-                                                                <?= htmlspecialchars($linea['nombre_docu']) ?> (<?= htmlspecialchars($linea['codi_docu']) ?>-<?= htmlspecialchars($linea['nume_docu']) ?>)
-                                                                — <?= $linea['causado'] ? 'CONFIRMADA' : 'sin confirmar' ?>
-                                                                — $<?= number_format($linea['total'], 0, ',', '.') ?>
-                                                            </li>
-                                                        <?php endforeach; ?>
-                                                    </ul>
+                    <div style="overflow:auto;">
+                        <table class="seguridad-table no-datatable" style="white-space:nowrap;width:100%;">
+                            <tbody>
+                                <?php foreach ($emp['conceptos'] as $c): ?>
+                                    <?php
+                                    $et = $etiquetasEstado[$c['estado']];
+                                    $hayLineaAbierta = count(array_filter($c['lineas_sihos'], static fn (array $l): bool => !$l['causado'])) > 0;
+                                    $aplicableValor = $puedeGuardar && $c['concepto'] === 'arl' && $c['estado'] === 'diferencia' && $hayLineaAbierta;
+                                    $aplicableTercero = $puedeGuardar && $c['tercero_estado'] === 'diferencia' && $c['tercero_archivo_nit'] !== null && $hayLineaAbierta;
+                                    ?>
+                                    <tr class="sihos-pi-correccion-fila">
+                                        <td style="width:90px;"><strong><?= htmlspecialchars($nombreConcepto[$c['concepto']] ?? $c['concepto']) ?></strong></td>
+                                        <td>archivo $<?= number_format($c['suma_archivo'], 0, ',', '.') ?></td>
+                                        <td><?= $c['suma_sihos'] !== null ? 'SIHOS $' . number_format($c['suma_sihos'], 0, ',', '.') : 'sin registro en SIHOS' ?></td>
+                                        <td><?= $c['diferencia'] !== null ? 'diferencia $' . number_format($c['diferencia'], 0, ',', '.') : '' ?></td>
+                                        <td class="sihos-correccion-estado">
+                                            <span style="color:<?= $et['color'] ?>;"><?= $et['texto'] ?></span>
+                                            <?php if ($aplicableValor): ?>
+                                                <label class="field-note" style="margin-left:8px;">
+                                                    <input type="checkbox" class="sihos-pi-check"
+                                                        data-tipo-docu="<?= htmlspecialchars($emp['tipo_docu'], ENT_QUOTES, 'UTF-8') ?>"
+                                                        data-no-id="<?= htmlspecialchars($emp['no_id'], ENT_QUOTES, 'UTF-8') ?>"
+                                                        data-concepto="<?= htmlspecialchars($c['concepto'], ENT_QUOTES, 'UTF-8') ?>"
+                                                        data-tipo-correccion="valor"
+                                                        data-suma-esperada="<?= htmlspecialchars((string)$c['suma_archivo'], ENT_QUOTES, 'UTF-8') ?>">
+                                                    corregir valor
+                                                </label>
+                                            <?php endif; ?>
+                                            <?php if ($c['lineas_sihos'] !== []): ?>
+                                                <details style="display:inline;">
+                                                    <summary style="display:inline;cursor:pointer;color:var(--link-color,#5aa9ff);">Ver registros en SIHOS</summary>
+                                                    <div style="margin-top:6px;padding:8px;background:rgba(255,255,255,0.03);border-radius:6px;">
+                                                        <ul style="margin:0;padding:0 0 0 18px;">
+                                                            <?php foreach ($c['lineas_sihos'] as $linea): ?>
+                                                                <li>
+                                                                    <?= htmlspecialchars($linea['nombre_docu']) ?> (<?= htmlspecialchars($linea['codi_docu']) ?>-<?= htmlspecialchars($linea['nume_docu']) ?>)
+                                                                    — <?= $linea['causado'] ? 'CONFIRMADA' : 'sin confirmar' ?>
+                                                                    — $<?= number_format($linea['total'], 0, ',', '.') ?>
+                                                                </li>
+                                                            <?php endforeach; ?>
+                                                        </ul>
+                                                    </div>
+                                                </details>
+                                            <?php endif; ?>
+                                            <?php if ($c['tercero_estado'] !== 'no_aplica'): ?>
+                                                <div style="margin-top:4px;">
+                                                    <?php if ($c['tercero_estado'] === 'diferencia'): ?>
+                                                        <span style="color:#e67e22;">⚠ Tercero archivo: <?= htmlspecialchars((string)$c['tercero_archivo_nombre']) ?> (<?= htmlspecialchars((string)$c['tercero_archivo_nit']) ?>)
+                                                        — SIHOS: <?= htmlspecialchars((string)$c['tercero_sihos_nit']) ?></span>
+                                                        <?php if ($aplicableTercero): ?>
+                                                            <label class="field-note" style="margin-left:8px;">
+                                                                <input type="checkbox" class="sihos-pi-check"
+                                                                    data-tipo-docu="<?= htmlspecialchars($emp['tipo_docu'], ENT_QUOTES, 'UTF-8') ?>"
+                                                                    data-no-id="<?= htmlspecialchars($emp['no_id'], ENT_QUOTES, 'UTF-8') ?>"
+                                                                    data-concepto="<?= htmlspecialchars($c['concepto'], ENT_QUOTES, 'UTF-8') ?>"
+                                                                    data-tipo-correccion="tercero"
+                                                                    data-tercero-nit="<?= htmlspecialchars((string)$c['tercero_archivo_nit'], ENT_QUOTES, 'UTF-8') ?>">
+                                                                corregir tercero
+                                                            </label>
+                                                        <?php endif; ?>
+                                                    <?php elseif ($c['tercero_estado'] === 'no_encontrado'): ?>
+                                                        <span class="field-note">Tercero: sin dato suficiente para comparar.</span>
+                                                    <?php else: ?>
+                                                        <span class="field-note">Tercero coincide (<?= htmlspecialchars((string)$c['tercero_archivo_nit']) ?>).</span>
+                                                    <?php endif; ?>
                                                 </div>
-                                            </details>
-                                        <?php endif; ?>
-                                    </td>
-                                </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </div>
-            <?php endforeach; ?>
+                                            <?php endif; ?>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                <?php endforeach; ?>
+
+                <?php if ($puedeGuardar && ($totalAplicablesValor > 0 || $totalAplicablesTercero > 0)): ?>
+                    <div style="margin-top:16px;display:flex;gap:12px;align-items:center;">
+                        <label class="field-note"><input type="checkbox" id="sihosPiMarcarTodas"> Marcar todas las corregibles</label>
+                        <button type="button" id="sihosPiAplicarBtn" class="auditoria-btn-primary">✅ Aplicar seleccionadas en SIHOS</button>
+                        <span id="sihosPiStatus" class="field-note"></span>
+                    </div>
+                <?php endif; ?>
+            </form>
 
         <?php endif; ?>
 
     <?php endif; ?>
 
 </div>
+
+<script src="/js/sihos-nomina-planilla-integrada-correccion.js?v=<?= (int)$sihosPlanillaIntegradaJsV ?>"></script>
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
