@@ -535,28 +535,40 @@ class SihosPlanillaIntegradaService
             ];
         }
 
-        // Ordenar de mayor a menor diferencia total (mismo criterio que
-        // SihosNominaPilaCorreccionService::construirVistaPrevia(), a pedido
-        // del usuario, 2026-09-02, para priorizar la revisión): suma del
+        // Ordenar con los que tienen ALGUNA diferencia primero (a pedido del
+        // usuario, 2026-10-09) — una diferencia de TERCERO cuenta igual que
+        // una de valor, aunque no tenga un monto que sumar (por eso no basta
+        // con ordenar solo por el total en pesos: un empleado con el valor
+        // exacto pero el tercero equivocado también debe quedar arriba).
+        // Dentro de "tienen diferencia", de mayor a menor según la suma del
         // valor absoluto de la diferencia de TODOS los conceptos del
-        // empleado, no solo la más grande individual. Los conceptos sin
-        // `suma_sihos` (estado 'no_encontrado', nada con qué comparar) no
-        // aportan a la suma.
+        // empleado (mismo criterio que SihosNominaPilaCorreccionService::
+        // construirVistaPrevia(), ya usado aquí desde 2026-09-02). Los
+        // conceptos sin `suma_sihos` (estado 'no_encontrado', nada con qué
+        // comparar) no aportan a la suma.
         usort($resultado, static function (array $a, array $b): int {
             $totalA = 0.0;
+            $tieneDiferenciaA = false;
             foreach ($a['conceptos'] as $c) {
                 if ($c['diferencia'] !== null) {
                     $totalA += abs($c['diferencia']);
                 }
+                if ($c['estado'] === 'diferencia' || $c['tercero_estado'] === 'diferencia') {
+                    $tieneDiferenciaA = true;
+                }
             }
             $totalB = 0.0;
+            $tieneDiferenciaB = false;
             foreach ($b['conceptos'] as $c) {
                 if ($c['diferencia'] !== null) {
                     $totalB += abs($c['diferencia']);
                 }
+                if ($c['estado'] === 'diferencia' || $c['tercero_estado'] === 'diferencia') {
+                    $tieneDiferenciaB = true;
+                }
             }
 
-            return $totalB <=> $totalA;
+            return [$tieneDiferenciaB, $totalB] <=> [$tieneDiferenciaA, $totalA];
         });
 
         return $resultado;
