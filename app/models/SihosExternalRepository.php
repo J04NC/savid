@@ -725,7 +725,7 @@ class SihosExternalRepository
             WHERE nc.CodiInst = ?
               AND nc.CodiDocu IN ({$ph})
               AND nc.FechDocu BETWEEN ? AND ?
-              AND nc.Anulado = 0
+              AND nc.Causado = '1' AND nc.Anulado <> '1'
               AND YEAR(nc.FechDocu) = YEAR(fact.FechDocu)
               AND EXISTS (
                   SELECT 1 FROM DetaPlan dp2
