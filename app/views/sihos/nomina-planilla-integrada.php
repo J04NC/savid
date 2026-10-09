@@ -223,10 +223,16 @@ $sihosPlanillaIntegradaJsV = is_readable($assetSihosPlanillaIntegrada) ? (int)fi
                                     // Mismo criterio de "elegir la de mayor valor" que usa
                                     // aplicarCorrecciones() cuando hay varias líneas abiertas —
                                     // se muestra aquí cuál es, para que quede claro a qué
-                                    // nómina pertenece el registro que se actualizaría.
+                                    // nómina pertenece el registro que se actualizaría. Si NO
+                                    // hay ninguna abierta (todas ya causadas/confirmadas en
+                                    // SIHOS), se muestra igual cuál sería — a pedido del
+                                    // usuario, 2026-10-09 — para que sepa cuál nómina debe
+                                    // REVERSAR en SIHOS antes de poder correr el ajuste aquí.
+                                    $esDiferenciaCorregibleAqui = ($c['concepto'] === 'arl' && $c['estado'] === 'diferencia') || $c['tercero_estado'] === 'diferencia';
                                     $lineaElegida = null;
-                                    if ($hayLineaAbierta) {
-                                        $ordenadas = $lineasAbiertas;
+                                    if ($esDiferenciaCorregibleAqui && $c['lineas_sihos'] !== []) {
+                                        $candidatas = $hayLineaAbierta ? $lineasAbiertas : $c['lineas_sihos'];
+                                        $ordenadas = $candidatas;
                                         usort($ordenadas, static fn (array $a, array $b): int => $b['total'] <=> $a['total']);
                                         $lineaElegida = $ordenadas[0];
                                     }
@@ -238,14 +244,25 @@ $sihosPlanillaIntegradaJsV = is_readable($assetSihosPlanillaIntegrada) ? (int)fi
                                         <td><?= $c['diferencia'] !== null ? 'diferencia $' . number_format($c['diferencia'], 0, ',', '.') : '' ?></td>
                                         <td class="sihos-correccion-estado">
                                             <span style="color:<?= $et['color'] ?>;"><?= $et['texto'] ?></span>
-                                            <?php if ($lineaElegida !== null && ($aplicableValor || $aplicableTercero)): ?>
-                                                <div class="field-note" style="margin-top:2px;">
-                                                    Nómina a actualizar: <?= htmlspecialchars($lineaElegida['nombre_docu']) ?>
-                                                    (<?= htmlspecialchars($lineaElegida['codi_docu']) ?>-<?= htmlspecialchars($lineaElegida['nume_docu']) ?>)
-                                                    <?php if (count($lineasAbiertas) > 1): ?>
-                                                        <span title="Había <?= count($lineasAbiertas) ?> líneas sin confirmar para este concepto — se eligió automáticamente la de mayor valor. Verifique antes de aplicar." style="color:#e67e22;cursor:help;">⚠</span>
-                                                    <?php endif; ?>
-                                                </div>
+                                            <?php if ($lineaElegida !== null): ?>
+                                                <?php if (!$lineaElegida['causado']): ?>
+                                                    <div class="field-note" style="margin-top:2px;">
+                                                        Nómina a actualizar: <?= htmlspecialchars($lineaElegida['nombre_docu']) ?>
+                                                        (<?= htmlspecialchars($lineaElegida['codi_docu']) ?>-<?= htmlspecialchars($lineaElegida['nume_docu']) ?>)
+                                                        <?php if (count($lineasAbiertas) > 1): ?>
+                                                            <span title="Había <?= count($lineasAbiertas) ?> líneas sin confirmar para este concepto — se eligió automáticamente la de mayor valor. Verifique antes de aplicar." style="color:#e67e22;cursor:help;">⚠</span>
+                                                        <?php endif; ?>
+                                                    </div>
+                                                <?php else: ?>
+                                                    <div style="margin-top:2px;">
+                                                        <span style="color:#e74c3c;">
+                                                            🔒 Nómina a reversar: <?= htmlspecialchars($lineaElegida['nombre_docu']) ?>
+                                                            (<?= htmlspecialchars($lineaElegida['codi_docu']) ?>-<?= htmlspecialchars($lineaElegida['nume_docu']) ?>)
+                                                            — ya está CONFIRMADA en SIHOS, no se puede corregir aquí mientras siga así.
+                                                            Reverse esta nómina en SIHOS y vuelva a comparar para poder aplicar el ajuste.
+                                                        </span>
+                                                    </div>
+                                                <?php endif; ?>
                                             <?php endif; ?>
                                             <?php if ($aplicableValor): ?>
                                                 <label class="field-note" style="margin-left:8px;">
