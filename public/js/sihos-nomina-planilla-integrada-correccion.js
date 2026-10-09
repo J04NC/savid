@@ -4,21 +4,33 @@
     const form = document.getElementById('sihosPlanillaIntegradaCorreccionForm');
     if (!form) return;
 
-    const btnAplicar = document.getElementById('sihosPiAplicarBtn');
-    const status = document.getElementById('sihosPiStatus');
-    const marcarTodas = document.getElementById('sihosPiMarcarTodas');
+    // El botón/estado/"marcar todas" se repiten arriba y abajo del detalle
+    // (a pedido del usuario, 2026-10-09, para no tener que hacer scroll) —
+    // se manejan como listas y se mantienen sincronizados entre sí.
+    const btnsAplicar = form.querySelectorAll('.sihos-pi-aplicar-btn');
+    const statuses = form.querySelectorAll('.sihos-pi-status');
+    const marcarTodasChecks = form.querySelectorAll('.sihos-pi-marcar-todas');
 
-    if (marcarTodas) {
+    if (btnsAplicar.length === 0) return;
+
+    function setStatus(texto) {
+        statuses.forEach(function (s) { s.textContent = texto; });
+    }
+
+    function setBtnsDisabled(disabled) {
+        btnsAplicar.forEach(function (b) { b.disabled = disabled; });
+    }
+
+    marcarTodasChecks.forEach(function (marcarTodas) {
         marcarTodas.addEventListener('change', function () {
             form.querySelectorAll('.sihos-pi-check').forEach(function (chk) {
                 chk.checked = marcarTodas.checked;
             });
+            marcarTodasChecks.forEach(function (otro) { otro.checked = marcarTodas.checked; });
         });
-    }
+    });
 
-    if (!btnAplicar) return;
-
-    btnAplicar.addEventListener('click', function () {
+    function aplicar() {
         const seleccionados = Array.prototype.filter.call(
             form.querySelectorAll('.sihos-pi-check'),
             function (chk) { return chk.checked; }
@@ -33,8 +45,8 @@
             return;
         }
 
-        btnAplicar.disabled = true;
-        status.textContent = 'Aplicando…';
+        setBtnsDisabled(true);
+        setStatus('Aplicando…');
 
         // Escritura real en SIHOS: bloquea el resto de la pantalla mientras
         // dura (evita navegar a mitad de la escritura) — se muestra antes
@@ -69,8 +81,8 @@
             .then(function (r) { return r.json(); })
             .then(function (j) {
                 if (!j.ok) {
-                    status.textContent = j.error || 'No se pudo aplicar.';
-                    btnAplicar.disabled = false;
+                    setStatus(j.error || 'No se pudo aplicar.');
+                    setBtnsDisabled(false);
                     return;
                 }
 
@@ -97,17 +109,21 @@
                     }
                 });
 
-                status.textContent = exitos + ' aplicada(s), ' + rechazos + ' rechazada(s).';
-                btnAplicar.disabled = false;
+                setStatus(exitos + ' aplicada(s), ' + rechazos + ' rechazada(s).');
+                setBtnsDisabled(false);
             })
             .catch(function () {
-                status.textContent = 'Error de conexión.';
-                btnAplicar.disabled = false;
+                setStatus('Error de conexión.');
+                setBtnsDisabled(false);
             })
             .finally(function () {
                 if (typeof savidOcultarCargando === 'function') {
                     savidOcultarCargando();
                 }
             });
+    }
+
+    btnsAplicar.forEach(function (btn) {
+        btn.addEventListener('click', aplicar);
     });
 })();

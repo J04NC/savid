@@ -200,6 +200,14 @@ $sihosPlanillaIntegradaJsV = is_readable($assetSihosPlanillaIntegrada) ? (int)fi
 
             <form id="sihosPlanillaIntegradaCorreccionForm" data-codi-ano="<?= htmlspecialchars($codiAno) ?>" data-codi-mes="<?= htmlspecialchars($codiMes) ?>" data-empresa-id="<?= (int)$empresaId ?>">
 
+                <?php if ($puedeGuardar && ($totalAplicablesValor > 0 || $totalAplicablesTercero > 0)): ?>
+                    <div style="margin-bottom:16px;display:flex;gap:12px;align-items:center;">
+                        <label class="field-note"><input type="checkbox" class="sihos-pi-marcar-todas"> Marcar todas las corregibles</label>
+                        <button type="button" class="auditoria-btn-primary sihos-pi-aplicar-btn">✅ Aplicar seleccionadas en SIHOS</button>
+                        <span class="field-note sihos-pi-status"></span>
+                    </div>
+                <?php endif; ?>
+
                 <?php foreach ($empleados as $emp): ?>
                     <div class="crud-toolbar auditoria-toolbar" style="margin-top:14px;margin-bottom:0;padding-bottom:6px;border-bottom:1px solid var(--border-color, #444);">
                         <div class="auditoria-toolbar-title">
@@ -326,9 +334,9 @@ $sihosPlanillaIntegradaJsV = is_readable($assetSihosPlanillaIntegrada) ? (int)fi
 
                 <?php if ($puedeGuardar && ($totalAplicablesValor > 0 || $totalAplicablesTercero > 0)): ?>
                     <div style="margin-top:16px;display:flex;gap:12px;align-items:center;">
-                        <label class="field-note"><input type="checkbox" id="sihosPiMarcarTodas"> Marcar todas las corregibles</label>
-                        <button type="button" id="sihosPiAplicarBtn" class="auditoria-btn-primary">✅ Aplicar seleccionadas en SIHOS</button>
-                        <span id="sihosPiStatus" class="field-note"></span>
+                        <label class="field-note"><input type="checkbox" class="sihos-pi-marcar-todas"> Marcar todas las corregibles</label>
+                        <button type="button" class="auditoria-btn-primary sihos-pi-aplicar-btn">✅ Aplicar seleccionadas en SIHOS</button>
+                        <span class="field-note sihos-pi-status"></span>
                     </div>
                 <?php endif; ?>
             </form>
