@@ -1,0 +1,113 @@
+(function () {
+    'use strict';
+
+    const form = document.getElementById('sihosPlanillaIntegradaCorreccionForm');
+    if (!form) return;
+
+    const btnAplicar = document.getElementById('sihosPiAplicarBtn');
+    const status = document.getElementById('sihosPiStatus');
+    const marcarTodas = document.getElementById('sihosPiMarcarTodas');
+
+    if (marcarTodas) {
+        marcarTodas.addEventListener('change', function () {
+            form.querySelectorAll('.sihos-pi-check').forEach(function (chk) {
+                chk.checked = marcarTodas.checked;
+            });
+        });
+    }
+
+    if (!btnAplicar) return;
+
+    btnAplicar.addEventListener('click', function () {
+        const seleccionados = Array.prototype.filter.call(
+            form.querySelectorAll('.sihos-pi-check'),
+            function (chk) { return chk.checked; }
+        );
+
+        if (seleccionados.length === 0) {
+            alert('Marque al menos una corrección para aplicar.');
+            return;
+        }
+
+        if (!confirm('¿Aplicar ' + seleccionados.length + ' corrección(es) sobre la nómina real en SIHOS? Esta acción no se puede deshacer desde aquí.')) {
+            return;
+        }
+
+        btnAplicar.disabled = true;
+        status.textContent = 'Aplicando…';
+
+        // Escritura real en SIHOS: bloquea el resto de la pantalla mientras
+        // dura (evita navegar a mitad de la escritura) — se muestra antes
+        // del fetch y se apaga siempre al terminar, éxito o error (ver
+        // savidMostrarCargando en app.js).
+        if (typeof savidMostrarCargando === 'function') {
+            savidMostrarCargando('Aplicando correcciones en SIHOS, no cierre esta ventana…');
+        }
+
+        const fd = new FormData();
+        fd.append('empresa_id', form.dataset.empresaId);
+        fd.append('codi_ano', form.dataset.codiAno);
+        fd.append('codi_mes', form.dataset.codiMes);
+
+        seleccionados.forEach(function (chk, i) {
+            fd.append('seleccion[' + i + '][tipo_docu]', chk.dataset.tipoDocu);
+            fd.append('seleccion[' + i + '][no_id]', chk.dataset.noId);
+            fd.append('seleccion[' + i + '][concepto]', chk.dataset.concepto);
+            fd.append('seleccion[' + i + '][tipo_correccion]', chk.dataset.tipoCorreccion);
+            if (chk.dataset.tipoCorreccion === 'valor') {
+                fd.append('seleccion[' + i + '][suma_esperada]', chk.dataset.sumaEsperada);
+            } else {
+                fd.append('seleccion[' + i + '][tercero_nit]', chk.dataset.terceroNit);
+            }
+        });
+
+        fetch('?url=sihos/nominaPlanillaIntegradaAplicar', {
+            method: 'POST',
+            body: fd,
+            credentials: 'same-origin',
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (j) {
+                if (!j.ok) {
+                    status.textContent = j.error || 'No se pudo aplicar.';
+                    btnAplicar.disabled = false;
+                    return;
+                }
+
+                let exitos = 0;
+                let rechazos = 0;
+
+                j.resultados.forEach(function (r, i) {
+                    const chk = seleccionados[i];
+                    const etiqueta = chk ? chk.closest('label') : null;
+
+                    if (r.ok) {
+                        exitos++;
+                        if (chk) {
+                            chk.disabled = true;
+                        }
+                        if (etiqueta) {
+                            etiqueta.insertAdjacentHTML('afterend', ' <span style="color:#2ecc71;">✅ Corregido</span>');
+                        }
+                    } else {
+                        rechazos++;
+                        if (etiqueta) {
+                            etiqueta.insertAdjacentHTML('afterend', ' <span style="color:#e74c3c;">❌ ' + (r.motivo || 'Rechazado') + '</span>');
+                        }
+                    }
+                });
+
+                status.textContent = exitos + ' aplicada(s), ' + rechazos + ' rechazada(s).';
+                btnAplicar.disabled = false;
+            })
+            .catch(function () {
+                status.textContent = 'Error de conexión.';
+                btnAplicar.disabled = false;
+            })
+            .finally(function () {
+                if (typeof savidOcultarCargando === 'function') {
+                    savidOcultarCargando();
+                }
+            });
+    });
+})();
