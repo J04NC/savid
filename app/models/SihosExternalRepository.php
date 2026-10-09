@@ -3901,7 +3901,16 @@ where e.CodiInst=:codiInst";
      * segura de adivinar en cuál aplicar el ajuste, ni de repartir el total
      * esperado entre documentos o líneas.
      *
-     * @return list<array{codiDocu:string,numeDocu:string,nombreDocu:string,codiConc:string,lineas:list<array{consConc:string,valoEmpe:float,valoPatr:float}>}>
+     * Cada línea trae también `tiDoTerc`/`nuDoTerc` — el tercero (AFP/ARL/
+     * EPS/CCF) que quedó grabado en ESA línea del documento (columnas reales
+     * de `DetaNomi`, NOT NULL, con el guión-DV igual que `Empleado.NuDoXxx`
+     * — usado por SihosPlanillaIntegradaService para detectar y corregir
+     * cuando el archivo liquidó a un tercero distinto del que quedó en
+     * SIHOS). No confundir con la afiliación "vigente" del maestro
+     * `Empleado` — esa puede diferir de lo que quedó grabado en el
+     * documento si la afiliación cambió después.
+     *
+     * @return list<array{codiDocu:string,numeDocu:string,nombreDocu:string,codiConc:string,lineas:list<array{consConc:string,valoEmpe:float,valoPatr:float,tiDoTerc:string,nuDoTerc:string}>}>
      */
     public function buscarConceptoCorreccionNomina(
         string $tipoDocu,
@@ -3933,7 +3942,7 @@ where e.CodiInst=:codiInst";
         $placeholdersDocu = implode(',', $nombresDocu);
 
         $stmt = $this->connect()->prepare(
-            "SELECT d.CodiDocu, d.NumeDocu, m.NombDocu, d.CodiConc, d.ConsConc, d.ValoEmpe, d.ValoPatr
+            "SELECT d.CodiDocu, d.NumeDocu, m.NombDocu, d.CodiConc, d.ConsConc, d.ValoEmpe, d.ValoPatr, d.TiDoTerc, d.NuDoTerc
              FROM DetaNomi d
              INNER JOIN Concepto c ON c.CodiInst = d.CodiInst AND c.CodiConc = d.CodiConc
              INNER JOIN MaesDocu m ON m.CodiInst = d.CodiInst AND m.CodiDocu = d.CodiDocu
@@ -3969,10 +3978,51 @@ where e.CodiInst=:codiInst";
                 'consConc' => (string)$f['ConsConc'],
                 'valoEmpe' => (float)$f['ValoEmpe'],
                 'valoPatr' => (float)$f['ValoPatr'],
+                'tiDoTerc' => (string)$f['TiDoTerc'],
+                'nuDoTerc' => (string)$f['NuDoTerc'],
             ];
         }
 
         return array_values($grupos);
+    }
+
+    /**
+     * Busca en `CodiTerc` el tercero cuyo NIT (sin dígito de verificación)
+     * coincida con el pedido — para resolver, a partir del NIT que trae el
+     * archivo de la Planilla Integrada (ya limpio de DV), el par
+     * `TipoDocu`+`NumeTerc` (CON el DV, formato real de `CodiTerc.NumeTerc`
+     * y de `DetaNomi.TiDoTerc`/`NuDoTerc`) que hay que escribir al corregir
+     * el tercero de una línea de nómina — ver
+     * SihosPlanillaIntegradaService::aplicarCorrecciones().
+     *
+     * Devuelve `null` si no hay ninguna coincidencia o si hay más de una
+     * (NIT ambiguo en el catálogo) — más seguro rechazar la corrección que
+     * adivinar cuál tercero es.
+     *
+     * @return array{tipoDocu:string,numeTerc:string,nombreTerc:string}|null
+     */
+    public function buscarTerceroPorNit(string $nit): ?array
+    {
+        $nit = trim($nit);
+        if ($nit === '') {
+            return null;
+        }
+
+        $stmt = $this->connect()->prepare(
+            'SELECT TipoDocu, NumeTerc, NombTerc FROM CodiTerc WHERE NumeTerc = :exacto OR NumeTerc LIKE :conDv'
+        );
+        $stmt->execute(['exacto' => $nit, 'conDv' => $nit . '-%']);
+        $filas = $stmt->fetchAll();
+
+        if (count($filas) !== 1) {
+            return null;
+        }
+
+        return [
+            'tipoDocu' => (string)$filas[0]['TipoDocu'],
+            'numeTerc' => (string)$filas[0]['NumeTerc'],
+            'nombreTerc' => (string)$filas[0]['NombTerc'],
+        ];
     }
 
     /** ¿Ya está confirmada ("causada") la nómina de este documento en SIHOS? true si no se encuentra el documento (más seguro rechazar que asumir editable). */

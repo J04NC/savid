@@ -2481,6 +2481,138 @@ class SihosExternalWriteRepository
     }
 
     /**
+     * Corrige en `DetaNomi` el TERCERO (`TiDoTerc`+`NuDoTerc`) de una línea
+     * de nómina — usado por SihosPlanillaIntegradaService cuando el tercero
+     * (AFP/EPS/CCF/ARL) que quedó grabado en SIHOS no coincide con el que
+     * liquidó el operador en la Planilla Integrada. A diferencia de
+     * corregirValoPatrNomina() (que ajusta un VALOR), aquí nunca se toca
+     * `ValoEmpe`/`ValoPatr` — solo el tercero de la línea.
+     *
+     * Mismas re-verificaciones DENTRO de la transacción que
+     * corregirValoPatrNomina() (ver su docblock): nómina sin causar y
+     * EXACTAMENTE una línea para ese concepto en el momento de escribir, no
+     * en el de la vista previa.
+     *
+     * @return array{ok:bool,motivo?:string,tiDoTercAntes?:string,nuDoTercAntes?:string,tiDoTercDespues?:string,nuDoTercDespues?:string}
+     * @throws PDOException en errores reales de BD (no en rechazos de negocio, esos se devuelven como ok=false)
+     */
+    public function corregirTerceroNomina(
+        string $codiDocu,
+        string $numeDocu,
+        string $codiAno,
+        string $codiMes,
+        string $tipoDocu,
+        string $numePers,
+        string $codiConc,
+        string $tiDoTercEsperado,
+        string $nuDoTercEsperado,
+        string $usuaDigi
+    ): array {
+        return $this->conBloqueo(
+            'nominaterc:' . $codiDocu . ':' . $numeDocu . ':' . $tipoDocu . ':' . $numePers . ':' . $codiConc,
+            function () use ($codiDocu, $numeDocu, $codiAno, $codiMes, $tipoDocu, $numePers, $codiConc, $tiDoTercEsperado, $nuDoTercEsperado, $usuaDigi): array {
+                return $this->corregirTerceroNominaBloqueado(
+                    $codiDocu, $numeDocu, $codiAno, $codiMes, $tipoDocu, $numePers, $codiConc, $tiDoTercEsperado, $nuDoTercEsperado, $usuaDigi
+                );
+            }
+        );
+    }
+
+    /** @see corregirTerceroNomina (ya con el bloqueo tomado) */
+    private function corregirTerceroNominaBloqueado(
+        string $codiDocu,
+        string $numeDocu,
+        string $codiAno,
+        string $codiMes,
+        string $tipoDocu,
+        string $numePers,
+        string $codiConc,
+        string $tiDoTercEsperado,
+        string $nuDoTercEsperado,
+        string $usuaDigi
+    ): array {
+        $pdo = $this->connect();
+        $codiInst = $this->codiInst();
+
+        $pdo->beginTransaction();
+
+        try {
+            $stmt = $pdo->prepare('SELECT Causado FROM EncaCont WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ? FOR UPDATE');
+            $stmt->execute([$codiInst, $codiDocu, $numeDocu]);
+            $causado = $stmt->fetchColumn();
+
+            if ($causado === false) {
+                $pdo->rollBack();
+
+                return ['ok' => false, 'motivo' => "El documento de nómina {$codiDocu}-{$numeDocu} ya no existe en SIHOS."];
+            }
+
+            if ((int)$causado === 1) {
+                $pdo->rollBack();
+
+                return [
+                    'ok' => false,
+                    'motivo' => "La nómina {$codiDocu}-{$numeDocu} ya está confirmada (causada) en SIHOS — no se modifica aquí. Use la nota de ajuste habitual.",
+                ];
+            }
+
+            $stmt = $pdo->prepare(
+                'SELECT ConsConc, TiDoTerc, NuDoTerc FROM DetaNomi
+                 WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ? AND CodiAno = ? AND CAST(CodiMes AS SIGNED) = ?
+                   AND TipoDocu = ? AND NumePers = ? AND CodiConc = ?
+                 FOR UPDATE'
+            );
+            $stmt->execute([$codiInst, $codiDocu, $numeDocu, $codiAno, $codiMes, $tipoDocu, $numePers, $codiConc]);
+            $lineas = $stmt->fetchAll();
+
+            if ($lineas === []) {
+                $pdo->rollBack();
+
+                return ['ok' => false, 'motivo' => 'La línea de nómina a corregir ya no existe — puede que ya se haya corregido o borrado.'];
+            }
+
+            if (count($lineas) > 1) {
+                $pdo->rollBack();
+
+                return [
+                    'ok' => false,
+                    'motivo' => 'El concepto tiene más de una línea en SIHOS (novedad partida en el período) — no se puede corregir automáticamente.',
+                ];
+            }
+
+            $consConc = (string)$lineas[0]['ConsConc'];
+            $tiDoTercActual = (string)$lineas[0]['TiDoTerc'];
+            $nuDoTercActual = (string)$lineas[0]['NuDoTerc'];
+
+            $stmt = $pdo->prepare(
+                'UPDATE DetaNomi SET TiDoTerc = ?, NuDoTerc = ?, FechModi = CURDATE(), HoraModi = CURTIME(), UsuaModi = ?
+                 WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ? AND CodiAno = ? AND CAST(CodiMes AS SIGNED) = ?
+                   AND TipoDocu = ? AND NumePers = ? AND CodiConc = ? AND ConsConc = ?'
+            );
+            $stmt->execute([
+                $tiDoTercEsperado, $nuDoTercEsperado, $usuaDigi, $codiInst, $codiDocu, $numeDocu, $codiAno, $codiMes,
+                $tipoDocu, $numePers, $codiConc, $consConc,
+            ]);
+
+            $pdo->commit();
+
+            return [
+                'ok' => true,
+                'tiDoTercAntes' => $tiDoTercActual,
+                'nuDoTercAntes' => $nuDoTercActual,
+                'tiDoTercDespues' => $tiDoTercEsperado,
+                'nuDoTercDespues' => $nuDoTercEsperado,
+            ];
+        } catch (PDOException $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+
+            throw $e;
+        }
+    }
+
+    /**
      * Carga masiva de tarifas de `TariProc` (SIHOS/PROCESOS/TARIFA
      * PROCEDIMIENTOS) — reemplaza al importador CSV legado y obsoleto de
      * SIHOS (`modulos/procesos/tarifas/importartarifa.class.php`, sin ítem de
