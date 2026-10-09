@@ -203,6 +203,21 @@ class Router
 
         $sgdElaboracionJsonMethods = ['elaboracionUploadMedia', 'elaboracionImportWord', 'elaboracionImportWordFetch', 'elaboracionPreviewPdf'];
 
+        /*
+         * Endpoints JSON de la accion especial "configurar" de acad_exercise
+         * (sub-lista de opciones/turnos/audio de referencia segun el tipo de
+         * ejercicio) — no tienen item de menu propio (no aparecen en ningun
+         * breadcrumb), asi que el fallback generico de
+         * PermisoService::resolveItemAccionId() caeria al segmento raiz
+         * "acad", que tampoco existe como item (solo existen rutas completas
+         * como acad/practice, acad/study, etc.), dejando estos endpoints
+         * inalcanzables para cualquier usuario que no sea superadmin. Se
+         * validan aqui explicitamente contra acad_exercise/configurar, el
+         * mismo permiso que cada metodo del controller ya vuelve a revisar
+         * internamente.
+         */
+        $acadExerciseConfigJsonMethods = ['exerciseOptions', 'exerciseWordBank', 'exerciseSentenceOrder', 'exerciseDialogueTurns', 'exerciseTrueFalseStatements', 'exerciseReferenceAudio'];
+
         /* Latido de actividad: para todo usuario logueado, no solo quien puede ver el reporte de sesiones. */
         $sesionesJsonMethods = ['ping'];
 
@@ -253,6 +268,16 @@ class Router
          * caiga al fallback genérico sobre el segmento raíz "sihos".
          */
         $sihosNominaPilaCorreccionAccionMethods = ['nominaPilaCorreccionAplicar'];
+
+        /*
+         * Misma razón: sihos/nominaPlanillaIntegradaAplicar (la escritura
+         * AJAX de la pantalla "Planilla Integrada vs SIHOS") no tiene ítem
+         * de menú propio — su pantalla es sihos/nominaPlanillaIntegrada. El
+         * permiso fino ('guardar') se re-valida dentro del propio
+         * controller; aquí solo se evita que caiga al fallback genérico
+         * sobre el segmento raíz "sihos".
+         */
+        $sihosNominaPlanillaIntegradaAccionMethods = ['nominaPlanillaIntegradaAplicar'];
 
         /*
          * Misma razón: estas acciones AJAX de sihos/interfazLaboratorio no
@@ -331,11 +356,17 @@ class Router
                 && in_array($method, $sihosNominaPilaCorreccionAccionMethods, true)
                 && PermisoService::can('sihos/nominaPilaCorreccion', 'ver'))
             && !($controllerName === 'SihosController'
+                && in_array($method, $sihosNominaPlanillaIntegradaAccionMethods, true)
+                && PermisoService::can('sihos/nominaPlanillaIntegrada', 'ver'))
+            && !($controllerName === 'SihosController'
                 && in_array($method, $sihosInterlabAccionMethods, true)
                 && PermisoService::can('sihos/interfazLaboratorio', 'ver'))
             && !($controllerName === 'SihosController'
                 && in_array($method, $sihosTarifaProcedimientoAccionMethods, true)
                 && PermisoService::can('sihos/tarifaProcedimiento', 'ver'))
+            && !($controllerName === 'AcadController'
+                && in_array($method, $acadExerciseConfigJsonMethods, true)
+                && PermisoService::can('acad_exercise', 'configurar'))
             && !PermisoService::can($rutaCompleta, 'ver')) {
             self::logAccesoDenegado("sin permiso 'ver' sobre {$rutaCompleta}");
             http_response_code(403);

@@ -907,9 +907,11 @@ class SihosController
      * Carga la "Planilla Integrada de Liquidación de Aportes" que genera el
      * operador al finalizar el cargue completo (ya liquidada/pagada, a
      * diferencia del CSV de "posibles correcciones" de sihos/nominaPilaCorreccion)
-     * y la compara de solo lectura contra SIHOS: por empleado+concepto y
-     * agregado por administradora. Nunca escribe nada — no tiene acción de
-     * aplicar, solo la de 'ver' (igual que sihos/nominaPila).
+     * y la compara contra SIHOS: por empleado+concepto (valor y tercero) y
+     * agregado por administradora. Esta acción ('ver') nunca escribe — la
+     * corrección de valor (ARL) y de tercero (pensión/salud/CCF/ARL) vive en
+     * nominaPlanillaIntegradaAplicar() ('guardar'), igual patrón que
+     * sihos/nominaPilaCorreccion.
      */
     public function nominaPlanillaIntegrada(): void
     {
@@ -941,11 +943,54 @@ class SihosController
             }
         }
 
+        $puedeGuardar = PermisoService::can('sihos/nominaPlanillaIntegrada', 'guardar');
+
         $moduleService = new ModuleService();
         $breadcrumb = $moduleService->buildBreadcrumbForRuta('sihos/nominaPlanillaIntegrada');
 
         $view = BASE_PATH . '/app/views/sihos/nomina-planilla-integrada.php';
         require BASE_PATH . '/app/views/layouts/main.php';
+    }
+
+    /**
+     * POST ?url=sihos/nominaPlanillaIntegradaAplicar — aplica las
+     * correcciones (valor de ARL, o tercero de pensión/salud/CCF/ARL) que el
+     * usuario marcó en la vista de comparación. Responde JSON fila por fila,
+     * igual patrón que nominaPilaCorreccionAplicar(). Requiere el permiso
+     * 'guardar' sobre sihos/nominaPlanillaIntegrada, además del 'ver' que ya
+     * aplica Router::middleware().
+     */
+    public function nominaPlanillaIntegradaAplicar(): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+
+        if (!PermisoService::can('sihos/nominaPlanillaIntegrada', 'guardar')) {
+            http_response_code(403);
+            echo json_encode(['ok' => false, 'error' => 'Sin permiso.'], JSON_UNESCAPED_UNICODE);
+
+            return;
+        }
+
+        $scope = $this->connectionService->buildScope($_POST);
+        $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : 0;
+        $codiAno = trim((string)($_POST['codi_ano'] ?? ''));
+        $codiMes = trim((string)($_POST['codi_mes'] ?? ''));
+        $seleccion = $_POST['seleccion'] ?? [];
+
+        if ($empresaId <= 0 || $codiAno === '' || $codiMes === '' || !is_array($seleccion)) {
+            http_response_code(400);
+            echo json_encode(['ok' => false, 'error' => 'Faltan datos del período o de la selección.'], JSON_UNESCAPED_UNICODE);
+
+            return;
+        }
+
+        $resultado = $this->planillaIntegradaService->aplicarCorrecciones($empresaId, $codiAno, $codiMes, $seleccion);
+
+        if (!$resultado['ok']) {
+            http_response_code(400);
+        }
+
+        echo json_encode($resultado, JSON_UNESCAPED_UNICODE);
     }
 
     /**
