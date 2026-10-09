@@ -324,6 +324,15 @@ $sihosPlanillaIntegradaJsV = is_readable($assetSihosPlanillaIntegrada) ? (int)fi
                                                     <?php endif; ?>
                                                 </div>
                                             <?php endif; ?>
+                                            <?php if ($c['maestro_tercero_estado'] === 'diferencia'): ?>
+                                                <div style="margin-top:4px;">
+                                                    <span style="color:#e74c3c;">
+                                                        ⚠ El maestro del empleado en SIHOS (Empleados y Contratistas) tiene otra administradora
+                                                        (<?= htmlspecialchars((string)$c['maestro_tercero_nit']) ?>) — no coincide con lo liquidado en esta nómina.
+                                                        Esto NO se corrige aquí: actualice la afiliación del empleado directamente en SIHOS.
+                                                    </span>
+                                                </div>
+                                            <?php endif; ?>
                                         </td>
                                     </tr>
                                 <?php endforeach; ?>

@@ -4079,36 +4079,71 @@ where e.CodiInst=:codiInst";
     }
 
     /**
-     * Columna de `Empleado` con el NIT (`NuDoXxx`) de la administradora
-     * asignada a cada empleado, por concepto — usada por
-     * sumaCotizacionPorAdministradora() para agrupar. SENA/ICBF no
-     * aparecen aquí a propósito: son administradoras únicas y fijas para
-     * toda la institución (no se elige por empleado), así que no hay nada
-     * por lo cual agrupar — sumaCotizacionPorAdministradora() devuelve para
-     * esos dos conceptos un total único.
+     * Tercero (AFP/EPS/ARL/CCF) grabado HOY en el maestro `Empleado` de un
+     * empleado — la afiliación "vigente", NO la de un documento de nómina
+     * puntual (eso es `DetaNomi.TiDoTerc`/`NuDoTerc`, ver
+     * buscarConceptoCorreccionNomina()). Usado por
+     * SihosPlanillaIntegradaService para alertar cuando el maestro del
+     * empleado quedó desactualizado frente a lo que realmente se liquidó —
+     * nunca para escribir: corregir el maestro queda fuera de alcance aquí
+     * a propósito (afecta períodos futuros, no solo el corregido), el
+     * usuario decide si lo actualiza directamente en SIHOS/Empleados y
+     * Contratistas.
+     *
+     * @return array{pension:string,salud:string,arl:string,ccf:string}|null `null` si no se encuentra el empleado
      */
-    private const CAMPO_ADMINISTRADORA_POR_CONCEPTO = [
-        'pension' => 'NuDoAFP',
-        'salud' => 'NuDoEPS',
-        'arl' => 'NuDoARP',
-        'ccf' => 'NuDoCaja',
-        // El Fondo de Solidaridad Pensional se paga a través de la MISMA
-        // AFP del empleado (no tiene administradora propia) — se agrupa
-        // por el mismo campo que 'pension'.
-        'fondo_solidaridad' => 'NuDoAFP',
-    ];
+    public function terceroActualEmpleado(string $tipoDocu, string $numePers): ?array
+    {
+        $stmt = $this->connect()->prepare(
+            'SELECT NuDoAFP, NuDoEPS, NuDoARP, NuDoCaja FROM Empleado WHERE CodiInst = ? AND TipoDocu = ? AND NumePers = ?'
+        );
+        $stmt->execute([$this->codiInst(), $tipoDocu, $numePers]);
+        $fila = $stmt->fetch();
+
+        if ($fila === false) {
+            return null;
+        }
+
+        return [
+            'pension' => (string)$fila['NuDoAFP'],
+            'salud' => (string)$fila['NuDoEPS'],
+            'arl' => (string)$fila['NuDoARP'],
+            'ccf' => (string)$fila['NuDoCaja'],
+        ];
+    }
+
+    /**
+     * Conceptos con administradora elegible por empleado (AFP/EPS/ARL/CCF,
+     * y Fondo de Solidaridad Pensional porque se paga a través de la MISMA
+     * AFP) — usados por sumaCotizacionPorAdministradora() para decidir si
+     * agrupa por tercero o devuelve un único total. SENA/ICBF no aparecen
+     * aquí a propósito: son administradoras únicas y fijas para toda la
+     * institución (no se elige por empleado).
+     */
+    private const CONCEPTOS_CON_ADMINISTRADORA_POR_EMPLEADO = ['pension', 'salud', 'arl', 'ccf', 'fondo_solidaridad'];
 
     /**
      * Suma REAL en `DetaNomi` (documentos de Nómina de Empleados / Nómina
      * de Vacaciones — igual que buscarConceptoCorreccionNomina()) de un
-     * concepto de cotización para TODO el período, agrupada por la
-     * administradora asignada a cada empleado (`Empleado.NuDoXxx`) —
-     * para el chequeo agregado de SihosPlanillaIntegradaService contra la
-     * tabla "totales por administradora" del archivo de PILA.
+     * concepto de cotización para TODO el período, agrupada por el tercero
+     * grabado en CADA LÍNEA real (`DetaNomi.NuDoTerc`) — para el chequeo
+     * agregado de SihosPlanillaIntegradaService contra la tabla "totales
+     * por administradora" del archivo de PILA.
+     *
+     * Hasta 2026-10-09 agrupaba por `Empleado.NuDoXxx` (la afiliación
+     * "vigente" del maestro del empleado) en vez de por la línea — a pedido
+     * explícito del usuario, se cambió a `DetaNomi.NuDoTerc`: es fiel a lo
+     * que SIHOS realmente liquidó en ESE documento, no a la afiliación
+     * actual del empleado (que puede haber cambiado después, o que puede
+     * diferir del documento por un error ya corregido en la línea vía
+     * SihosPlanillaIntegradaService::aplicarCorrecciones() — con el
+     * agrupamiento viejo, esa corrección de línea nunca se reflejaba aquí,
+     * caso real verificado: $406.700 de un empleado seguían contados bajo
+     * la administradora vieja aunque la línea ya decía la correcta).
      *
      * Para 'sena'/'icbf' (sin administradora por empleado, ver
-     * CAMPO_ADMINISTRADORA_POR_CONCEPTO) se agrupa por una clave fija
-     * `''` — un único total para todo el concepto.
+     * CONCEPTOS_CON_ADMINISTRADORA_POR_EMPLEADO) se agrupa por una clave
+     * fija `''` — un único total para todo el concepto.
      *
      * Deliberadamente consulta `DetaNomi` de nuevo aquí (no reutiliza los
      * totales ya calculados por fetchNominaPila()): esta pantalla existe
@@ -4143,9 +4178,9 @@ where e.CodiInst=:codiInst";
         $placeholdersDocu = implode(',', $nombresDocu);
 
         $concepto = array_search($flagConcepto, self::FLAGS_CONCEPTO_CORRECCION, true);
-        $campoAdministradora = self::CAMPO_ADMINISTRADORA_POR_CONCEPTO[$concepto] ?? null;
+        $tieneAdministradoraPorEmpleado = $concepto !== false && in_array($concepto, self::CONCEPTOS_CON_ADMINISTRADORA_POR_EMPLEADO, true);
 
-        if ($campoAdministradora === null) {
+        if (!$tieneAdministradoraPorEmpleado) {
             // Sin administradora por empleado (SENA/ICBF): un único total.
             $stmt = $this->connect()->prepare(
                 "SELECT SUM(d.ValoEmpe + d.ValoPatr) AS Suma
@@ -4168,14 +4203,13 @@ where e.CodiInst=:codiInst";
         }
 
         $stmt = $this->connect()->prepare(
-            "SELECT e.{$campoAdministradora} AS Nit, SUM(d.ValoEmpe + d.ValoPatr) AS Suma
+            "SELECT d.NuDoTerc AS Nit, SUM(d.ValoEmpe + d.ValoPatr) AS Suma
              FROM DetaNomi d
              INNER JOIN Concepto c ON c.CodiInst = d.CodiInst AND c.CodiConc = d.CodiConc
-             INNER JOIN Empleado e ON e.CodiInst = d.CodiInst AND e.TipoDocu = d.TipoDocu AND e.NumePers = d.NumePers
              WHERE d.CodiInst = :codiInst AND d.CodiAno = :codiAno
                AND (d.CodiMes = :codiMesCorto OR d.CodiMes = :codiMesPadded)
                AND d.CodiDocu IN ({$placeholdersDocu}) AND c.{$flagConcepto} = '1'
-             GROUP BY e.{$campoAdministradora}"
+             GROUP BY d.NuDoTerc"
         );
         $stmt->execute([
             'codiInst' => $this->codiInst(),
@@ -4187,12 +4221,12 @@ where e.CodiInst=:codiInst";
 
         $resultado = [];
         while ($fila = $stmt->fetch()) {
-            // `Empleado.NuDoXxx` guarda el NIT con el guión-DV (p. ej.
+            // `DetaNomi.NuDoTerc` guarda el NIT con el guión-DV (p. ej.
             // "800224808-8") — se quita para que la clave quede en el mismo
             // formato sin DV que usa el resto de la app (terceroidentificacion.numero)
             // y que trae el archivo de la planilla integrada.
             $nit = preg_replace('/-\d$/', '', trim((string)($fila['Nit'] ?? ''))) ?? '';
-            $resultado[$nit] = round((float)$fila['Suma'], 2);
+            $resultado[$nit] = round((float)($resultado[$nit] ?? 0.0) + (float)$fila['Suma'], 2);
         }
 
         return $resultado;

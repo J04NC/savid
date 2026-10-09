@@ -431,6 +431,7 @@ class SihosPlanillaIntegradaService
         $resultado = [];
         foreach ($porEmpleado as $emp) {
             $conceptos = [];
+            $terceroMaestro = $repositorio->terceroActualEmpleado($emp['tipo_docu'], $emp['no_id']);
             foreach (self::CONCEPTOS_EMPLEADO as $concepto) {
                 $flagConcepto = SihosExternalRepository::FLAGS_CONCEPTO_CORRECCION[$concepto];
                 $gruposSihos = $repositorio->buscarConceptoCorreccionNomina(
@@ -512,6 +513,28 @@ class SihosPlanillaIntegradaService
                     }
                 }
 
+                // Comparación contra el MAESTRO del empleado (`Empleado.
+                // NuDoXxx`, la afiliación "vigente") — independiente de la
+                // de arriba (que es contra la línea del documento). Solo
+                // informativo: a pedido del usuario (2026-10-09), esto
+                // NUNCA se corrige desde aquí (afectaría períodos futuros,
+                // no solo el corregido) — si difiere, se alerta para que la
+                // persona lo actualice directamente en SIHOS/Empleados y
+                // Contratistas.
+                $maestroTerceroNit = null;
+                $maestroTerceroEstado = 'no_aplica';
+                if ($campoNombreAdmin !== null) {
+                    $maestroTerceroNitCrudo = $terceroMaestro[$concepto] ?? null;
+                    if ($maestroTerceroNitCrudo !== null && $maestroTerceroNitCrudo !== '') {
+                        $maestroTerceroNit = $maestroTerceroNitCrudo;
+                        $maestroTerceroEstado = $terceroSihosNit === null
+                            ? 'no_encontrado'
+                            : (self::limpiarNit($terceroSihosNit) === self::limpiarNit($maestroTerceroNitCrudo) ? 'coincide' : 'diferencia');
+                    } else {
+                        $maestroTerceroEstado = 'no_encontrado';
+                    }
+                }
+
                 $conceptos[] = [
                     'concepto' => $concepto,
                     'suma_archivo' => $sumaArchivo,
@@ -524,6 +547,8 @@ class SihosPlanillaIntegradaService
                     'tercero_sihos_tipo_docu' => $terceroSihosTipoDocu,
                     'tercero_sihos_nit' => $terceroSihosNit,
                     'tercero_estado' => $terceroEstado,
+                    'maestro_tercero_nit' => $maestroTerceroNit,
+                    'maestro_tercero_estado' => $maestroTerceroEstado,
                 ];
             }
 
