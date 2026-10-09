@@ -1,25 +1,37 @@
 <?php
 
 /**
- * Comparación de solo lectura entre la "Planilla Integrada de Liquidación
- * de Aportes" (el archivo que genera el operador de aportes en línea al
- * finalizar el cargue completo — a diferencia de SihosNominaPilaCorreccionService,
- * que trabaja con el reporte de "posibles correcciones" ANTES de liquidar,
- * este archivo refleja lo que YA quedó liquidado/pagado) y los valores
- * reales en `DetaNomi` de SIHOS. Nunca escribe nada — es un reporte de
- * diferencias para revisión manual.
+ * Comparación entre la "Planilla Integrada de Liquidación de Aportes" (el
+ * archivo que genera el operador de aportes en línea al finalizar el
+ * cargue completo — a diferencia de SihosNominaPilaCorreccionService, que
+ * trabaja con el reporte de "posibles correcciones" ANTES de liquidar, este
+ * archivo refleja lo que YA quedó liquidado/pagado) y los valores reales en
+ * `DetaNomi` de SIHOS.
  *
  * Dos niveles de comparación, ambos contra SIHOS en fresco (nunca contra
  * datos ya calculados de otro reporte):
- *  1) Por empleado + concepto (pensión/salud/CCF/SENA/ICBF/ARL) — igual
- *     principio de "sumar todas las porciones del período" que
- *     SihosNominaPilaCorreccionService, porque este archivo también trae
- *     una fila por porción (normal/vacaciones/incapacidad/licencia) cuando
- *     un empleado tuvo una novedad — ver parseCsv().
+ *  1) Por empleado + concepto (pensión/salud/CCF/SENA/ICBF/ARL/Fondo de
+ *     Solidaridad) — igual principio de "sumar todas las porciones del
+ *     período" que SihosNominaPilaCorreccionService, porque este archivo
+ *     también trae una fila por porción (normal/vacaciones/incapacidad/
+ *     licencia) cuando un empleado tuvo una novedad — ver parseCsv(). Para
+ *     pensión/salud/CCF/ARL también compara el TERCERO (AFP/EPS/CCF/ARL)
+ *     que quedó grabado en la línea real de `DetaNomi`
+ *     (`TiDoTerc`/`NuDoTerc`) contra el que liquidó el archivo — ver
+ *     compararEmpleados().
  *  2) Por administradora (agregado de TODA la nómina) — cruza la tabla de
  *     "totales por administradora" del archivo contra la suma real de
- *     `DetaNomi` agrupada por la administradora asignada a cada empleado
- *     (SihosExternalRepository::sumaCotizacionPorAdministradora()).
+ *     `DetaNomi` agrupada por la administradora ASIGNADA HOY a cada
+ *     empleado (SihosExternalRepository::sumaCotizacionPorAdministradora(),
+ *     que lee `Empleado.NuDoXxx`, no `DetaNomi.NuDoTerc` — un chequeo más
+ *     grueso, solo de lectura, para detectar anomalías de bulto).
+ *
+ * SÍ escribe en SIHOS (ver aplicarCorrecciones(), a pedido explícito del
+ * usuario, 2026-10-09): corrige el VALOR de ARL (el único de los 6
+ * conceptos de cotización obligatoria que SihosNominaPilaCorreccionService
+ * deja fuera de su alcance) y el TERCERO de pensión/salud/CCF/ARL, siempre
+ * reutilizando el mismo candado de "nómina preliminar" (`Causado`) de
+ * SihosExternalWriteRepository — nunca toca una nómina ya confirmada.
  */
 class SihosPlanillaIntegradaService
 {
@@ -152,10 +164,12 @@ class SihosPlanillaIntegradaService
     ];
 
     private SihosEmpresaConfigRepository $configRepository;
+    private SihosUsuaDigiResolver $usuaDigiResolver;
 
     public function __construct()
     {
         $this->configRepository = new SihosEmpresaConfigRepository();
+        $this->usuaDigiResolver = new SihosUsuaDigiResolver();
     }
 
     /**
@@ -352,7 +366,7 @@ class SihosPlanillaIntegradaService
         ]);
 
         try {
-            $empleadosComparados = $this->compararEmpleados($repositorio, $codiAno, $codiMes, $empleadosArchivo);
+            $empleadosComparados = $this->compararEmpleados($repositorio, $codiAno, $codiMes, $empleadosArchivo, $administradorasArchivo);
             $administradorasComparadas = $this->compararAdministradoras($repositorio, $codiAno, $codiMes, $administradorasArchivo, $empleadosArchivo);
         } catch (PDOException $e) {
             return ['ok' => false, 'error' => 'No se pudo consultar SIHOS: ' . $e->getMessage()];
@@ -363,10 +377,23 @@ class SihosPlanillaIntegradaService
 
     /**
      * @param list<array<string,mixed>> $empleadosArchivo
+     * @param list<array<string,mixed>> $administradorasArchivo
      * @return list<array{tipo_docu:string,no_id:string,nombre:string,conceptos:list<array<string,mixed>>}>
      */
-    private function compararEmpleados(SihosExternalRepository $repositorio, string $codiAno, string $codiMes, array $empleadosArchivo): array
+    private function compararEmpleados(SihosExternalRepository $repositorio, string $codiAno, string $codiMes, array $empleadosArchivo, array $administradorasArchivo): array
     {
+        // Nombre de administradora => NIT (sin DV), por concepto — para
+        // resolver, a partir del nombre que el archivo asigna a CADA
+        // empleado (OFFSETS_DETALLE: nombre_afp/nombre_eps/nombre_ccf/
+        // nombre_arp), el NIT con el que comparar contra el tercero real de
+        // la línea en SIHOS (ver CAMPO_NOMBRE_ADMINISTRADORA_POR_CONCEPTO más
+        // abajo). Mismo catálogo que ya usa compararAdministradoras(), solo
+        // que aquí se indexa por nombre en vez de recorrerse en bloque.
+        $nitPorConceptoYNombre = [];
+        foreach ($administradorasArchivo as $fila) {
+            $nitPorConceptoYNombre[$fila['concepto']][$fila['nombre']] = $fila['nit'];
+        }
+
         // 1) Agrupar las filas del archivo por empleado, sumando cada
         // concepto entre TODAS sus porciones del período (normal +
         // vacaciones/incapacidad/licencia) — cada fila del archivo ya trae
@@ -382,12 +409,21 @@ class SihosPlanillaIntegradaService
                     'no_id' => $fila['no_id'],
                     'nombre' => $fila['apellido'],
                     'sumas' => array_fill_keys(self::CONCEPTOS_EMPLEADO, 0.0),
+                    'nombres_administradora' => [],
                 ];
             }
             foreach (self::CONCEPTOS_EMPLEADO as $concepto) {
                 $valor = $fila['cot_' . $concepto] ?? null;
                 if ($valor !== null) {
                     $porEmpleado[$clave]['sumas'][$concepto] += $valor;
+                }
+            }
+            // El nombre de administradora por empleado es el mismo en todas
+            // las porciones del período (normal/vacaciones/...) — se toma de
+            // la primera fila que lo traiga, no hace falta acumular.
+            foreach (self::CAMPO_NOMBRE_ADMINISTRADORA_POR_CONCEPTO as $concepto => $campoNombre) {
+                if (!isset($porEmpleado[$clave]['nombres_administradora'][$concepto]) && ($fila[$campoNombre] ?? '') !== '') {
+                    $porEmpleado[$clave]['nombres_administradora'][$concepto] = $fila[$campoNombre];
                 }
             }
         }
@@ -409,8 +445,11 @@ class SihosPlanillaIntegradaService
                             'codi_docu' => $g['codiDocu'],
                             'nume_docu' => $g['numeDocu'],
                             'nombre_docu' => $g['nombreDocu'],
+                            'codi_conc' => $g['codiConc'],
                             'causado' => $causado,
                             'total' => round($linea['valoEmpe'] + $linea['valoPatr'], 2),
+                            'ti_do_terc' => $linea['tiDoTerc'],
+                            'nu_do_terc' => $linea['nuDoTerc'],
                         ];
                     }
                 }
@@ -433,6 +472,46 @@ class SihosPlanillaIntegradaService
                     $estado = 'diferencia';
                 }
 
+                // Comparación de TERCERO (independiente del valor, ver
+                // docblock de la clase) — solo para los 4 conceptos con
+                // administradora elegible por empleado (pensión/salud/CCF/
+                // ARL; SENA/ICBF son de entidad única, no aplica). Se
+                // compara contra la línea de SIHOS de MAYOR valor (mismo
+                // criterio que SihosNominaPilaCorreccionService::evaluarGrupo()
+                // usa para elegir cuál línea corregir cuando hay varias) —
+                // solo es informativo aquí; aplicarCorrecciones() re-verifica
+                // fresco cuál línea sigue abierta antes de escribir.
+                $campoNombreAdmin = self::CAMPO_NOMBRE_ADMINISTRADORA_POR_CONCEPTO[$concepto] ?? null;
+                $terceroArchivoNombre = null;
+                $terceroArchivoNit = null;
+                $terceroSihosTipoDocu = null;
+                $terceroSihosNit = null;
+                $terceroEstado = 'no_aplica';
+
+                if ($campoNombreAdmin !== null) {
+                    $terceroArchivoNombre = $emp['nombres_administradora'][$concepto] ?? null;
+                    $terceroArchivoNit = $terceroArchivoNombre !== null
+                        ? ($nitPorConceptoYNombre[$concepto][$terceroArchivoNombre] ?? null)
+                        : null;
+
+                    if ($lineasSihos !== []) {
+                        $lineasOrdenadas = $lineasSihos;
+                        usort($lineasOrdenadas, static fn (array $a, array $b): int => $b['total'] <=> $a['total']);
+                        $lineaElegida = $lineasOrdenadas[0];
+                        $terceroSihosTipoDocu = $lineaElegida['ti_do_terc'];
+                        $terceroSihosNit = $lineaElegida['nu_do_terc'];
+
+                        if ($terceroArchivoNit === null) {
+                            $terceroEstado = 'no_encontrado';
+                        } else {
+                            $nitSihosLimpio = self::limpiarNit($terceroSihosNit);
+                            $terceroEstado = $nitSihosLimpio === $terceroArchivoNit ? 'coincide' : 'diferencia';
+                        }
+                    } else {
+                        $terceroEstado = 'no_encontrado';
+                    }
+                }
+
                 $conceptos[] = [
                     'concepto' => $concepto,
                     'suma_archivo' => $sumaArchivo,
@@ -440,6 +519,11 @@ class SihosPlanillaIntegradaService
                     'diferencia' => $sumaSihos === null ? null : round($sumaArchivo - $sumaSihos, 2),
                     'lineas_sihos' => $lineasSihos,
                     'estado' => $estado,
+                    'tercero_archivo_nombre' => $terceroArchivoNombre,
+                    'tercero_archivo_nit' => $terceroArchivoNit,
+                    'tercero_sihos_tipo_docu' => $terceroSihosTipoDocu,
+                    'tercero_sihos_nit' => $terceroSihosNit,
+                    'tercero_estado' => $terceroEstado,
                 ];
             }
 
@@ -609,6 +693,290 @@ class SihosPlanillaIntegradaService
         }
 
         return $resultado;
+    }
+
+    /**
+     * Aplica, para los pares (tipo_docu,no_id,concepto) que el usuario marcó
+     * en la vista previa, UNO de dos tipos de corrección en `DetaNomi`:
+     *
+     *  - 'valor' (SOLO para 'arl'): ajusta `ValoPatr` para que el total
+     *    (ValoEmpe+ValoPatr) quede igual a lo liquidado en la Planilla
+     *    Integrada. Mismo mecanismo que
+     *    SihosNominaPilaCorreccionService::aplicarCorrecciones(), que
+     *    deliberadamente deja ARL fuera de su alcance — aquí es el único
+     *    lugar donde SÍ se corrige, porque el archivo de esta pantalla (ya
+     *    liquidado) es el único que trae un "valor esperado" confiable para
+     *    ARL.
+     *  - 'tercero' (pensión/salud/CCF/ARL): ajusta `TiDoTerc`/`NuDoTerc` de
+     *    la línea para que coincida con la administradora que liquidó el
+     *    archivo — ver corregirTerceroNomina().
+     *
+     * En ambos casos: re-verifica fresco en SIHOS (nunca confía en la vista
+     * previa), nunca escribe en una nómina ya causada (candado reutilizado
+     * de SihosExternalWriteRepository), y si hay más de una línea abierta
+     * para el concepto, elige la de MAYOR valor (mismo criterio ya usado en
+     * SihosNominaPilaCorreccionService::aplicarCorrecciones()).
+     *
+     * @param list<array<string,mixed>> $seleccion cada item: tipo_docu, no_id, concepto, tipo_correccion ('valor'|'tercero'), suma_esperada (solo 'valor'), tercero_nit (solo 'tercero')
+     * @return array{ok:bool,error?:string,resultados?:list<array<string,mixed>>}
+     */
+    public function aplicarCorrecciones(int $empresaId, string $codiAno, string $codiMes, array $seleccion): array
+    {
+        if ($seleccion === []) {
+            return ['ok' => false, 'error' => 'No hay ninguna corrección seleccionada.'];
+        }
+
+        $configFila = $this->configRepository->findByEmpresaId($empresaId);
+        if ($configFila === null || $configFila['host'] === '' || $configFila['base_datos'] === '') {
+            return ['ok' => false, 'error' => 'Esta empresa no tiene conexión a SIHOS configurada.'];
+        }
+
+        $codiInst = trim((string)($configFila['codi_inst'] ?? ''));
+        $usuarioEscritura = trim((string)($configFila['usuario_escritura'] ?? ''));
+        if ($codiInst === '' || $usuarioEscritura === '' || empty($configFila['password_escritura_cifrado'])) {
+            return [
+                'ok' => false,
+                'error' => 'Configure las credenciales de escritura de esta empresa en Conexión SIHOS antes de usar esta acción.',
+            ];
+        }
+
+        $repositorioLectura = new SihosExternalRepository([
+            'host' => $configFila['host'],
+            'port' => (string)$configFila['puerto'],
+            'database' => $configFila['base_datos'],
+            'username' => $configFila['usuario'],
+            'codiInst' => $codiInst,
+            'password' => SihosCredentialCipher::decrypt($configFila['password_cifrado'] ?? null),
+            'charset' => $configFila['charset'],
+        ]);
+
+        $usuaDigi = $this->usuaDigiResolver->resolver((int)($_SESSION['user_id'] ?? 0), $repositorioLectura);
+
+        $repositorioEscritura = new SihosExternalWriteRepository([
+            'host' => $configFila['host'],
+            'port' => (string)$configFila['puerto'],
+            'database' => $configFila['base_datos'],
+            'username' => $usuarioEscritura,
+            'codiInst' => $codiInst,
+            'password' => SihosCredentialCipher::decrypt($configFila['password_escritura_cifrado']),
+            'charset' => $configFila['charset'],
+        ]);
+
+        $resultados = [];
+
+        foreach ($seleccion as $item) {
+            $tipoDocu = trim((string)($item['tipo_docu'] ?? ''));
+            $numePers = trim((string)($item['no_id'] ?? ''));
+            $concepto = trim((string)($item['concepto'] ?? ''));
+            $tipoCorreccion = trim((string)($item['tipo_correccion'] ?? ''));
+
+            $etiqueta = "{$tipoDocu} {$numePers} — {$concepto} ({$tipoCorreccion})";
+
+            if ($tipoDocu === '' || $numePers === '' || !isset(SihosExternalRepository::FLAGS_CONCEPTO_CORRECCION[$concepto])) {
+                $resultados[] = ['etiqueta' => $etiqueta, 'ok' => false, 'motivo' => 'Datos incompletos o inválidos.'];
+                continue;
+            }
+
+            // 'valor' solo para ARL (ver docblock) — los otros 5 conceptos
+            // de cotización obligatoria ya se corrigen, por valor, desde
+            // sihos/nominaPilaCorreccion. 'tercero' solo para los 4
+            // conceptos con administradora elegible por empleado.
+            if ($tipoCorreccion === 'valor' && $concepto !== 'arl') {
+                $resultados[] = ['etiqueta' => $etiqueta, 'ok' => false, 'motivo' => 'Corrección de valor fuera de alcance para este concepto.'];
+                continue;
+            }
+            if ($tipoCorreccion === 'tercero' && !isset(self::CAMPO_NOMBRE_ADMINISTRADORA_POR_CONCEPTO[$concepto])) {
+                $resultados[] = ['etiqueta' => $etiqueta, 'ok' => false, 'motivo' => 'Corrección de tercero fuera de alcance para este concepto.'];
+                continue;
+            }
+            if (!in_array($tipoCorreccion, ['valor', 'tercero'], true)) {
+                $resultados[] = ['etiqueta' => $etiqueta, 'ok' => false, 'motivo' => 'Tipo de corrección inválido.'];
+                continue;
+            }
+
+            $flagConcepto = SihosExternalRepository::FLAGS_CONCEPTO_CORRECCION[$concepto];
+
+            try {
+                $gruposSihos = $repositorioLectura->buscarConceptoCorreccionNomina($tipoDocu, $numePers, $codiAno, $codiMes, $flagConcepto);
+            } catch (PDOException $e) {
+                $resultados[] = ['etiqueta' => $etiqueta, 'ok' => false, 'motivo' => 'No se pudo consultar SIHOS: ' . $e->getMessage()];
+                continue;
+            }
+
+            if ($gruposSihos === []) {
+                $resultados[] = ['etiqueta' => $etiqueta, 'ok' => false, 'motivo' => 'Ya no se encuentra esta línea en SIHOS.'];
+                continue;
+            }
+
+            $lineasSihos = [];
+            try {
+                foreach ($gruposSihos as $g) {
+                    $causado = $repositorioLectura->nominaEstaCausada($g['codiDocu'], $g['numeDocu']);
+                    foreach ($g['lineas'] as $linea) {
+                        $lineasSihos[] = [
+                            'codi_docu' => $g['codiDocu'],
+                            'nume_docu' => $g['numeDocu'],
+                            'codi_conc' => $g['codiConc'],
+                            'causado' => $causado,
+                            'total' => round($linea['valoEmpe'] + $linea['valoPatr'], 2),
+                        ];
+                    }
+                }
+            } catch (PDOException $e) {
+                $resultados[] = ['etiqueta' => $etiqueta, 'ok' => false, 'motivo' => 'No se pudo consultar SIHOS: ' . $e->getMessage()];
+                continue;
+            }
+
+            $abiertas = array_values(array_filter($lineasSihos, static fn (array $l): bool => !$l['causado']));
+
+            if ($abiertas === []) {
+                $resultados[] = [
+                    'etiqueta' => $etiqueta,
+                    'ok' => false,
+                    'motivo' => 'Todas las líneas de este concepto ya están confirmadas en SIHOS — no se corrige automáticamente.',
+                ];
+                continue;
+            }
+
+            // Mismo criterio que SihosNominaPilaCorreccionService::aplicarCorrecciones():
+            // con más de una línea abierta, se elige la de MAYOR valor.
+            usort($abiertas, static fn (array $a, array $b): int => $b['total'] <=> $a['total']);
+            $abierta = $abiertas[0];
+
+            if ($tipoCorreccion === 'valor') {
+                $sumaEsperada = is_numeric($item['suma_esperada'] ?? null) ? round((float)$item['suma_esperada'], 2) : null;
+                if ($sumaEsperada === null) {
+                    $resultados[] = ['etiqueta' => $etiqueta, 'ok' => false, 'motivo' => 'Falta el valor esperado del archivo.'];
+                    continue;
+                }
+
+                $sumaCerradas = round(array_sum(array_column($lineasSihos, 'total')) - $abierta['total'], 2);
+                $totalObjetivoLinea = round($sumaEsperada - $sumaCerradas, 2);
+
+                try {
+                    $resultado = $repositorioEscritura->corregirValoPatrNomina(
+                        $abierta['codi_docu'], $abierta['nume_docu'], $codiAno, $codiMes,
+                        $tipoDocu, $numePers, $abierta['codi_conc'], $totalObjetivoLinea, $usuaDigi
+                    );
+                } catch (SihosOperacionEnCursoException $e) {
+                    $resultados[] = ['etiqueta' => $etiqueta, 'ok' => false, 'motivo' => $e->getMessage()];
+                    continue;
+                } catch (PDOException $e) {
+                    $resultados[] = ['etiqueta' => $etiqueta, 'ok' => false, 'motivo' => 'No se pudo corregir en SIHOS: ' . $e->getMessage()];
+                    continue;
+                }
+
+                if (!$resultado['ok']) {
+                    $resultados[] = ['etiqueta' => $etiqueta, 'ok' => false, 'motivo' => $resultado['motivo'] ?? 'Rechazado por SIHOS.'];
+                    continue;
+                }
+
+                $this->registrarAuditoria(
+                    $empresaId, 'sihos.DetaNomi',
+                    "{$codiInst}-{$abierta['codi_docu']}-{$abierta['nume_docu']}-{$tipoDocu}-{$numePers}-{$abierta['codi_conc']}",
+                    json_encode(['ValoPatr' => $resultado['valoPatrAntes']], JSON_UNESCAPED_UNICODE),
+                    json_encode(['ValoPatr' => $resultado['valoPatrDespues']], JSON_UNESCAPED_UNICODE),
+                    "Corrección de aporte patronal (ARL) en DetaNomi de SIHOS, nómina {$abierta['codi_docu']}-{$abierta['nume_docu']}, "
+                        . "empleado {$tipoDocu} {$numePers}, a partir de la Planilla Integrada de Liquidación de Aportes ya pagada "
+                        . "(valor liquidado: {$sumaEsperada})."
+                );
+
+                $resultados[] = [
+                    'etiqueta' => $etiqueta, 'ok' => true,
+                    'valo_patr_antes' => $resultado['valoPatrAntes'], 'valo_patr_despues' => $resultado['valoPatrDespues'],
+                ];
+                continue;
+            }
+
+            // $tipoCorreccion === 'tercero'
+            $terceroNit = trim((string)($item['tercero_nit'] ?? ''));
+            if ($terceroNit === '') {
+                $resultados[] = ['etiqueta' => $etiqueta, 'ok' => false, 'motivo' => 'Falta el NIT del tercero del archivo.'];
+                continue;
+            }
+
+            $tercero = $repositorioLectura->buscarTerceroPorNit($terceroNit);
+            if ($tercero === null) {
+                $resultados[] = ['etiqueta' => $etiqueta, 'ok' => false, 'motivo' => "El NIT {$terceroNit} del archivo no se encontró (o es ambiguo) en el catálogo de terceros de SIHOS."];
+                continue;
+            }
+
+            try {
+                $resultado = $repositorioEscritura->corregirTerceroNomina(
+                    $abierta['codi_docu'], $abierta['nume_docu'], $codiAno, $codiMes,
+                    $tipoDocu, $numePers, $abierta['codi_conc'], $tercero['tipoDocu'], $tercero['numeTerc'], $usuaDigi
+                );
+            } catch (SihosOperacionEnCursoException $e) {
+                $resultados[] = ['etiqueta' => $etiqueta, 'ok' => false, 'motivo' => $e->getMessage()];
+                continue;
+            } catch (PDOException $e) {
+                $resultados[] = ['etiqueta' => $etiqueta, 'ok' => false, 'motivo' => 'No se pudo corregir en SIHOS: ' . $e->getMessage()];
+                continue;
+            }
+
+            if (!$resultado['ok']) {
+                $resultados[] = ['etiqueta' => $etiqueta, 'ok' => false, 'motivo' => $resultado['motivo'] ?? 'Rechazado por SIHOS.'];
+                continue;
+            }
+
+            $this->registrarAuditoria(
+                $empresaId, 'sihos.DetaNomi',
+                "{$codiInst}-{$abierta['codi_docu']}-{$abierta['nume_docu']}-{$tipoDocu}-{$numePers}-{$abierta['codi_conc']}",
+                json_encode(['TiDoTerc' => $resultado['tiDoTercAntes'], 'NuDoTerc' => $resultado['nuDoTercAntes']], JSON_UNESCAPED_UNICODE),
+                json_encode(['TiDoTerc' => $resultado['tiDoTercDespues'], 'NuDoTerc' => $resultado['nuDoTercDespues']], JSON_UNESCAPED_UNICODE),
+                "Corrección de tercero ({$concepto}) en DetaNomi de SIHOS, nómina {$abierta['codi_docu']}-{$abierta['nume_docu']}, "
+                    . "empleado {$tipoDocu} {$numePers}, a partir de la Planilla Integrada de Liquidación de Aportes ya pagada "
+                    . "(tercero liquidado NIT: {$terceroNit})."
+            );
+
+            $resultados[] = [
+                'etiqueta' => $etiqueta, 'ok' => true,
+                'ti_do_terc_antes' => $resultado['tiDoTercAntes'], 'nu_do_terc_antes' => $resultado['nuDoTercAntes'],
+                'ti_do_terc_despues' => $resultado['tiDoTercDespues'], 'nu_do_terc_despues' => $resultado['nuDoTercDespues'],
+            ];
+        }
+
+        return ['ok' => true, 'resultados' => $resultados];
+    }
+
+    /**
+     * Registro manual en la auditoría de SAVID: AuditingPDO solo cubre
+     * escrituras en la BD propia de SAVID, no ésta contra SIHOS. Mismo
+     * patrón que SihosNominaPilaCorreccionService::registrarAuditoria().
+     */
+    private function registrarAuditoria(
+        int $empresaId,
+        string $tabla,
+        string $registroId,
+        ?string $datosAnteriores,
+        ?string $datosNuevos,
+        string $sqlResumen
+    ): void {
+        $pdo = (new Database())->connect();
+
+        $stmt = $pdo->prepare('
+            INSERT INTO auditoria (
+                accion, tabla, registro_id,
+                datos_anteriores, datos_nuevos, campos_cambiados,
+                sql_resumen, usuario_id, empresa_id, sede_id,
+                ip, user_agent, request_url
+            ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)
+        ');
+
+        $stmt->execute([
+            'UPDATE',
+            $tabla,
+            $registroId,
+            $datosAnteriores,
+            $datosNuevos,
+            $sqlResumen,
+            $_SESSION['user_id'] ?? null,
+            $empresaId,
+            $_SESSION['sede_id'] ?? null,
+            $_SERVER['REMOTE_ADDR'] ?? null,
+            $_SERVER['HTTP_USER_AGENT'] ?? null,
+            $_SERVER['REQUEST_URI'] ?? null,
+        ]);
     }
 
     /** "$207,500" => 207500.0; "" o formato no numérico => null. */
