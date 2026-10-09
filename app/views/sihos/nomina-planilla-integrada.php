@@ -215,9 +215,21 @@ $sihosPlanillaIntegradaJsV = is_readable($assetSihosPlanillaIntegrada) ? (int)fi
                                 <?php foreach ($emp['conceptos'] as $c): ?>
                                     <?php
                                     $et = $etiquetasEstado[$c['estado']];
-                                    $hayLineaAbierta = count(array_filter($c['lineas_sihos'], static fn (array $l): bool => !$l['causado'])) > 0;
+                                    $lineasAbiertas = array_values(array_filter($c['lineas_sihos'], static fn (array $l): bool => !$l['causado']));
+                                    $hayLineaAbierta = $lineasAbiertas !== [];
                                     $aplicableValor = $puedeGuardar && $c['concepto'] === 'arl' && $c['estado'] === 'diferencia' && $hayLineaAbierta;
                                     $aplicableTercero = $puedeGuardar && $c['tercero_estado'] === 'diferencia' && $c['tercero_archivo_nit'] !== null && $hayLineaAbierta;
+
+                                    // Mismo criterio de "elegir la de mayor valor" que usa
+                                    // aplicarCorrecciones() cuando hay varias líneas abiertas —
+                                    // se muestra aquí cuál es, para que quede claro a qué
+                                    // nómina pertenece el registro que se actualizaría.
+                                    $lineaElegida = null;
+                                    if ($hayLineaAbierta) {
+                                        $ordenadas = $lineasAbiertas;
+                                        usort($ordenadas, static fn (array $a, array $b): int => $b['total'] <=> $a['total']);
+                                        $lineaElegida = $ordenadas[0];
+                                    }
                                     ?>
                                     <tr class="sihos-pi-correccion-fila">
                                         <td style="width:90px;"><strong><?= htmlspecialchars($nombreConcepto[$c['concepto']] ?? $c['concepto']) ?></strong></td>
@@ -226,6 +238,15 @@ $sihosPlanillaIntegradaJsV = is_readable($assetSihosPlanillaIntegrada) ? (int)fi
                                         <td><?= $c['diferencia'] !== null ? 'diferencia $' . number_format($c['diferencia'], 0, ',', '.') : '' ?></td>
                                         <td class="sihos-correccion-estado">
                                             <span style="color:<?= $et['color'] ?>;"><?= $et['texto'] ?></span>
+                                            <?php if ($lineaElegida !== null && ($aplicableValor || $aplicableTercero)): ?>
+                                                <div class="field-note" style="margin-top:2px;">
+                                                    Nómina a actualizar: <?= htmlspecialchars($lineaElegida['nombre_docu']) ?>
+                                                    (<?= htmlspecialchars($lineaElegida['codi_docu']) ?>-<?= htmlspecialchars($lineaElegida['nume_docu']) ?>)
+                                                    <?php if (count($lineasAbiertas) > 1): ?>
+                                                        <span title="Había <?= count($lineasAbiertas) ?> líneas sin confirmar para este concepto — se eligió automáticamente la de mayor valor. Verifique antes de aplicar." style="color:#e67e22;cursor:help;">⚠</span>
+                                                    <?php endif; ?>
+                                                </div>
+                                            <?php endif; ?>
                                             <?php if ($aplicableValor): ?>
                                                 <label class="field-note" style="margin-left:8px;">
                                                     <input type="checkbox" class="sihos-pi-check"
@@ -243,10 +264,12 @@ $sihosPlanillaIntegradaJsV = is_readable($assetSihosPlanillaIntegrada) ? (int)fi
                                                     <div style="margin-top:6px;padding:8px;background:rgba(255,255,255,0.03);border-radius:6px;">
                                                         <ul style="margin:0;padding:0 0 0 18px;">
                                                             <?php foreach ($c['lineas_sihos'] as $linea): ?>
-                                                                <li>
+                                                                <?php $esLaElegida = $lineaElegida !== null && !$linea['causado'] && $linea['codi_docu'] === $lineaElegida['codi_docu'] && $linea['nume_docu'] === $lineaElegida['nume_docu']; ?>
+                                                                <li<?= $esLaElegida ? ' style="font-weight:bold;"' : '' ?>>
                                                                     <?= htmlspecialchars($linea['nombre_docu']) ?> (<?= htmlspecialchars($linea['codi_docu']) ?>-<?= htmlspecialchars($linea['nume_docu']) ?>)
                                                                     — <?= $linea['causado'] ? 'CONFIRMADA' : 'sin confirmar' ?>
                                                                     — $<?= number_format($linea['total'], 0, ',', '.') ?>
+                                                                    <?= $esLaElegida ? ' ← se ajustará esta' : '' ?>
                                                                 </li>
                                                             <?php endforeach; ?>
                                                         </ul>
