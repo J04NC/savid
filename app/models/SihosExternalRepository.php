@@ -974,6 +974,12 @@ class SihosExternalRepository
      * exclusión NO aplica si la nota se referencia a sí misma (TiDoRefe
      * apunta a su propio CodiDocu/NumeDocu): eso es en sí mismo un
      * problema de trazabilidad que no debe quedar oculto.
+     * Cada línea se evalúa contra la factura que ella misma referencia
+     * (dc.TiDoRefe/NuDoRefe); solo las líneas sin referencia propia se
+     * evalúan contra todas las facturas de la nota. Sin esto, una nota que
+     * consolida varias facturas con cuentas de ingreso distintas se
+     * cruzaba línea×factura y quedaba marcada aunque cada línea estuviera
+     * en la cuenta correcta de su propia factura.
      * Mismo criterio de vigencia actual que los chequeos 3/4.
      *
      * @param string[] $codigosNota
@@ -1002,6 +1008,10 @@ class SihosExternalRepository
                 ON fact.CodiInst = nc.CodiInst AND fact.CodiDocu = dcref.TiDoRefe AND fact.NumeDocu = dcref.NuDoRefe
             INNER JOIN DetaCont dc
                 ON dc.CodiInst = nc.CodiInst AND dc.CodiDocu = nc.CodiDocu AND dc.NumeDocu = nc.NumeDocu
+               AND (
+                   dc.TiDoRefe IS NULL OR dc.TiDoRefe = ''
+                   OR (dc.TiDoRefe = fact.CodiDocu AND dc.NuDoRefe = fact.NumeDocu)
+               )
             WHERE nc.CodiInst = ?
               AND nc.CodiDocu IN ({$ph})
               AND nc.FechDocu BETWEEN ? AND ?
