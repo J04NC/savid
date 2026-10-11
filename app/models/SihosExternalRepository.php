@@ -325,7 +325,11 @@ class SihosExternalRepository
      * por rubro — se suman). El signo se invierte para los documentos de
      * $codigosSignoInvertido (glosas/notas que en DetaPlan quedan con el
      * signo contrario al de la ejecución presupuestal — regla de negocio
-     * confirmada por el usuario contra su propio reporte de SIHOS).
+     * confirmada por el usuario contra su propio reporte de SIHOS). Solo se
+     * invierte con TipoComp 5 (Devolución Factura), 0 o 21 (nota que anula
+     * la factura completa — confirmado por el usuario; sin el 21, FE-570971
+     * quedaba con presupuesto duplicado: factura + nota sumaban en vez de
+     * restar).
      *
      * @param string[] $codigosPresupuesto
      * @param string[] $codigosSignoInvertido
@@ -353,7 +357,7 @@ class SihosExternalRepository
 
         $sql = "
             SELECT EP.CodiDocu, EP.NumeDocu, MIN(EP.FechDocu) AS FechDocu, MIN(EP.CentCost) AS CentCost, MIN(EP.TipoUsua) AS TipoUsua,
-                   SUM(IF(EP.TipoComp IN ('5', '0') AND ({$condicionSigno}), DP.Valor * -1, DP.Valor)) AS Valor
+                   SUM(IF(EP.TipoComp IN ('5', '0', '21') AND ({$condicionSigno}), DP.Valor * -1, DP.Valor)) AS Valor
             FROM EncaCont EP
             INNER JOIN DetaPlan DP
                 ON EP.CodiInst = DP.CodiInst AND EP.CodiAno = DP.CodiAno AND EP.CodiDocu = DP.CodiDocu AND EP.NumeDocu = DP.NumeDocu
