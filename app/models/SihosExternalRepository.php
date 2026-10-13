@@ -2343,6 +2343,23 @@ class SihosExternalRepository
             return null;
         }
 
+        // Fuente principal cuando existe: DetaNoFa (qué ítems de qué
+        // liquidación afecta la nota). Si la nota no tiene DetaNoFa, o no se
+        // puede resolver sin ambigüedad, sigue la lógica de abajo.
+        $porDetaNoFa = $this->emparejarPorDetaNoFa($codiInst, $codiDocuNota, $numeDocuNota, (string)$nota['FechDocu']);
+        if ($porDetaNoFa !== null) {
+            return [
+                'Anulado' => (int)$nota['Anulado'],
+                'FechDocu' => (string)$nota['FechDocu'],
+                'TiDoTerc' => $nota['TiDoTerc'],
+                'NuDoTerc' => $nota['NuDoTerc'],
+                'CodiCent' => $nota['CodiCent'],
+                'FacturaCodiDocu' => $porDetaNoFa[0]['TiDoRefe'],
+                'FacturaNumeDocu' => $porDetaNoFa[0]['NuDoRefe'],
+                'Emparejamientos' => $porDetaNoFa,
+            ];
+        }
+
         $stmt = $this->connect()->prepare(
             "SELECT dc.ConsDeta, dc.CodiCont, dc.CentCost, dc.TiDoTerc, dc.NuDoTerc, dc.Valor, dc.TiDoRefe, dc.NuDoRefe
              FROM DetaCont dc
