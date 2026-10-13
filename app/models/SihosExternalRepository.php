@@ -574,7 +574,8 @@ class SihosExternalRepository
             WHERE ec.CodiInst = ?
               AND ec.CodiDocu IN ({$phFact})
               AND ec.FechDocu BETWEEN ? AND ?
-              AND ec.Anulado = 0
+              AND ec.Causado = '1'
+              AND ec.Anulado <> '1'
               AND NOT EXISTS (
                   SELECT 1 FROM DetaCont dc
                   WHERE dc.CodiInst = ec.CodiInst AND dc.CodiDocu = ec.CodiDocu AND dc.NumeDocu = ec.NumeDocu
