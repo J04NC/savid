@@ -528,7 +528,7 @@ class SihosExternalRepository
             WHERE ec.CodiInst = ?
               AND ec.CodiDocu IN ({$ph})
               AND ec.FechDocu BETWEEN ? AND ?
-              AND ec.Anulado = 0
+              AND ec.Causado = '1' AND ec.Anulado <> '1'
               AND NOT EXISTS (
                   SELECT 1 FROM DetaPlan dp
                   WHERE dp.CodiInst = ec.CodiInst AND dp.CodiDocu = ec.CodiDocu AND dp.NumeDocu = ec.NumeDocu
@@ -657,7 +657,7 @@ class SihosExternalRepository
             WHERE nc.CodiInst = ?
               AND nc.CodiDocu IN ({$ph})
               AND nc.FechDocu BETWEEN ? AND ?
-              AND nc.Anulado = 0
+              AND nc.Causado = '1' AND nc.Anulado <> '1'
               AND YEAR(nc.FechDocu) = YEAR(fact.FechDocu)
             HAVING (TieneDetaPlan = 0 OR TieneCuenta4 = 0)
                AND (AnotGlosTipoCond IS NULL OR AnotGlosTipoCond = 1 OR (AnotGlosTipoCond = 2 AND AnotGlosTipoDeta = 1))
@@ -883,7 +883,7 @@ class SihosExternalRepository
             WHERE nc.CodiInst = ?
               AND nc.CodiDocu IN ({$ph})
               AND nc.FechDocu BETWEEN ? AND ?
-              AND nc.Anulado = 0
+              AND nc.Causado = '1' AND nc.Anulado <> '1'
               AND YEAR(fact.FechDocu) < YEAR(nc.FechDocu)
               AND EXISTS (
                   SELECT 1 FROM DetaPlan dp2
@@ -950,7 +950,7 @@ class SihosExternalRepository
             WHERE ec.CodiInst = ?
               AND ec.CodiDocu IN ({$phFact})
               AND ec.FechDocu BETWEEN ? AND ?
-              AND ec.Anulado = 0
+              AND ec.Causado = '1' AND ec.Anulado <> '1'
               AND dc.CodiCont NOT LIKE '13%'
               AND dc.CodiCont NOT LIKE '14%'
               AND dc.CodiCont NOT LIKE '4%'
@@ -1020,7 +1020,7 @@ class SihosExternalRepository
             WHERE nc.CodiInst = ?
               AND nc.CodiDocu IN ({$ph})
               AND nc.FechDocu BETWEEN ? AND ?
-              AND nc.Anulado = 0
+              AND nc.Causado = '1' AND nc.Anulado <> '1'
               AND YEAR(nc.FechDocu) = YEAR(fact.FechDocu)
               AND dc.CodiCont NOT LIKE '13%'
               AND dc.CodiCont NOT LIKE '14%'
@@ -1106,7 +1106,7 @@ class SihosExternalRepository
             WHERE nc.CodiInst = ?
               AND nc.CodiDocu IN ({$ph})
               AND nc.FechDocu BETWEEN ? AND ?
-              AND nc.Anulado = 0
+              AND nc.Causado = '1' AND nc.Anulado <> '1'
               AND YEAR(fact.FechDocu) < YEAR(nc.FechDocu)
               AND dc.CodiCont NOT LIKE '13%'
               AND dc.CodiCont NOT LIKE '14%'
@@ -1548,7 +1548,7 @@ class SihosExternalRepository
             WHERE ec.CodiInst = ?
               AND ec.CodiDocu IN ({$phFact})
               AND ec.FechDocu BETWEEN ? AND ?
-              AND ec.Anulado = 0
+              AND ec.Causado = '1' AND ec.Anulado <> '1'
               AND dc.CodiCont NOT LIKE '13%'
               AND dc.CodiCont NOT LIKE '14%'
               AND dc.CodiCont NOT LIKE '4312%'
@@ -1571,7 +1571,7 @@ class SihosExternalRepository
                 WHERE fact.CodiInst = ?
                   AND fact.CodiDocu IN ({$phFact})
                   AND fact.FechDocu BETWEEN ? AND ?
-                  AND fact.Anulado = 0
+                  AND fact.Causado = '1' AND fact.Anulado <> '1'
                   AND vinc.CodiDocu IN ({$phVinc})
                   AND vinc.Anulado = 0
                   AND dcv.CodiCont NOT LIKE '13%'
