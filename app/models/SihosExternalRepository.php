@@ -765,6 +765,79 @@ class SihosExternalRepository
     }
 
     /**
+     * "Anulación definitiva": pares nota↔factura cuyo conjunto de documentos
+     * (la factura, los DAC confirmados que la referencian y la propia nota)
+     * cierra en cero — cada cuenta distinta de 13/14/8 netea exactamente 0 y
+     * la cartera (13 y 14) netea 0 como GRUPO (la nota puede usar otra
+     * subcuenta de cartera que la factura). Cubre el caso capita: el ingreso
+     * de la factura (2910xx) lo distribuye un DAC a cuentas 43xx y la nota
+     * es el espejo de ese DAC, sin compartir ninguna cuenta con la factura.
+     * Solo se cuentan esos tres tipos de documento (no cualquiera que
+     * referencie la factura: un recaudo traería banco y nunca netearía 0).
+     * Comparte la definición entre las secciones 3c y 5b.
+     *
+     * @param list<array{CodiDocu:string,NumeDocu:string,FacturaCodiDocu:string,FacturaNumeDocu:string}> $pares
+     * @param string[] $codigosDac
+     * @return array<string, true> indexado por "{CodiDocu}-{NumeDocu}|{FacturaCodiDocu}-{FacturaNumeDocu}"
+     */
+    public function fetchParesNotaFacturaQueCierranEnCero(array $pares, array $codigosDac): array
+    {
+        $cierran = [];
+        if ($pares === []) {
+            return $cierran;
+        }
+
+        $phDac = $codigosDac !== [] ? implode(',', array_fill(0, count($codigosDac), '?')) : "''";
+        $sql = "
+            SELECT IF(dc.CodiCont LIKE '13%' OR dc.CodiCont LIKE '14%', 'CARTERA', dc.CodiCont) AS Grupo,
+                   ROUND(SUM(dc.Valor), 2) AS Neto
+            FROM DetaCont dc
+            INNER JOIN EncaCont ec
+                ON ec.CodiInst = dc.CodiInst AND ec.CodiDocu = dc.CodiDocu AND ec.NumeDocu = dc.NumeDocu
+            WHERE dc.CodiInst = ?
+              AND ec.Causado = '1' AND ec.Anulado <> '1'
+              AND dc.CodiCont NOT LIKE '8%'
+              AND (
+                  (dc.CodiDocu = ? AND dc.NumeDocu = ?)
+                  OR (dc.CodiDocu IN ({$phDac}) AND dc.TiDoRefe = ? AND dc.NuDoRefe = ?)
+                  OR (dc.CodiDocu = ? AND dc.NumeDocu = ?
+                      AND (dc.TiDoRefe IS NULL OR dc.TiDoRefe = '' OR (dc.TiDoRefe = ? AND dc.NuDoRefe = ?)))
+              )
+            GROUP BY Grupo
+        ";
+        $stmt = $this->connect()->prepare($sql);
+
+        foreach ($pares as $par) {
+            $clave = $par['CodiDocu'] . '-' . $par['NumeDocu'] . '|' . $par['FacturaCodiDocu'] . '-' . $par['FacturaNumeDocu'];
+            if (isset($cierran[$clave])) {
+                continue;
+            }
+
+            $stmt->execute([
+                $this->codiInst(),
+                $par['FacturaCodiDocu'], $par['FacturaNumeDocu'],
+                ...$codigosDac, $par['FacturaCodiDocu'], $par['FacturaNumeDocu'],
+                $par['CodiDocu'], $par['NumeDocu'], $par['FacturaCodiDocu'], $par['FacturaNumeDocu'],
+            ]);
+            $filas = $stmt->fetchAll();
+
+            $cierraEnCero = $filas !== [];
+            foreach ($filas as $fila) {
+                if (abs((float)$fila['Neto']) >= 0.005) {
+                    $cierraEnCero = false;
+                    break;
+                }
+            }
+
+            if ($cierraEnCero) {
+                $cierran[$clave] = true;
+            }
+        }
+
+        return $cierran;
+    }
+
+    /**
      * Notas detectadas por fetchNotasVigenciaActualSinCancelar4312() (sección
      * 3c) que YA tienen una nota de ajuste activa que las corrige — creada
      * por SihosExternalWriteRepository::crearNotaAjusteVigenciaActual() (rama
@@ -994,40 +1067,13 @@ class SihosExternalRepository
         string $fechaIni,
         string $fechaFin,
         string $prefijoReversion,
-        string $prefijoGasto,
-        array $codigosDac = []
+        string $prefijoGasto
     ): array {
         if ($codigosNota === []) {
             return [];
         }
 
         $ph = implode(',', array_fill(0, count($codigosNota), '?'));
-
-        // Espejo de un DAC: la línea de la nota queda en la misma cuenta que
-        // una línea de un DAC confirmado que referencia la MISMA factura, con
-        // el valor exactamente opuesto (débito<->crédito). Es la corrección
-        // válida cuando el DAC distribuyó el ingreso en cuentas que la
-        // factura no usó (p. ej. factura capita: solo 2910xx). Exige valor
-        // exacto, así una nota con las cuentas correctas pero mal repartida
-        // sigue saliendo.
-        $exclEspejoDac = '';
-        $paramsDac = [];
-        if ($codigosDac !== []) {
-            $phDac = implode(',', array_fill(0, count($codigosDac), '?'));
-            $exclEspejoDac = "
-              AND NOT EXISTS (
-                  SELECT 1 FROM DetaCont dd
-                  INNER JOIN EncaCont de
-                      ON de.CodiInst = dd.CodiInst AND de.CodiDocu = dd.CodiDocu AND de.NumeDocu = dd.NumeDocu
-                  WHERE dd.CodiInst = fact.CodiInst
-                    AND dd.TiDoRefe = fact.CodiDocu AND dd.NuDoRefe = fact.NumeDocu
-                    AND dd.CodiDocu IN ({$phDac})
-                    AND de.Causado = '1' AND de.Anulado <> '1'
-                    AND dd.CodiCont = dc.CodiCont
-                    AND ROUND(dd.Valor + dc.Valor, 2) = 0
-              )";
-            $paramsDac = $codigosDac;
-        }
 
         $sql = "
             SELECT DISTINCT nc.CodiDocu, nc.NumeDocu, nc.FechDocu, dc.CodiCont, dc.Valor, dc.ConsDeta,
@@ -1059,10 +1105,10 @@ class SihosExternalRepository
                       WHERE dcf.CodiInst = fact.CodiInst AND dcf.CodiDocu = fact.CodiDocu AND dcf.NumeDocu = fact.NumeDocu
                         AND dcf.CodiCont = dc.CodiCont
                   )
-              ){$exclEspejoDac}
+              )
         ";
 
-        $params = [$this->codiInst(), ...$codigosNota, $fechaIni, $fechaFin, ...$paramsDac];
+        $params = [$this->codiInst(), ...$codigosNota, $fechaIni, $fechaFin];
 
         if ($prefijoReversion !== '') {
             $sql .= ' AND dc.CodiCont NOT LIKE ?';

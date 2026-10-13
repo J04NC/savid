@@ -219,19 +219,32 @@ class SihosCruceReconocimientoService
             // fecha de esa corrección — la rama de mes abierto (edición en
             // sitio) se autorresuelve sola, porque la línea corregida ya no
             // vuelve a calzar con "cuenta fuera de lo esperado".
+            // "Anulación definitiva" (secciones 3c y 5b): si factura + DAC +
+            // nota netean 0 cuenta por cuenta (y cartera como grupo), la nota
+            // no se lista — ver fetchParesNotaFacturaQueCierranEnCero().
+            $codigosDac = $repository->resolveCodigosDocumentoPorAplicacion(self::DOCU_APLI_DAC);
+            $candidatas3c = $repository->fetchNotasVigenciaActualSinCancelar4312($codigosNota, $fechaIni, $fechaFin);
+            $candidatas5b = $repository->fetchCuentasInesperadasNotasVigenciaActual(
+                $codigosNota,
+                $fechaIni,
+                $fechaFin,
+                $prefijoReversion,
+                $prefijoVigenciaAnterior
+            );
+            $cierranEnCero = $repository->fetchParesNotaFacturaQueCierranEnCero(
+                [...$candidatas3c, ...$candidatas5b],
+                $codigosDac
+            );
+
             $cuentasInesperadasNotasActual = array_map(
                 static function (array $f): array {
                     $f['EsVigenciaAnterior'] = false;
 
                     return $f;
                 },
-                $repository->fetchCuentasInesperadasNotasVigenciaActual(
-                    $codigosNota,
-                    $fechaIni,
-                    $fechaFin,
-                    $prefijoReversion,
-                    $prefijoVigenciaAnterior,
-                    $repository->resolveCodigosDocumentoPorAplicacion(self::DOCU_APLI_DAC)
+                array_filter(
+                    $candidatas5b,
+                    static fn (array $f): bool => !isset($cierranEnCero[$f['CodiDocu'] . '-' . $f['NumeDocu'] . '|' . $f['FacturaCodiDocu'] . '-' . $f['FacturaNumeDocu']])
                 )
             );
             // Sin $prefijoReversion aquí: es la familia de CuenGlosAct (vigencia
@@ -264,7 +277,10 @@ class SihosCruceReconocimientoService
             // nota original nunca deja de "verse mal" por sí sola — caso real
             // que lo expuso: NCC-8932, ya corregida por NC-1084, seguía
             // apareciendo aquí sin este filtro).
-            $notasSinCancelar4312 = $repository->fetchNotasVigenciaActualSinCancelar4312($codigosNota, $fechaIni, $fechaFin);
+            $notasSinCancelar4312 = array_values(array_filter(
+                $candidatas3c,
+                static fn (array $f): bool => !isset($cierranEnCero[$f['CodiDocu'] . '-' . $f['NumeDocu'] . '|' . $f['FacturaCodiDocu'] . '-' . $f['FacturaNumeDocu']])
+            ));
             $clavesConAjuste3c = $repository->fetchClavesConAjustePrevioNotasVigenciaActual($notasSinCancelar4312);
             $notasSinCancelar4312 = array_values(array_filter(
                 $notasSinCancelar4312,
