@@ -225,7 +225,14 @@ class SihosCruceReconocimientoService
 
                     return $f;
                 },
-                $repository->fetchCuentasInesperadasNotasVigenciaActual($codigosNota, $fechaIni, $fechaFin, $prefijoReversion, $prefijoVigenciaAnterior)
+                $repository->fetchCuentasInesperadasNotasVigenciaActual(
+                    $codigosNota,
+                    $fechaIni,
+                    $fechaFin,
+                    $prefijoReversion,
+                    $prefijoVigenciaAnterior,
+                    $repository->resolveCodigosDocumentoPorAplicacion(self::DOCU_APLI_DAC)
+                )
             );
             // Sin $prefijoReversion aquí: es la familia de CuenGlosAct (vigencia
             // ACTUAL), no tiene por qué excluir nada en la detección de vigencia

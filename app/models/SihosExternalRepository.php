@@ -994,13 +994,40 @@ class SihosExternalRepository
         string $fechaIni,
         string $fechaFin,
         string $prefijoReversion,
-        string $prefijoGasto
+        string $prefijoGasto,
+        array $codigosDac = []
     ): array {
         if ($codigosNota === []) {
             return [];
         }
 
         $ph = implode(',', array_fill(0, count($codigosNota), '?'));
+
+        // Espejo de un DAC: la línea de la nota queda en la misma cuenta que
+        // una línea de un DAC confirmado que referencia la MISMA factura, con
+        // el valor exactamente opuesto (débito<->crédito). Es la corrección
+        // válida cuando el DAC distribuyó el ingreso en cuentas que la
+        // factura no usó (p. ej. factura capita: solo 2910xx). Exige valor
+        // exacto, así una nota con las cuentas correctas pero mal repartida
+        // sigue saliendo.
+        $exclEspejoDac = '';
+        $paramsDac = [];
+        if ($codigosDac !== []) {
+            $phDac = implode(',', array_fill(0, count($codigosDac), '?'));
+            $exclEspejoDac = "
+              AND NOT EXISTS (
+                  SELECT 1 FROM DetaCont dd
+                  INNER JOIN EncaCont de
+                      ON de.CodiInst = dd.CodiInst AND de.CodiDocu = dd.CodiDocu AND de.NumeDocu = dd.NumeDocu
+                  WHERE dd.CodiInst = fact.CodiInst
+                    AND dd.TiDoRefe = fact.CodiDocu AND dd.NuDoRefe = fact.NumeDocu
+                    AND dd.CodiDocu IN ({$phDac})
+                    AND de.Causado = '1' AND de.Anulado <> '1'
+                    AND dd.CodiCont = dc.CodiCont
+                    AND ROUND(dd.Valor + dc.Valor, 2) = 0
+              )";
+            $paramsDac = $codigosDac;
+        }
 
         $sql = "
             SELECT DISTINCT nc.CodiDocu, nc.NumeDocu, nc.FechDocu, dc.CodiCont, dc.Valor, dc.ConsDeta,
@@ -1032,10 +1059,10 @@ class SihosExternalRepository
                       WHERE dcf.CodiInst = fact.CodiInst AND dcf.CodiDocu = fact.CodiDocu AND dcf.NumeDocu = fact.NumeDocu
                         AND dcf.CodiCont = dc.CodiCont
                   )
-              )
+              ){$exclEspejoDac}
         ";
 
-        $params = [$this->codiInst(), ...$codigosNota, $fechaIni, $fechaFin];
+        $params = [$this->codiInst(), ...$codigosNota, $fechaIni, $fechaFin, ...$paramsDac];
 
         if ($prefijoReversion !== '') {
             $sql .= ' AND dc.CodiCont NOT LIKE ?';
