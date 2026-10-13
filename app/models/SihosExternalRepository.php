@@ -2385,6 +2385,193 @@ class SihosExternalRepository
     }
 
     /**
+     * Empareja las líneas de ingreso de una nota usando DetaNoFa — donde el
+     * usuario registró QUÉ ítems de qué liquidación afecta la nota (NumeLiqu +
+     * ConsDeFa + ValoTota por factura). Cada ítem trae su centro de costo en
+     * DetaFact (CodiDocu=CodiLiqu, NumeFact=NumeLiqu, ConsDeFa), y la cuenta
+     * destino es la que la factura tiene en ESE centro de costo. Así la nota
+     * se reparte exactamente como el servicio facturado, sin prorratear ni
+     * adivinar por valor, y cada línea queda referenciando la factura real
+     * (no a la propia nota).
+     *
+     * Devuelve null — y el llamador sigue con las reglas de
+     * emparejarLineasDeFactura() — cuando: la nota no tiene DetaNoFa; la
+     * factura es de otra vigencia o tiene UNA sola cuenta de ingreso (ahí
+     * rigen las reglas de capita/distribución de DAC, que un envío directo
+     * por centro de costo rompería, p. ej. NCC-8963); un ítem no se
+     * encuentra en DetaFact; un centro de costo no resuelve a UNA sola
+     * cuenta de la factura; o los valores de DetaNoFa no suman exacto lo que
+     * la nota tiene en sus líneas de ingreso.
+     *
+     * @return list<array<string,mixed>>|null
+     */
+    private function emparejarPorDetaNoFa(string $codiInst, string $codiDocuNota, string $numeDocuNota, string $fechaNota): ?array
+    {
+        $pdo = $this->connect();
+        $stmt = $pdo->prepare(
+            'SELECT CodiLiqu, NumeLiqu, ConsDeFa, TiDoRefe, NudoRefe, ValoTota
+             FROM DetaNoFa WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?'
+        );
+        $stmt->execute([$codiInst, $codiDocuNota, $numeDocuNota]);
+        $filasNoFa = $stmt->fetchAll();
+        if ($filasNoFa === []) {
+            return null;
+        }
+
+        $stmt = $pdo->prepare(
+            "SELECT ConsDeta, CodiCont, CentCost, TiDoTerc, NuDoTerc, Valor, TiDoRefe, NuDoRefe
+             FROM DetaCont
+             WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu = ?
+               AND CodiCont NOT LIKE '13%' AND CodiCont NOT LIKE '14%' AND CodiCont NOT LIKE '8%'
+             ORDER BY ConsDeta"
+        );
+        $stmt->execute([$codiInst, $codiDocuNota, $numeDocuNota]);
+        $lineasNota = $stmt->fetchAll();
+        if ($lineasNota === []) {
+            return null;
+        }
+
+        // Sin centro de costo se guarda como '' o '0' según la tabla.
+        $normCc = static function ($cc): string {
+            $cc = trim((string)($cc ?? ''));
+
+            return $cc === '0' ? '' : $cc;
+        };
+        $centimos = static fn ($v): int => (int)round((float)$v * 100);
+
+        // Destinos por factura: [factura => [clave cuenta|cc => [CodiCont, CentCost, centimos]]]
+        $facturas = [];
+        foreach ($filasNoFa as $fila) {
+            $clave = $fila['TiDoRefe'] . '|' . $fila['NudoRefe'];
+            if (!isset($facturas[$clave])) {
+                $facturas[$clave] = ['codi' => $fila['TiDoRefe'], 'nume' => $fila['NudoRefe'], 'destinos' => [], 'lineas' => null];
+            }
+
+            $stmt = $pdo->prepare('SELECT CentCost FROM DetaFact WHERE CodiInst = ? AND CodiDocu = ? AND NumeFact = ? AND ConsDeFa = ?');
+            $stmt->execute([$codiInst, $fila['CodiLiqu'], $fila['NumeLiqu'], $fila['ConsDeFa']]);
+            $cc = $stmt->fetchColumn();
+            if ($cc === false) {
+                return null;
+            }
+            $facturas[$clave]['destinos'][] = ['cc' => $normCc($cc), 'centimos' => $centimos($fila['ValoTota'])];
+        }
+
+        $destinosFinales = [];
+        foreach ($facturas as $clave => $f) {
+            $stmt = $pdo->prepare(
+                "SELECT d.CodiCont, d.CentCost FROM DetaCont d
+                 INNER JOIN EncaCont e ON e.CodiInst = d.CodiInst AND e.CodiDocu = d.CodiDocu AND e.NumeDocu = d.NumeDocu
+                 WHERE d.CodiInst = ? AND d.CodiDocu = ? AND d.NumeDocu = ?
+                   AND d.CodiCont NOT LIKE '13%' AND d.CodiCont NOT LIKE '14%' AND d.CodiCont NOT LIKE '8%'
+                   AND d.CodiCont NOT LIKE '3%' AND YEAR(e.FechDocu) = YEAR(?)"
+            );
+            $stmt->execute([$codiInst, $f['codi'], $f['nume'], $fechaNota]);
+            $lineasFactura = $stmt->fetchAll();
+            if (count(array_unique(array_column($lineasFactura, 'CodiCont'))) <= 1) {
+                return null;
+            }
+
+            $porCc = [];
+            foreach ($lineasFactura as $lf) {
+                $porCc[$normCc($lf['CentCost'])][$lf['CodiCont']] = true;
+            }
+
+            $acumulado = [];
+            foreach ($f['destinos'] as $d) {
+                $cuentas = array_map('strval', array_keys($porCc[$d['cc']] ?? []));
+                if (count($cuentas) !== 1) {
+                    return null;
+                }
+                $k = $cuentas[0] . '|' . $d['cc'];
+                $acumulado[$k] = ($acumulado[$k] ?? ['CodiCont' => $cuentas[0], 'CentCost' => $d['cc'] !== '' ? $d['cc'] : null, 'centimos' => 0]);
+                $acumulado[$k]['centimos'] += $d['centimos'];
+            }
+            $destinosFinales[$clave] = array_values($acumulado);
+        }
+
+        // Atribuye las líneas de ingreso de la nota a cada factura.
+        $lineasPorFactura = array_fill_keys(array_keys($facturas), []);
+        foreach ($lineasNota as $ln) {
+            if (count($facturas) === 1) {
+                $lineasPorFactura[array_key_first($facturas)][] = $ln;
+                continue;
+            }
+            $k = $ln['TiDoRefe'] . '|' . $ln['NuDoRefe'];
+            if (!isset($lineasPorFactura[$k])) {
+                return null;
+            }
+            $lineasPorFactura[$k][] = $ln;
+        }
+
+        $emparejamientos = [];
+        foreach ($facturas as $clave => $f) {
+            $lineas = $lineasPorFactura[$clave];
+            $totalDestinos = array_sum(array_column($destinosFinales[$clave], 'centimos'));
+            $totalLineas = array_sum(array_map(static fn (array $l): int => (int)round(abs((float)$l['Valor']) * 100), $lineas));
+            if ($lineas === [] || $totalDestinos !== $totalLineas) {
+                return null;
+            }
+
+            // Reparte los destinos (en orden) sobre las líneas de la factura,
+            // partiendo un destino entre dos líneas si hace falta.
+            $cola = $destinosFinales[$clave];
+            foreach ($lineas as $ln) {
+                $signo = (float)$ln['Valor'] < 0 ? -1 : 1;
+                $falta = (int)round(abs((float)$ln['Valor']) * 100);
+                $destinos = [];
+                while ($falta > 0 && $cola !== []) {
+                    $toma = min($falta, $cola[0]['centimos']);
+                    $destinos[] = [
+                        'CodiCont' => $cola[0]['CodiCont'],
+                        'Valor' => $signo * $toma / 100,
+                        'CentCost' => $cola[0]['CentCost'],
+                    ];
+                    $cola[0]['centimos'] -= $toma;
+                    $falta -= $toma;
+                    if ($cola[0]['centimos'] === 0) {
+                        array_shift($cola);
+                    }
+                }
+
+                $emparejamientos[] = [
+                    'ConsDeta' => (int)$ln['ConsDeta'],
+                    'CodiContOrigen' => $ln['CodiCont'],
+                    'TiDoTerc' => $ln['TiDoTerc'],
+                    'NuDoTerc' => $ln['NuDoTerc'],
+                    'TiDoRefe' => $f['codi'],
+                    'NuDoRefe' => $f['nume'],
+                    'Valor' => (float)$ln['Valor'],
+                    'Destinos' => $destinos,
+                ];
+            }
+        }
+
+        // Idempotencia: si cada línea ya está exactamente donde DetaNoFa la
+        // pondría (misma cuenta, valor, centro de costo y referencia), no hay
+        // nada por corregir — se deja que decida la lógica general.
+        $yaCorrecta = true;
+        foreach ($emparejamientos as $em) {
+            $linea = null;
+            foreach ($lineasNota as $ln) {
+                if ((int)$ln['ConsDeta'] === $em['ConsDeta']) {
+                    $linea = $ln;
+                    break;
+                }
+            }
+            if ($linea === null || count($em['Destinos']) !== 1
+                || $em['Destinos'][0]['CodiCont'] !== $linea['CodiCont']
+                || $centimos($em['Destinos'][0]['Valor']) !== $centimos($linea['Valor'])
+                || $normCc($em['Destinos'][0]['CentCost']) !== $normCc($linea['CentCost'])
+                || (string)$linea['TiDoRefe'] !== (string)$em['TiDoRefe'] || (string)$linea['NuDoRefe'] !== (string)$em['NuDoRefe']) {
+                $yaCorrecta = false;
+                break;
+            }
+        }
+
+        return $yaCorrecta ? null : $emparejamientos;
+    }
+
+    /**
      * Empareja las líneas de una nota que referencian UNA misma factura contra
      * sus cuentas de ingreso. Una NCC puede consolidar varias facturas, y cada
      * grupo se resuelve solo contra las cuentas de su propia factura.
