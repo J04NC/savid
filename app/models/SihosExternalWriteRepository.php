@@ -1203,8 +1203,10 @@ class SihosExternalWriteRepository
                 $centCostVieja = $linea['CentCost'] !== '' ? $linea['CentCost'] : null;
                 $tiDoTerc = $linea['TiDoTerc'] !== '' ? $linea['TiDoTerc'] : null;
                 $nuDoTerc = $linea['NuDoTerc'] !== '' ? $linea['NuDoTerc'] : null;
-                $tiDoRefeLinea = $linea['TiDoRefe'];
-                $nuDoRefeLinea = $linea['NuDoRefe'];
+                // La referencia nueva viene del emparejamiento (puede ser la
+                // factura real cuando la línea apuntaba a la propia nota).
+                $tiDoRefeLinea = $par['TiDoRefe'] ?? $linea['TiDoRefe'];
+                $nuDoRefeLinea = $par['NuDoRefe'] ?? $linea['NuDoRefe'];
 
                 if (!isset($configsCuenta[$cuentaVieja])) {
                     $configsCuenta[$cuentaVieja] = $this->obtenerConfigCuenta($pdo, $codiInst, $cuentaVieja, $codiAno);
