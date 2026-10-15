@@ -331,6 +331,12 @@ class SihosExternalRepository
      * quedaba con presupuesto duplicado: factura + nota sumaban en vez de
      * restar).
      *
+     * Regla principal del signo: el neto de cartera (DetaCont 13/14) del
+     * propio documento — negativo = el documento resta (nota crédito o
+     * anulación), positivo = suma. DetaPlan no guarda negativos, y así no
+     * se depende de una lista de TipoComp (caso FE-710802/NCF-45356). Si el
+     * documento no tiene cartera o su neto es 0, rige la regla por TipoComp.
+     *
      * @param string[] $codigosPresupuesto
      * @param string[] $codigosSignoInvertido
      * @return array<string, array{CodiDocu:string,NumeDocu:string,FechDocu:string,CentCost:?string,TipoUsua:?string,Valor:float}> indexado por "CodiDocu-NumeDocu"
@@ -357,10 +363,29 @@ class SihosExternalRepository
 
         $sql = "
             SELECT EP.CodiDocu, EP.NumeDocu, MIN(EP.FechDocu) AS FechDocu, MIN(EP.CentCost) AS CentCost, MIN(EP.TipoUsua) AS TipoUsua,
-                   SUM(IF(EP.TipoComp IN ('5', '0', '21') AND ({$condicionSigno}), DP.Valor * -1, DP.Valor)) AS Valor
+                   SUM(CASE
+                           WHEN CA.NetoCartera IS NOT NULL AND ABS(CA.NetoCartera) >= 0.005
+                               THEN IF(CA.NetoCartera < 0, DP.Valor * -1, DP.Valor)
+                           WHEN EP.TipoComp IN ('5', '0', '21') AND ({$condicionSigno})
+                               THEN DP.Valor * -1
+                           ELSE DP.Valor
+                       END) AS Valor
             FROM EncaCont EP
             INNER JOIN DetaPlan DP
                 ON EP.CodiInst = DP.CodiInst AND EP.CodiAno = DP.CodiAno AND EP.CodiDocu = DP.CodiDocu AND EP.NumeDocu = DP.NumeDocu
+            LEFT JOIN (
+                SELECT DC.CodiDocu, DC.NumeDocu, SUM(DC.Valor) AS NetoCartera
+                FROM DetaCont DC
+                INNER JOIN EncaCont EC
+                    ON EC.CodiInst = DC.CodiInst AND EC.CodiDocu = DC.CodiDocu AND EC.NumeDocu = DC.NumeDocu
+                WHERE DC.CodiInst = ?
+                  AND DC.CodiDocu IN ({$phPres})
+                  AND (DC.CodiCont LIKE '13%' OR DC.CodiCont LIKE '14%')
+                  AND EC.Causado = '1'
+                  AND EC.Anulado <> 1
+                  AND EC.FechDocu BETWEEN ? AND ?
+                GROUP BY DC.CodiDocu, DC.NumeDocu
+            ) CA ON CA.CodiDocu = EP.CodiDocu AND CA.NumeDocu = EP.NumeDocu
             WHERE EP.CodiInst = ?
               AND EP.CodiDocu IN ({$phPres})
               AND EP.Causado = '1'
@@ -369,9 +394,13 @@ class SihosExternalRepository
             GROUP BY EP.CodiDocu, EP.NumeDocu
         ";
         $stmt = $this->connect()->prepare($sql);
-        // Orden posicional: los "?" de $condicionSigno van en el SELECT,
-        // ANTES que CodiInst/CodiDocu/fechas del WHERE en el texto SQL.
-        $stmt->execute([...$paramsSigno, $this->codiInst(), ...$codigosPresupuesto, $fechaIni, $fechaFin]);
+        // Orden posicional: los "?" de $condicionSigno van en el SELECT, luego
+        // los del subselect de cartera (LEFT JOIN) y al final los del WHERE.
+        $stmt->execute([
+            ...$paramsSigno,
+            $this->codiInst(), ...$codigosPresupuesto, $fechaIni, $fechaFin,
+            $this->codiInst(), ...$codigosPresupuesto, $fechaIni, $fechaFin,
+        ]);
 
         $porDocumento = [];
         while ($fila = $stmt->fetch()) {
