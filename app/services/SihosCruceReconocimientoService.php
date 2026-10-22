@@ -435,7 +435,7 @@ class SihosCruceReconocimientoService
             $fechaIni,
             $fechaFin
         );
-        $porContabilidad = $repository->fetchContabilidad4312PorDocumento($fechaIni, $fechaFin);
+        $porContabilidad = $repository->fetchContabilidad43PorDocumento($fechaIni, $fechaFin);
         $nombresTipoUsua = $repository->fetchTipoUsuarioNombres();
         $rubrosReconocimientoTesoreria = $repository->fetchRubrosPresupuestoPorDocumento(
             $codigosReconocimientoTesoreria,
@@ -568,16 +568,21 @@ class SihosCruceReconocimientoService
         // suma lo atribuido a cada factura EN RANGO y se resta del propio
         // vinculado (para no contarlo dos veces); lo que no se atribuyó a
         // ninguna factura en rango se queda como saldo propio del vinculado.
+        // Familia 43 completa (no solo 4312), desglosada por cuenta para
+        // poder mostrar una columna por cada cuenta de 4 dígitos.
         $atribucionesContabilidad = $repository->fetchAtribucionContabilidadVinculada(
             $codigosVinculadosContabilidad,
             $codigosFactura,
             $fechaIni,
-            $fechaFin
+            $fechaFin,
+            ['43'],
+            true
         );
         foreach ($atribucionesContabilidad as $fila) {
             $claveVinculado = $fila['VinculadoCodiDocu'] . '-' . $fila['VinculadoNumeDocu'];
             $claveFactura = $fila['FacturaCodiDocu'] . '-' . $fila['FacturaNumeDocu'];
             $valor = (float)$fila['Valor'];
+            $cuenta = trim((string)$fila['CodiCont']);
 
             if (!isset($porContabilidad[$claveFactura])) {
                 $porContabilidad[$claveFactura] = [
@@ -586,12 +591,15 @@ class SihosCruceReconocimientoService
                     'FechDocu' => $fila['FacturaFecha'],
                     'TipoUsua' => $fila['FacturaTipoUsua'],
                     'Valor' => 0,
+                    'PorCuenta' => [],
                 ];
             }
             $porContabilidad[$claveFactura]['Valor'] += $valor;
+            $porContabilidad[$claveFactura]['PorCuenta'][$cuenta] = ($porContabilidad[$claveFactura]['PorCuenta'][$cuenta] ?? 0.0) + $valor;
 
             if (isset($porContabilidad[$claveVinculado])) {
                 $porContabilidad[$claveVinculado]['Valor'] -= $valor;
+                $porContabilidad[$claveVinculado]['PorCuenta'][$cuenta] = ($porContabilidad[$claveVinculado]['PorCuenta'][$cuenta] ?? 0.0) - $valor;
             }
         }
 
@@ -627,6 +635,11 @@ class SihosCruceReconocimientoService
         $totalContabilidad = 0.0;
         $totalDiferenciaReconocimientoTesoreria = 0.0;
         $porTipoUsua = [];
+        // Cuentas de 4 dígitos de la familia 43 que aparecen en el rango (una
+        // columna por cada una) y el detalle de las que NO son 4312, que se
+        // muestra aparte como los reconocimientos de tesorería.
+        $cuentas4Presentes = [];
+        $detalleOtrasCuentas43 = [];
         // Pares de vigencia anterior que se cancelan entre sí (p. ej. la nota
         // mal clasificada original y la nota de ajuste que la corrige, ambas
         // sobre la misma factura vieja) — se suman por factura y, si el
@@ -682,11 +695,36 @@ class SihosCruceReconocimientoService
                 : ('Tipo ' . ($codiTipoUsua ?? 'sin dato'));
 
             if (!isset($porTipoUsua[$nombreTipoUsua])) {
-                $porTipoUsua[$nombreTipoUsua] = ['presupuesto' => 0.0, 'contabilidad' => 0.0, 'diferencia' => 0.0];
+                $porTipoUsua[$nombreTipoUsua] = ['presupuesto' => 0.0, 'contabilidad' => 0.0, 'diferencia' => 0.0, 'cuentas' => []];
             }
             $porTipoUsua[$nombreTipoUsua]['presupuesto'] += $presupuesto;
             $porTipoUsua[$nombreTipoUsua]['contabilidad'] += $contabilidad;
             $porTipoUsua[$nombreTipoUsua]['diferencia'] += $diferencia;
+
+            // Mismo signo que "contabilidad" (créditos de DetaCont invertidos).
+            foreach (($filaCont['PorCuenta'] ?? []) as $cuenta => $valorCuenta) {
+                $cuenta = (string)$cuenta;
+                $valorCuenta = round((float)$valorCuenta * -1, 2);
+                if (abs($valorCuenta) < 0.01) {
+                    continue;
+                }
+                $cuenta4 = substr($cuenta, 0, 4);
+                $cuentas4Presentes[$cuenta4] = true;
+                $porTipoUsua[$nombreTipoUsua]['cuentas'][$cuenta4] = ($porTipoUsua[$nombreTipoUsua]['cuentas'][$cuenta4] ?? 0.0) + $valorCuenta;
+
+                if ($cuenta4 !== '4312') {
+                    $detalleOtrasCuentas43[] = [
+                        'CodiDocu' => $codiDocu,
+                        'NumeDocu' => $numeDocu,
+                        'FechDocu' => $filaPres['FechDocu'] ?? $filaCont['FechDocu'] ?? '',
+                        'TipoUsua' => $nombreTipoUsua,
+                        'CodiCont' => $cuenta,
+                        'valor' => $valorCuenta,
+                        'RelacionadoCodiDocu' => $ref['FacturaCodiDocu'] ?? $vinculadoPorFactura[$clave]['VinculadoCodiDocu'] ?? null,
+                        'RelacionadoNumeDocu' => $ref['FacturaNumeDocu'] ?? $vinculadoPorFactura[$clave]['VinculadoNumeDocu'] ?? null,
+                    ];
+                }
+            }
 
             if (abs($diferencia) >= 0.01) {
                 $fechaDocu = $filaPres['FechDocu'] ?? $filaCont['FechDocu'] ?? '';
@@ -783,6 +821,9 @@ class SihosCruceReconocimientoService
         }, $detalle);
 
         usort($detalle, static fn (array $a, array $b): int => abs($b['diferencia']) <=> abs($a['diferencia']));
+        usort($detalleOtrasCuentas43, static fn (array $a, array $b): int => abs($b['valor']) <=> abs($a['valor']));
+        $cuentas4Presentes = array_keys($cuentas4Presentes);
+        sort($cuentas4Presentes);
         usort(
             $detalleReconocimientoTesoreria,
             static fn (array $a, array $b): int => abs($b['diferencia']) <=> abs($a['diferencia'])
@@ -826,6 +867,8 @@ class SihosCruceReconocimientoService
                 2
             ),
             'porTipoUsua' => $porTipoUsua,
+            'cuentas4' => $cuentas4Presentes,
+            'detalleOtrasCuentas43' => $detalleOtrasCuentas43,
         ];
     }
 }

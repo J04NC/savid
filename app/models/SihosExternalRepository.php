@@ -468,35 +468,53 @@ class SihosExternalRepository
     }
 
     /**
-     * Saldo contable de la familia 4312 (ingreso por servicios de salud)
-     * por documento: EncaCont+DetaCont agregado por CodiDocu+NumeDocu, para
-     * TODO documento que toque 4312xx en el rango (sin restringir tipo de
-     * documento — así se detectan documentos "fuera de lista" que sí
-     * afectan el ingreso contable pero no están en el universo de
-     * presupuesto). El signo queda tal como se guarda en DetaCont (créditos
-     * en negativo); se invierte al comparar contra presupuesto.
+     * Saldo contable de la familia 43 (ingresos por venta de servicios: 4312
+     * servicios de salud, 4395 devoluciones/rebajas/descuentos, etc. — el
+     * cruce contra presupuesto es contra TODA la 43, confirmado por la
+     * contadora) por documento: EncaCont+DetaCont agregado por
+     * CodiDocu+NumeDocu, para TODO documento que toque 43xx en el rango (sin
+     * restringir tipo de documento — así se detectan documentos "fuera de
+     * lista" que sí afectan el ingreso contable pero no están en el universo
+     * de presupuesto). El signo queda tal como se guarda en DetaCont
+     * (créditos en negativo); se invierte al comparar contra presupuesto.
+     * 'PorCuenta' trae el mismo saldo desglosado por cuenta completa
+     * (CodiCont), para mostrar columnas por cuenta de 4 dígitos.
      *
-     * @return array<string, array{CodiDocu:string,NumeDocu:string,FechDocu:string,TipoUsua:?string,Valor:float}> indexado por "CodiDocu-NumeDocu"
+     * @return array<string, array{CodiDocu:string,NumeDocu:string,FechDocu:string,TipoUsua:?string,Valor:float,PorCuenta:array<string,float>}> indexado por "CodiDocu-NumeDocu"
      */
-    public function fetchContabilidad4312PorDocumento(string $fechaIni, string $fechaFin): array
+    public function fetchContabilidad43PorDocumento(string $fechaIni, string $fechaFin): array
     {
         $sql = "
-            SELECT e.CodiDocu, e.NumeDocu, MIN(e.FechDocu) AS FechDocu, MIN(e.TipoUsua) AS TipoUsua, SUM(d.Valor) AS Valor
+            SELECT e.CodiDocu, e.NumeDocu, MIN(e.FechDocu) AS FechDocu, MIN(e.TipoUsua) AS TipoUsua,
+                   d.CodiCont, SUM(d.Valor) AS Valor
             FROM EncaCont e
             INNER JOIN DetaCont d ON e.CodiInst = d.CodiInst AND e.CodiDocu = d.CodiDocu AND e.NumeDocu = d.NumeDocu
             WHERE e.CodiInst = ?
               AND e.Causado = 1
               AND e.Anulado <> 1
-              AND d.CodiCont LIKE '4312%'
+              AND d.CodiCont LIKE '43%'
               AND e.FechDocu BETWEEN ? AND ?
-            GROUP BY e.CodiDocu, e.NumeDocu
+            GROUP BY e.CodiDocu, e.NumeDocu, d.CodiCont
         ";
         $stmt = $this->connect()->prepare($sql);
         $stmt->execute([$this->codiInst(), $fechaIni, $fechaFin]);
 
         $porDocumento = [];
         while ($fila = $stmt->fetch()) {
-            $porDocumento[$fila['CodiDocu'] . '-' . $fila['NumeDocu']] = $fila;
+            $clave = $fila['CodiDocu'] . '-' . $fila['NumeDocu'];
+            if (!isset($porDocumento[$clave])) {
+                $porDocumento[$clave] = [
+                    'CodiDocu' => $fila['CodiDocu'],
+                    'NumeDocu' => $fila['NumeDocu'],
+                    'FechDocu' => $fila['FechDocu'],
+                    'TipoUsua' => $fila['TipoUsua'],
+                    'Valor' => 0.0,
+                    'PorCuenta' => [],
+                ];
+            }
+            $cuenta = trim((string)$fila['CodiCont']);
+            $porDocumento[$clave]['Valor'] += (float)$fila['Valor'];
+            $porDocumento[$clave]['PorCuenta'][$cuenta] = ($porDocumento[$clave]['PorCuenta'][$cuenta] ?? 0.0) + (float)$fila['Valor'];
         }
 
         return $porDocumento;
@@ -1565,15 +1583,17 @@ class SihosExternalRepository
      *
      * @param string[] $codigosVinculados
      * @param string[] $codigosFactura
-     * @param string[] $prefijosCuenta prefijos sin '%', p. ej. ['4312'] o ['13','14']
-     * @return list<array{VinculadoCodiDocu:string,VinculadoNumeDocu:string,FacturaCodiDocu:string,FacturaNumeDocu:string,FacturaFecha:string,FacturaTipoUsua:?string,Valor:float}>
+     * @param string[] $prefijosCuenta prefijos sin '%', p. ej. ['4312'], ['43'] o ['13','14']
+     * @param bool $desglosarPorCuenta true agrega 'CodiCont' (cuenta completa de la línea) a cada fila y al GROUP BY
+     * @return list<array{VinculadoCodiDocu:string,VinculadoNumeDocu:string,FacturaCodiDocu:string,FacturaNumeDocu:string,FacturaFecha:string,FacturaTipoUsua:?string,Valor:float,CodiCont?:string}>
      */
     public function fetchAtribucionContabilidadVinculada(
         array $codigosVinculados,
         array $codigosFactura,
         string $fechaIni,
         string $fechaFin,
-        array $prefijosCuenta = ['4312']
+        array $prefijosCuenta = ['4312'],
+        bool $desglosarPorCuenta = false
     ): array {
         if ($codigosVinculados === [] || $codigosFactura === [] || $prefijosCuenta === []) {
             return [];
@@ -1583,12 +1603,14 @@ class SihosExternalRepository
         $phFact = implode(',', array_fill(0, count($codigosFactura), '?'));
         $condicionesCuenta = implode(' OR ', array_fill(0, count($prefijosCuenta), 'dcref.CodiCont LIKE ?'));
         $paramsCuenta = array_map(static fn (string $p): string => $p . '%', $prefijosCuenta);
+        $selectCuenta = $desglosarPorCuenta ? ', dcref.CodiCont AS CodiCont' : '';
+        $groupCuenta = $desglosarPorCuenta ? ', dcref.CodiCont' : '';
 
         $sql = "
             SELECT vinc.CodiDocu AS VinculadoCodiDocu, vinc.NumeDocu AS VinculadoNumeDocu,
                    fact.CodiDocu AS FacturaCodiDocu, fact.NumeDocu AS FacturaNumeDocu,
                    fact.FechDocu AS FacturaFecha, fact.TipoUsua AS FacturaTipoUsua,
-                   SUM(dcref.Valor) AS Valor
+                   SUM(dcref.Valor) AS Valor{$selectCuenta}
             FROM EncaCont vinc
             INNER JOIN DetaCont dcref
                 ON dcref.CodiInst = vinc.CodiInst AND dcref.CodiDocu = vinc.CodiDocu AND dcref.NumeDocu = vinc.NumeDocu
@@ -1601,7 +1623,7 @@ class SihosExternalRepository
               AND vinc.Anulado <> 1
               AND fact.CodiDocu IN ({$phFact})
               AND fact.FechDocu BETWEEN ? AND ?
-            GROUP BY vinc.CodiDocu, vinc.NumeDocu, fact.CodiDocu, fact.NumeDocu, fact.FechDocu, fact.TipoUsua
+            GROUP BY vinc.CodiDocu, vinc.NumeDocu, fact.CodiDocu, fact.NumeDocu, fact.FechDocu, fact.TipoUsua{$groupCuenta}
         ";
         $stmt = $this->connect()->prepare($sql);
         $stmt->execute([...$paramsCuenta, $this->codiInst(), ...$codigosVinculados, $fechaIni, $fechaFin, ...$codigosFactura, $fechaIni, $fechaFin]);
@@ -1611,7 +1633,7 @@ class SihosExternalRepository
 
     /**
      * Para facturas en rango: qué otras cuentas (fuera de cartera 13/14,
-     * ingreso 4312xx, y cuenta de orden 8xxx) tocó la factura en su propia
+     * ingreso 43xx, y cuenta de orden 8xxx) tocó la factura en su propia
      * causación, MÁS las de cualquier documento que la referencie (nota,
      * glosa, DAC — vía TiDoRefe/NuDoRefe, $codigosVinculados) — NO para
      * conciliar nada, solo para mostrar en la sección de diferencias qué
@@ -1653,7 +1675,7 @@ class SihosExternalRepository
               AND ec.Causado = '1' AND ec.Anulado <> '1'
               AND dc.CodiCont NOT LIKE '13%'
               AND dc.CodiCont NOT LIKE '14%'
-              AND dc.CodiCont NOT LIKE '4312%'
+              AND dc.CodiCont NOT LIKE '43%'
               AND dc.CodiCont NOT LIKE '8%'
         ";
         $params = [$this->codiInst(), ...$codigosFactura, $fechaIni, $fechaFin];
@@ -1678,7 +1700,7 @@ class SihosExternalRepository
                   AND vinc.Anulado = 0
                   AND dcv.CodiCont NOT LIKE '13%'
                   AND dcv.CodiCont NOT LIKE '14%'
-                  AND dcv.CodiCont NOT LIKE '4312%'
+                  AND dcv.CodiCont NOT LIKE '43%'
                   AND dcv.CodiCont NOT LIKE '8%'
             ";
             $params = [...$params, $this->codiInst(), ...$codigosFactura, $fechaIni, $fechaFin, ...$codigosVinculados];
