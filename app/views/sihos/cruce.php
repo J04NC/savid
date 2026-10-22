@@ -467,8 +467,8 @@ $sihosReclasificarCuentaVigenciaActualMasivoJsV = is_readable($assetSihosReclasi
 
             <div class="crud-toolbar auditoria-toolbar" style="margin-top:24px;">
                 <div class="auditoria-toolbar-title">
-                    <h3 class="auditoria-title" style="font-size:16px;">6. Diferencia presupuesto vs. contabilidad (cuenta 4312)</h3>
-                    <p class="auditoria-subtitle">Por documento: presupuesto reconocido (<code class="auditoria-code">DetaPlan</code>) contra saldo contable de la familia <code class="auditoria-code">4312</code> (<code class="auditoria-code">DetaCont</code>).</p>
+                    <h3 class="auditoria-title" style="font-size:16px;">6. Diferencia presupuesto vs. contabilidad (cuenta 43)</h3>
+                    <p class="auditoria-subtitle">Por documento: presupuesto reconocido (<code class="auditoria-code">DetaPlan</code>) contra saldo contable de la familia <code class="auditoria-code">43</code> (<code class="auditoria-code">DetaCont</code>: 4312, 4395, etc.).</p>
                 </div>
             </div>
 
@@ -478,7 +478,7 @@ $sihosReclasificarCuentaVigenciaActualMasivoJsV = is_readable($assetSihosReclasi
                     <input type="text" class="form-input" value="<?= sihosFormatoMoneda($dif['totalPresupuesto']) ?>" readonly>
                 </div>
                 <div class="form-group">
-                    <label>Total saldo contable 4312</label>
+                    <label>Total saldo contable 43</label>
                     <input type="text" class="form-input" value="<?= sihosFormatoMoneda($dif['totalContabilidad']) ?>" readonly>
                 </div>
                 <div class="form-group">
@@ -489,7 +489,7 @@ $sihosReclasificarCuentaVigenciaActualMasivoJsV = is_readable($assetSihosReclasi
 
             <p class="field-note">
                 Diferencia por "Reconocimiento" de tesorería (rendimientos financieros, saldos de vigencia anterior, disponibilidad inicial): <strong><?= sihosFormatoMoneda($dif['totalDiferenciaReconocimientoTesoreria']) ?></strong> —
-                esperada, nunca tiene contrapartida en 4312 porque no es ingreso por facturación de pacientes. Se muestra aparte, abajo, para no tapar las diferencias reales.
+                esperada, nunca tiene contrapartida en la 43 porque no es ingreso por facturación de pacientes. Se muestra aparte, abajo, para no tapar las diferencias reales.
             </p>
 
             <h4 class="auditoria-title" style="font-size:14px; margin-top:16px;">Por tipo de usuario</h4>
@@ -498,12 +498,25 @@ $sihosReclasificarCuentaVigenciaActualMasivoJsV = is_readable($assetSihosReclasi
             <?php else: ?>
                 <div style="overflow-x:auto;">
                     <table class="seguridad-table">
-                        <thead><tr><th>Tipo de usuario</th><th>Presupuesto</th><th>Contabilidad</th><th>Diferencia</th></tr></thead>
+                        <thead>
+                            <tr>
+                                <th>Tipo de usuario</th>
+                                <th>Presupuesto</th>
+                                <?php foreach ($dif['cuentas4'] as $cuenta4): ?>
+                                    <th>Contabilidad <?= htmlspecialchars((string)$cuenta4) ?></th>
+                                <?php endforeach; ?>
+                                <th>Total contabilidad 43</th>
+                                <th>Diferencia</th>
+                            </tr>
+                        </thead>
                         <tbody>
                         <?php foreach ($dif['porTipoUsua'] as $tipo => $vals): ?>
                             <tr>
                                 <td><?= htmlspecialchars((string)$tipo) ?></td>
                                 <td><?= sihosFormatoMoneda($vals['presupuesto']) ?></td>
+                                <?php foreach ($dif['cuentas4'] as $cuenta4): ?>
+                                    <td><?= sihosFormatoMoneda(round((float)($vals['cuentas'][$cuenta4] ?? 0), 2)) ?></td>
+                                <?php endforeach; ?>
                                 <td><?= sihosFormatoMoneda($vals['contabilidad']) ?></td>
                                 <td><?= sihosFormatoMoneda($vals['diferencia']) ?></td>
                             </tr>
@@ -519,7 +532,7 @@ $sihosReclasificarCuentaVigenciaActualMasivoJsV = is_readable($assetSihosReclasi
             <?php else: ?>
                 <div style="overflow-x:auto;">
                     <table class="seguridad-table">
-                        <thead><tr><th>Documento</th><th>Fecha</th><th>Tipo de usuario</th><th>Presupuesto</th><th>Contabilidad</th><th>Diferencia</th><th>Documento relacionado</th><th>Fecha relacionado</th><th>Cuenta real (si no es 4312)</th><th>Opciones</th></tr></thead>
+                        <thead><tr><th>Documento</th><th>Fecha</th><th>Tipo de usuario</th><th>Presupuesto</th><th>Contabilidad</th><th>Diferencia</th><th>Documento relacionado</th><th>Fecha relacionado</th><th>Cuenta real (si no es 43)</th><th>Opciones</th></tr></thead>
                         <tbody>
                         <?php foreach ($dif['detalle'] as $f): ?>
                             <?php
@@ -549,6 +562,40 @@ $sihosReclasificarCuentaVigenciaActualMasivoJsV = is_readable($assetSihosReclasi
                                             data-empresa-id="<?= (int)$empresaId ?>"
                                             data-codi-docu="<?= htmlspecialchars($refAuditoriaCodiDocu) ?>"
                                             data-nume-docu="<?= htmlspecialchars($refAuditoriaNumeDocu) ?>">🔍 Referencias</button>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            <?php endif; ?>
+
+            <h4 class="auditoria-title" style="font-size:14px; margin-top:16px;">Cuentas 43 distintas de 4312 (informativo, ya incluidas en la contabilidad) (<?= count($dif['detalleOtrasCuentas43']) ?>)</h4>
+            <?php if ($dif['detalleOtrasCuentas43'] === []): ?>
+                <p class="field-note">Sin movimientos de otras cuentas 43 en el rango.</p>
+            <?php else: ?>
+                <div style="overflow-x:auto;">
+                    <table class="seguridad-table">
+                        <thead><tr><th>Documento</th><th>Fecha</th><th>Tipo de usuario</th><th>Cuenta</th><th>Valor</th><th>Documento relacionado</th><th>Opciones</th></tr></thead>
+                        <tbody>
+                        <?php foreach ($dif['detalleOtrasCuentas43'] as $f): ?>
+                            <?php
+                            $esFacturaPropia43 = in_array($f['CodiDocu'], $reporte['codigosFactura'], true);
+                            $refCodi43 = $esFacturaPropia43 ? $f['CodiDocu'] : ($f['RelacionadoCodiDocu'] ?? $f['CodiDocu']);
+                            $refNume43 = $esFacturaPropia43 ? $f['NumeDocu'] : ($f['RelacionadoNumeDocu'] ?? $f['NumeDocu']);
+                            ?>
+                            <tr>
+                                <td><?= htmlspecialchars($f['CodiDocu'] . '-' . $f['NumeDocu']) ?></td>
+                                <td><?= htmlspecialchars((string)$f['FechDocu']) ?></td>
+                                <td><?= htmlspecialchars($f['TipoUsua']) ?></td>
+                                <td><?= htmlspecialchars($f['CodiCont']) ?></td>
+                                <td><?= sihosFormatoMoneda($f['valor']) ?></td>
+                                <td><?= $f['RelacionadoCodiDocu'] !== null ? htmlspecialchars($f['RelacionadoCodiDocu'] . '-' . $f['RelacionadoNumeDocu']) : '—' ?></td>
+                                <td>
+                                    <button type="button" class="auditoria-btn-primary btnSihosAuditarReferencias"
+                                            data-empresa-id="<?= (int)$empresaId ?>"
+                                            data-codi-docu="<?= htmlspecialchars($refCodi43) ?>"
+                                            data-nume-docu="<?= htmlspecialchars($refNume43) ?>">🔍 Referencias</button>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
