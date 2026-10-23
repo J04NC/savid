@@ -71,9 +71,12 @@ class SihosCartera2193Repository
      *
      * @param string[] $codigosFactura
      * @param string[] $tiposUsuario CodiTipo elegidos
-     * @return list<array{CodiDocu:string,NumeDocu:string,TiDoTerc:string,NuDoTerc:string,TipoUsua:string,FechEdad:string}>
+     * Se entrega fila a fila (generator) para que el service procese por
+     * lotes sin materializar cientos de miles de facturas en memoria.
+     *
+     * @return iterable<array{CodiDocu:string,NumeDocu:string,TiDoTerc:string,NuDoTerc:string,TipoUsua:string,FechEdad:string}>
      */
-    public function fetchFacturas(array $codigosFactura, string $fechaCorte, array $tiposUsuario, ?string $nit): array
+    public function fetchFacturas(array $codigosFactura, string $fechaCorte, array $tiposUsuario, ?string $nit): iterable
     {
         $phDocu = implode(',', array_fill(0, count($codigosFactura), '?'));
         $phTipo = implode(',', array_fill(0, count($tiposUsuario), '?'));
@@ -97,7 +100,9 @@ class SihosCartera2193Repository
         );
         $stmt->execute($params);
 
-        return $stmt->fetchAll();
+        while (($fila = $stmt->fetch()) !== false) {
+            yield $fila;
+        }
     }
 
     /**
