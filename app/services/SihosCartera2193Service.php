@@ -10,9 +10,10 @@
  * Fidelidad a SIHOS: las reglas se copian del original, incluidas sus
  * rarezas, para que las cifras coincidan y cualquier diferencia con la
  * normativa se vea y se corrija en SIHOS, no aquí:
- *  - de las anotaciones de glosa solo cuenta la ÚLTIMA glosa de la factura
- *    (glosasencurso() sobrescribe en vez de acumular), aunque el valor de
- *    glosa sí suma todas;
+ *  - glosa en curso = suma de las glosas de la factura menos lo aceptado en
+ *    las anotaciones de TODAS ellas (validado contra el informe 2193 de
+ *    SIHOS con facturas de 2 glosas; leyendo glosasencurso() parecía que
+ *    solo contaba la última);
  *  - el giro directo se suma por tercero en cada tipo de usuario 2/90/91
  *    en que aparece (cuenta doble en el gran total).
  */
@@ -362,7 +363,7 @@ class SihosCartera2193Service
 
     /**
      * glosasencurso()['CursMenosAcep']: suma de las glosas menos lo aceptado
-     * (IPS + EAPB) de la ÚLTIMA glosa — ver la nota de fidelidad de la clase.
+     * (IPS + EAPB) en las anotaciones de todas ellas — ver la nota de la clase.
      *
      * @param list<array{CodiDocu:string,NumeDocu:string,ValoTota:float}> $glosas
      * @param array<string, array{AcepConc:float,RechConc:float,IpsCond:float,EapbCond:float}> $anotaciones
@@ -373,14 +374,16 @@ class SihosCartera2193Service
             return 0.0;
         }
 
-        $total = 0.0;
+        $total = $aceptado = 0.0;
         foreach ($glosas as $g) {
             $total += round($g['ValoTota'], 2);
+            $a = $anotaciones[$g['CodiDocu'] . '|' . $g['NumeDocu']] ?? null;
+            if ($a !== null) {
+                $aceptado += $a['IpsCond'] + $a['AcepConc'] + $a['EapbCond'] + $a['RechConc'];
+            }
         }
-        $ultima = end($glosas);
-        $a = $anotaciones[$ultima['CodiDocu'] . '|' . $ultima['NumeDocu']] ?? ['AcepConc' => 0.0, 'RechConc' => 0.0, 'IpsCond' => 0.0, 'EapbCond' => 0.0];
 
-        return round($total - ($a['IpsCond'] + $a['AcepConc']) - ($a['EapbCond'] + $a['RechConc']), 2);
+        return round($total - $aceptado, 2);
     }
 
     /**
