@@ -5105,4 +5105,66 @@ where e.CodiInst=:codiInst";
 
         return array_values($porDocumento);
     }
+
+    /**
+     * Reporte "Deterioro de cartera": valor aplicado por los documentos de
+     * deterioro (DCA, DocuApli=108) sobre cada factura/recibo de
+     * responsabilidad de glosa (DetaLiqu → EncaCont de la factura), con el
+     * tipo de usuario de la factura y el tercero del documento de
+     * deterioro. Una fila por tercero + factura + tipo de usuario.
+     *
+     * Los códigos de documento llegan ya resueltos por DocuApli (ver
+     * resolveCodigosDocumentoPorAplicacionContable()) — aquí no hay
+     * ningún CodiDocu literal. FechDocu/CodiDocu/NumeDocu salen de un
+     * documento cualquiera del grupo (sql_mode sin ONLY_FULL_GROUP_BY, igual
+     * que la consulta original en SIHOS): cuando una misma factura tiene
+     * más de un documento de deterioro, solo el Valor es la suma real.
+     * Medido en la instalación de pruebas: 7 variantes de plan/índices
+     * (FORCE INDEX, STRAIGHT_JOIN, sin ORDER BY) dan el mismo tiempo (~3 s
+     * para ~31.000 filas) y el mismo resultado — el costo es el volumen del
+     * join, no el plan, así que no se fuerza ningún índice. Sin ORDER BY a
+     * propósito: la tabla ordena en el cliente.
+     *
+     * @param string[] $codigosDeterioro
+     * @param string[] $codigosLiquidacion
+     * @return list<array<string, mixed>>
+     */
+    public function fetchDeterioroCartera(array $codigosDeterioro, array $codigosLiquidacion, string $fechaCorte): array
+    {
+        if ($codigosDeterioro === [] || $codigosLiquidacion === []) {
+            return [];
+        }
+
+        $phDeterioro = implode(',', array_fill(0, count($codigosDeterioro), '?'));
+        $phLiquidacion = implode(',', array_fill(0, count($codigosLiquidacion), '?'));
+
+        $stmt = $this->connect()->prepare(
+            "SELECT f.TipoUsua, t.NombTipo, e.FechDocu, e.CodiDocu, e.NumeDocu,
+                    d.CodiLiqu, d.NumeLiqu, e.TiDoTerc, e.NuDoTerc, c.NombTerc,
+                    SUM(d.ValoTota) AS Valor
+             FROM EncaCont e
+             INNER JOIN DetaLiqu d
+                ON d.CodiInst = e.CodiInst AND d.CodiDocu = e.CodiDocu AND d.NumeDocu = e.NumeDocu
+             INNER JOIN EncaCont f
+                ON f.CodiInst = d.CodiInst AND f.CodiDocu = d.CodiLiqu AND f.NumeDocu = d.NumeLiqu
+             INNER JOIN TipoUsua t ON t.CodiTipo = f.TipoUsua
+             INNER JOIN CodiTerc c ON c.TipoDocu = e.TiDoTerc AND c.NumeTerc = e.NuDoTerc
+             WHERE e.CodiInst = ?
+               AND e.Causado = '1' AND e.Anulado <> '1'
+               AND d.CodiDocu IN ({$phDeterioro})
+               AND d.CodiLiqu IN ({$phLiquidacion})
+               AND e.FechDocu <= ?
+             GROUP BY e.TiDoTerc, e.NuDoTerc, d.CodiLiqu, d.NumeLiqu, f.TipoUsua
+             HAVING Valor <> 0"
+        );
+        $stmt->execute([$this->codiInst(), ...$codigosDeterioro, ...$codigosLiquidacion, $fechaCorte]);
+
+        $filas = [];
+        foreach ($stmt->fetchAll() as $fila) {
+            $fila['Valor'] = (float)$fila['Valor'];
+            $filas[] = $fila;
+        }
+
+        return $filas;
+    }
 }

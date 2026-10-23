@@ -42,26 +42,30 @@ class SihosAuditoriaGlosaCache
         return preg_replace('/[^a-f0-9]/', '', strtolower($token)) ?? '';
     }
 
-    private static function keys(int $empresaId, string $token): array
+    private static function keys(int $empresaId, string $token, string $prefijo): array
     {
         $safe = self::tokenSafe($token);
 
         return [
-            'datos' => self::storage()->key(StorageService::ZONE_SIHOS_REPORTES, 'auditoria_glosa_' . $safe . '.json', $empresaId),
-            'meta' => self::storage()->key(StorageService::ZONE_SIHOS_REPORTES, 'auditoria_glosa_' . $safe . '_meta.json', $empresaId),
+            'datos' => self::storage()->key(StorageService::ZONE_SIHOS_REPORTES, $prefijo . '_' . $safe . '.json', $empresaId),
+            'meta' => self::storage()->key(StorageService::ZONE_SIHOS_REPORTES, $prefijo . '_' . $safe . '_meta.json', $empresaId),
         ];
     }
 
     /**
+     * $prefijo separa el espacio de nombres de cada reporte que reutiliza
+     * este cache (p. ej. 'deterioro'); el valor por defecto conserva los
+     * archivos de Auditoría Glosa tal como estaban.
+     *
      * @param list<array<string, mixed>> $filas
      * @param array<string, mixed> $meta
      */
-    public static function store(int $empresaId, int $userId, array $filas, array $meta): string
+    public static function store(int $empresaId, int $userId, array $filas, array $meta, string $prefijo = 'auditoria_glosa'): string
     {
-        self::purgeExpired($empresaId);
+        self::purgeExpired($empresaId, $prefijo);
 
         $token = bin2hex(random_bytes(16));
-        $keys = self::keys($empresaId, $token);
+        $keys = self::keys($empresaId, $token, $prefijo);
         $storage = self::storage();
 
         $storage->putContents($keys['datos'], json_encode($filas, JSON_UNESCAPED_UNICODE) ?: '[]');
@@ -79,14 +83,14 @@ class SihosAuditoriaGlosaCache
     /**
      * @return array{filas: list<array<string, mixed>>, meta: array<string, mixed>}|null
      */
-    public static function load(string $token, int $empresaId, int $userId): ?array
+    public static function load(string $token, int $empresaId, int $userId, string $prefijo = 'auditoria_glosa'): ?array
     {
         $safe = self::tokenSafe($token);
         if (strlen($safe) !== 32) {
             return null;
         }
 
-        $keys = self::keys($empresaId, $token);
+        $keys = self::keys($empresaId, $token, $prefijo);
         $storage = self::storage();
         if (!$storage->exists($keys['meta']) || !$storage->exists($keys['datos'])) {
             return null;
@@ -104,7 +108,7 @@ class SihosAuditoriaGlosaCache
 
         $created = (int)($meta['created_at'] ?? 0);
         if ($created > 0 && (time() - $created) > self::TTL_SECONDS) {
-            self::delete($token, $empresaId);
+            self::delete($token, $empresaId, $prefijo);
 
             return null;
         }
@@ -118,31 +122,31 @@ class SihosAuditoriaGlosaCache
         return ['filas' => $filas, 'meta' => $meta];
     }
 
-    public static function delete(string $token, int $empresaId): void
+    public static function delete(string $token, int $empresaId, string $prefijo = 'auditoria_glosa'): void
     {
         $safe = self::tokenSafe($token);
         if (strlen($safe) !== 32) {
             return;
         }
 
-        $keys = self::keys($empresaId, $token);
+        $keys = self::keys($empresaId, $token, $prefijo);
         $storage = self::storage();
         $storage->delete($keys['datos']);
         $storage->delete($keys['meta']);
     }
 
-    private static function purgeExpired(int $empresaId): void
+    private static function purgeExpired(int $empresaId, string $prefijo): void
     {
         $storage = self::storage();
         $now = time();
-        foreach ($storage->glob(StorageService::ZONE_SIHOS_REPORTES, 'auditoria_glosa_*_meta.json', $empresaId) as $metaKey) {
+        foreach ($storage->glob(StorageService::ZONE_SIHOS_REPORTES, $prefijo . '_*_meta.json', $empresaId) as $metaKey) {
             $raw = $storage->get($metaKey);
             $meta = is_string($raw) ? json_decode($raw, true) : null;
             $created = is_array($meta) ? (int)($meta['created_at'] ?? 0) : 0;
             if ($created > 0 && ($now - $created) > self::TTL_SECONDS) {
                 $basename = basename($metaKey, '_meta.json');
-                $token = str_replace('auditoria_glosa_', '', $basename);
-                self::delete($token, $empresaId);
+                $token = str_replace($prefijo . '_', '', $basename);
+                self::delete($token, $empresaId, $prefijo);
             }
         }
     }
