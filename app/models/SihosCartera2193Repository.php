@@ -293,6 +293,83 @@ class SihosCartera2193Repository
     }
 
     /**
+     * Giro directo por tercero (consulta sqlGiDi de cartera.php): suma de
+     * EncaCont.Saldo de los recibos de giro (TipoComp 25) del tercero, una
+     * vez por cada línea de DetaCont con valor positivo — así lo suma el
+     * original (el JOIN no filtra el período), no es un error de este reporte.
+     *
+     * @param string[] $codigosRecibo
+     * @param list<array{0:string,1:string}> $terceros pares [TiDoTerc, NuDoTerc]
+     * @return array<string, float> "tiTerc|nuTerc" => giro
+     */
+    public function fetchGiroDirectoPorTercero(array $codigosRecibo, array $terceros, string $fechaCorte): array
+    {
+        if ($codigosRecibo === [] || $terceros === []) {
+            return [];
+        }
+        $phRecibo = implode(',', array_fill(0, count($codigosRecibo), '?'));
+
+        $giros = [];
+        foreach ($this->lotes($this->agruparPorPrimero($terceros)) as [$tiDoTerc, $numeros]) {
+            $ph = implode(',', array_fill(0, count($numeros), '?'));
+            $stmt = $this->pdo->prepare(
+                "SELECT e.TiDoTerc, e.NuDoTerc, SUM(e.Saldo) AS Giro
+                 FROM EncaCont e
+                 INNER JOIN DetaCont d ON e.CodiInst = d.CodiInst AND e.CodiDocu = d.CodiDocu AND e.NumeDocu = d.NumeDocu
+                 WHERE e.CodiInst = ? AND e.FechDocu <= ? AND e.Causado = '1' AND e.Anulado <> '1'
+                   AND e.TiDoTerc = ? AND e.NuDoTerc IN ({$ph}) AND d.Valor > 0 AND e.TipoComp = '25'
+                   AND e.CodiDocu IN ({$phRecibo})
+                 GROUP BY e.TiDoTerc, e.NuDoTerc"
+            );
+            $stmt->execute([$this->codiInst, $fechaCorte, $tiDoTerc, ...$numeros, ...$codigosRecibo]);
+
+            foreach ($stmt->fetchAll() as $fila) {
+                $giros[$fila['TiDoTerc'] . '|' . $fila['NuDoTerc']] = (float)$fila['Giro'];
+            }
+        }
+
+        return $giros;
+    }
+
+    /**
+     * Nombre de cada tercero (CodiTerc, catálogo sin CodiInst).
+     *
+     * @param list<array{0:string,1:string}> $terceros pares [TiDoTerc, NuDoTerc]
+     * @return array<string, string> "tiTerc|nuTerc" => NombTerc
+     */
+    public function fetchNombresTerceros(array $terceros): array
+    {
+        $nombres = [];
+        foreach ($this->lotes($this->agruparPorPrimero($terceros)) as [$tipoDocu, $numeros]) {
+            $ph = implode(',', array_fill(0, count($numeros), '?'));
+            $stmt = $this->pdo->prepare("SELECT TipoDocu, NumeTerc, NombTerc FROM CodiTerc WHERE TipoDocu = ? AND NumeTerc IN ({$ph})");
+            $stmt->execute([$tipoDocu, ...$numeros]);
+
+            foreach ($stmt->fetchAll() as $fila) {
+                $nombres[$fila['TipoDocu'] . '|' . $fila['NumeTerc']] = (string)$fila['NombTerc'];
+            }
+        }
+
+        return $nombres;
+    }
+
+    /**
+     * [[a, b], ...] => [a => [b, ...]] sin repetidos.
+     *
+     * @param list<array{0:string,1:string}> $pares
+     * @return array<string, list<string>>
+     */
+    private function agruparPorPrimero(array $pares): array
+    {
+        $grupos = [];
+        foreach ($pares as [$primero, $segundo]) {
+            $grupos[$primero][$segundo] = $segundo;
+        }
+
+        return array_map('array_values', $grupos);
+    }
+
+    /**
      * Parte {CodiDocu => NumeDocu[]} en lotes de LOTE números.
      *
      * @param array<string, list<string>> $numerosPorDocumento
