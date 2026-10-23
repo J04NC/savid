@@ -21,3 +21,6 @@
 # Academic con texto a voz) — se recrea con:
 #   python3 -m venv scripts/.tts-venv && scripts/.tts-venv/bin/pip install edge-tts
 /scripts/.tts-venv/
+
+# Copia local de la versión anterior de SIHOS (referencia, no se versiona)
+/.sihosant/
