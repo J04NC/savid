@@ -248,6 +248,13 @@ class Router
         $sihosNominaPilaAccionMethods = ['nominaPilaExportar'];
 
         /*
+         * Misma razón: sihos/deterioroDatos (JSON server-side de la tabla de
+         * detalle) y sihos/deterioroExportar (CSV) no tienen ítem de menú
+         * propio — su pantalla es sihos/deterioro.
+         */
+        $sihosDeterioroAccionMethods = ['deterioroDatos', 'deterioroExportar'];
+
+        /*
          * Misma razón: sihos/auditoriaGlosaBuscarAdministradora (autocompletado
          * AJAX del filtro de administradora) no tiene ítem de menú propio — su
          * pantalla es sihos/auditoriaGlosa.
@@ -349,6 +356,9 @@ class Router
             && !($controllerName === 'SihosController'
                 && in_array($method, $sihosNominaPilaAccionMethods, true)
                 && PermisoService::can('sihos/nominaPila', 'ver'))
+            && !($controllerName === 'SihosController'
+                && in_array($method, $sihosDeterioroAccionMethods, true)
+                && PermisoService::can('sihos/deterioro', 'ver'))
             && !($controllerName === 'SihosController'
                 && in_array($method, $sihosAuditoriaGlosaAccionMethods, true)
                 && PermisoService::can('sihos/auditoriaGlosa', 'ver'))

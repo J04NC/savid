@@ -15,6 +15,7 @@ class SihosController
     private SihosInterlabService $interlabService;
     private SihosInterlabProcesarService $interlabProcesarService;
     private SihosTarifaProcedimientoService $tarifaProcedimientoService;
+    private SihosDeterioroService $deterioroService;
 
     public function __construct()
     {
@@ -31,6 +32,7 @@ class SihosController
         $this->interlabService = new SihosInterlabService();
         $this->interlabProcesarService = new SihosInterlabProcesarService();
         $this->tarifaProcedimientoService = new SihosTarifaProcedimientoService();
+        $this->deterioroService = new SihosDeterioroService();
     }
 
     /**
@@ -1324,5 +1326,164 @@ class SihosController
         }
 
         echo json_encode($resultado, JSON_UNESCAPED_UNICODE);
+    }
+
+    /**
+     * GET ?url=sihos/deterioro&empresa_id=N&fecha_corte=YYYY-MM-DD
+     * Deterioro de cartera: resumen por tipo de usuario, resumen por entidad
+     * y detalle factura por factura (este último paginado del lado del
+     * servidor vía deterioroDatos, sobre el resultado cacheado). La consulta
+     * a SIHOS solo corre con el botón "Consultar" (name="buscar").
+     */
+    public function deterioro(): void
+    {
+        $scope = $this->connectionService->buildScope($_GET);
+        $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : null;
+        $configurado = $empresaId !== null && $this->connectionService->buildConfigView($empresaId)['configurado'];
+
+        // Por defecto, el cierre del mes anterior.
+        $fechaCorte = trim((string)($_GET['fecha_corte'] ?? ''));
+        if ($fechaCorte === '') {
+            $fechaCorte = date('Y-m-d', strtotime('last day of previous month'));
+        }
+
+        $reporte = null;
+        $tokenDatos = null;
+        if ($empresaId !== null && $configurado && isset($_GET['buscar'])) {
+            SihosMemoryGuard::ejecutar(1024, function () use ($empresaId, $fechaCorte, &$reporte, &$tokenDatos): void {
+                $reporte = $this->deterioroService->buildReporte($empresaId, $fechaCorte);
+
+                if ($reporte['ok'] && $reporte['filas'] !== []) {
+                    $tokenDatos = SihosAuditoriaGlosaCache::store(
+                        $empresaId,
+                        (int)($_SESSION['user_id'] ?? 0),
+                        $reporte['filas'],
+                        ['fechaCorte' => $fechaCorte],
+                        'deterioro'
+                    );
+                }
+                // La vista solo necesita los resúmenes; el detalle ya está en el cache.
+                if ($reporte['ok']) {
+                    $reporte['totalFilas'] = count($reporte['filas']);
+                    unset($reporte['filas']);
+                }
+            });
+        }
+
+        $moduleService = new ModuleService();
+        $breadcrumb = $moduleService->buildBreadcrumbForRuta('sihos/deterioro');
+
+        $view = BASE_PATH . '/app/views/sihos/deterioro.php';
+        require BASE_PATH . '/app/views/layouts/main.php';
+    }
+
+    /**
+     * GET ?url=sihos/deterioroDatos&empresa_id=N&token=... — endpoint JSON
+     * server-side de la tabla de detalle de Deterioro; pagina/ordena/busca
+     * sobre el resultado cacheado sin volver a consultar SIHOS. Sin ítem de
+     * menú propio (ver Router::middleware()): exige el mismo 'ver' de
+     * sihos/deterioro.
+     */
+    public function deterioroDatos(): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+
+        $scope = $this->connectionService->buildScope($_GET);
+        $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : null;
+        $token = trim((string)($_GET['token'] ?? ''));
+        $draw = (int)($_GET['draw'] ?? 0);
+
+        if ($empresaId === null || $token === '') {
+            echo json_encode(['draw' => $draw, 'recordsTotal' => 0, 'recordsFiltered' => 0, 'data' => []], JSON_UNESCAPED_UNICODE);
+
+            return;
+        }
+
+        // Mismo colchón de memoria que auditoriaGlosaDatos() — ver SihosMemoryGuard.
+        SihosMemoryGuard::ejecutar(1024, function () use ($empresaId, $token, $draw): void {
+            $cache = SihosAuditoriaGlosaCache::load($token, $empresaId, (int)($_SESSION['user_id'] ?? 0), 'deterioro');
+            if ($cache === null) {
+                echo json_encode([
+                    'draw' => $draw,
+                    'recordsTotal' => 0,
+                    'recordsFiltered' => 0,
+                    'data' => [],
+                    'error' => 'El resultado de este reporte expiró o no existe. Vuelva a consultar.',
+                ], JSON_UNESCAPED_UNICODE);
+
+                return;
+            }
+
+            $start = max(0, (int)($_GET['start'] ?? 0));
+            $length = (int)($_GET['length'] ?? 10);
+            if ($length <= 0 || $length > 1000) {
+                $length = 10;
+            }
+
+            $columnSearches = [];
+            foreach ((array)($_GET['columns'] ?? []) as $idx => $col) {
+                $valor = trim((string)($col['search']['value'] ?? ''));
+                if ($valor !== '') {
+                    $columnSearches[(int)$idx] = $valor;
+                }
+            }
+
+            $resultado = $this->deterioroService->paginarParaDataTable(
+                $cache['filas'],
+                $start,
+                $length,
+                (int)($_GET['order'][0]['column'] ?? 0),
+                (string)($_GET['order'][0]['dir'] ?? 'asc'),
+                (string)($_GET['search']['value'] ?? ''),
+                $columnSearches
+            );
+
+            echo json_encode([
+                'draw' => $draw,
+                'recordsTotal' => (int)($cache['meta']['total'] ?? count($cache['filas'])),
+                'recordsFiltered' => $resultado['recordsFiltered'],
+                'data' => $resultado['data'],
+            ], JSON_UNESCAPED_UNICODE);
+        });
+    }
+
+    /**
+     * GET ?url=sihos/deterioroExportar&empresa_id=N&token=... — CSV de TODO
+     * el detalle cacheado (los botones de la tabla server-side solo
+     * exportan la página visible). Mismo permiso 'ver' de sihos/deterioro.
+     */
+    public function deterioroExportar(): void
+    {
+        $scope = $this->connectionService->buildScope($_GET);
+        $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : null;
+        $token = trim((string)($_GET['token'] ?? ''));
+
+        if ($empresaId === null || $token === '') {
+            http_response_code(400);
+            exit('Falta empresa o token.');
+        }
+
+        SihosMemoryGuard::ejecutar(1024, function () use ($empresaId, $token): void {
+            $cache = SihosAuditoriaGlosaCache::load($token, $empresaId, (int)($_SESSION['user_id'] ?? 0), 'deterioro');
+            if ($cache === null) {
+                http_response_code(410);
+                exit('El resultado de este reporte expiró. Vuelva a consultar.');
+            }
+
+            header('Content-Type: text/csv; charset=utf-8');
+            header('Content-Disposition: attachment; filename="deterioro_cartera_' . date('Ymd_His') . '.csv"');
+
+            $out = fopen('php://output', 'w');
+            fwrite($out, "\xEF\xBB\xBF");
+            // "sep=;" — ver la explicación en auditoriaGlosaExportar().
+            fwrite($out, "sep=;\r\n");
+            fputcsv($out, ['Tipo usuario', 'Fecha', 'Documento', 'Factura', 'Entidad', 'Tipo doc.', 'Documento entidad', 'Valor'], ';');
+
+            foreach ($this->deterioroService->filasParaExportar($cache['filas']) as $fila) {
+                fputcsv($out, $fila, ';');
+            }
+
+            fclose($out);
+        });
     }
 }
