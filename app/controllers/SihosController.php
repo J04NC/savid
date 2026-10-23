@@ -16,6 +16,7 @@ class SihosController
     private SihosInterlabProcesarService $interlabProcesarService;
     private SihosTarifaProcedimientoService $tarifaProcedimientoService;
     private SihosDeterioroService $deterioroService;
+    private SihosCartera2193Service $cartera2193Service;
 
     public function __construct()
     {
@@ -33,6 +34,7 @@ class SihosController
         $this->interlabProcesarService = new SihosInterlabProcesarService();
         $this->tarifaProcedimientoService = new SihosTarifaProcedimientoService();
         $this->deterioroService = new SihosDeterioroService();
+        $this->cartera2193Service = new SihosCartera2193Service();
     }
 
     /**
@@ -1482,5 +1484,45 @@ class SihosController
 
             fclose($out);
         });
+    }
+
+    /**
+     * GET ?url=sihos/cartera2193&empresa_id=N&fecha_corte=YYYY-MM-DD[&tipos[]=..][&nit=..]
+     * 2193 Cartera: cartera por edades por deudor y tipo de usuario (radicada,
+     * pendiente de radicar, glosa y giro directo), a la fecha de corte. La
+     * consulta a SIHOS solo corre con el botón "Consultar" (name="buscar").
+     */
+    public function cartera2193(): void
+    {
+        $scope = $this->connectionService->buildScope($_GET);
+        $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : null;
+        $configurado = $empresaId !== null && $this->connectionService->buildConfigView($empresaId)['configurado'];
+
+        // Sin valor por defecto: el usuario elige la fecha de corte (el input es required).
+        $fechaCorte = trim((string)($_GET['fecha_corte'] ?? ''));
+        $tiposElegidos = array_values(array_filter(array_map('strval', (array)($_GET['tipos'] ?? [])), 'ctype_digit'));
+        $nit = preg_replace('/[^0-9-]/', '', (string)($_GET['nit'] ?? ''));
+        $nit = $nit !== '' ? $nit : null;
+
+        $tiposDisponibles = [];
+        $reporte = null;
+        if ($empresaId !== null && $configurado) {
+            $listado = $this->cartera2193Service->listarTiposUsuario($empresaId);
+            $tiposDisponibles = $listado['tipos'] ?? [];
+
+            if (isset($_GET['buscar'])) {
+                // Una EPS grande son decenas de miles de facturas: el reporte puede tardar varios minutos.
+                set_time_limit(1800);
+                SihosMemoryGuard::ejecutar(512, function () use ($empresaId, $fechaCorte, $tiposElegidos, $nit, &$reporte): void {
+                    $reporte = $this->cartera2193Service->buildReporte($empresaId, $fechaCorte, $tiposElegidos, $nit);
+                });
+            }
+        }
+
+        $moduleService = new ModuleService();
+        $breadcrumb = $moduleService->buildBreadcrumbForRuta('sihos/cartera2193');
+
+        $view = BASE_PATH . '/app/views/sihos/cartera2193.php';
+        require BASE_PATH . '/app/views/layouts/main.php';
     }
 }
