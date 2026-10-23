@@ -4624,6 +4624,38 @@ where e.CodiInst=:codiInst";
     }
 
     /**
+     * Componentes de cada grupo quirúrgico (médico, anestesia, ayudante,
+     * perfusión, sala, materiales) que NO tienen fila en `TariProc` para el
+     * manual+plan dado. Sin esa tarifa el procedimiento de grupo quedaría
+     * incompleto en SIHOS.
+     *
+     * @return array<string, string[]> CodiGrup => códigos de componente sin tarifa
+     */
+    public function fetchComponentesGrupoSinTarifa(string $codiManu, string $codiPlan): array
+    {
+        $pdo = $this->connect();
+        $grupos = $pdo->query(
+            'SELECT CodiGrup, CodiMedi, CodiAnes, CodiAyud, CodiPerf, CodiSala, CodiMate FROM GrupQuir'
+        )->fetchAll();
+
+        $stmt = $pdo->prepare('SELECT CodiProc FROM TariProc WHERE CodiManu = ? AND CodiPlan = ?');
+        $stmt->execute([$codiManu, $codiPlan]);
+        $conTarifa = array_flip(array_map('trim', array_column($stmt->fetchAll(), 'CodiProc')));
+
+        $faltantes = [];
+        foreach ($grupos as $g) {
+            foreach (['CodiMedi', 'CodiAnes', 'CodiAyud', 'CodiPerf', 'CodiSala', 'CodiMate'] as $col) {
+                $codigo = trim((string)$g[$col]);
+                if ($codigo !== '' && !isset($conTarifa[$codigo])) {
+                    $faltantes[trim($g['CodiGrup'])][] = $codigo;
+                }
+            }
+        }
+
+        return $faltantes;
+    }
+
+    /**
      * Nombre y códigos CUPS/SOAT del catálogo `CodiProc` para los códigos
      * pedidos — usado para (a) validar que cada `CodiProc` de la plantilla
      * exista en el catálogo de la institución y (b) mostrar el nombre del

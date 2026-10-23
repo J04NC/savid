@@ -235,6 +235,7 @@ class SihosTarifaProcedimientoService
         try {
             $gruposValidos = array_flip($repositorio->fetchGruposQuirurgicos());
             $tarifasActuales = $repositorio->fetchTarifasPorManual($codiManu, $codiPlan);
+            $componentesSinTarifa = $repositorio->fetchComponentesGrupoSinTarifa($codiManu, $codiPlan);
         } catch (PDOException $e) {
             return ['ok' => false, 'error' => 'No se pudo consultar SIHOS: ' . $e->getMessage()];
         }
@@ -357,6 +358,10 @@ class SihosTarifaProcedimientoService
                 'indiUVB' => $indiUVB,
                 'estado' => $estado,
                 'motivo' => $motivo,
+                // No bloquea: avisa que el grupo quedaría incompleto en SIHOS.
+                'advertencia' => $motivo === null && $fila['grupQuir'] !== null && isset($componentesSinTarifa[$fila['grupQuir']])
+                    ? 'Al grupo ' . $fila['grupQuir'] . ' le falta tarifa en este manual para: ' . implode(', ', $componentesSinTarifa[$fila['grupQuir']]) . '.'
+                    : null,
             ];
 
             if ($motivo !== null || !in_array($estado, ['nuevo', 'actualizar'], true)) {

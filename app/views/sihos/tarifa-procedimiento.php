@@ -178,6 +178,9 @@ $tarifaProcJsV = is_readable($assetTarifaProc) ? (int)filemtime($assetTarifaProc
                                         <?php if ($f['motivo'] !== null): ?>
                                             <div class="field-note"><?= htmlspecialchars($f['motivo']) ?></div>
                                         <?php endif; ?>
+                                        <?php if (!empty($f['advertencia'])): ?>
+                                            <div class="field-note" style="color:#f39c12;">⚠ <?= htmlspecialchars($f['advertencia']) ?></div>
+                                        <?php endif; ?>
                                     </td>
                                 </tr>
                             <?php endforeach; ?>
