@@ -150,7 +150,10 @@ $fmt = static fn (float $v): string => SihosDeterioroService::formatoMoneda($v);
 </div>
 
 <script>
-(function () {
+// La vista se inserta en main.php ANTES de cargar app.js y jQuery: sin esperar
+// a DOMContentLoaded, savidMostrarCargando y jQuery aún no existen cuando este
+// script corre y los "if" fallan en silencio (ver sihos/cruce.php).
+document.addEventListener('DOMContentLoaded', function () {
     // Overlay de "cargando": la consulta a SIHOS tarda varios segundos.
     var form = document.getElementById('sihosDeterioroForm');
     if (form && typeof savidMostrarCargando === 'function') {
@@ -207,5 +210,5 @@ $fmt = static fn (float $v): string => SihosDeterioroService::formatoMoneda($v);
     document.getElementById('sihosDeterioroQuitarFiltro').addEventListener('click', function () {
         aplicarFiltro(-1, '', '');
     });
-})();
+});
 </script>

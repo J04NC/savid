@@ -1341,11 +1341,8 @@ class SihosController
         $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : null;
         $configurado = $empresaId !== null && $this->connectionService->buildConfigView($empresaId)['configurado'];
 
-        // Por defecto, el cierre del mes anterior.
+        // Sin valor por defecto: el usuario elige la fecha de corte (el input es required).
         $fechaCorte = trim((string)($_GET['fecha_corte'] ?? ''));
-        if ($fechaCorte === '') {
-            $fechaCorte = date('Y-m-d', strtotime('last day of previous month'));
-        }
 
         $reporte = null;
         $tokenDatos = null;
