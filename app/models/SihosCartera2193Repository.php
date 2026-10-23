@@ -158,6 +158,140 @@ class SihosCartera2193Repository
         return $saldos;
     }
 
+    /** Cuenta de difícil cobro de la institución (CodiInst.CuenDiCo), '' si no tiene. */
+    public function fetchCuentaDificilCobro(): string
+    {
+        $stmt = $this->pdo->prepare('SELECT CuenDiCo FROM CodiInst WHERE CodiInst = ?');
+        $stmt->execute([$this->codiInst]);
+
+        return (string)($stmt->fetchColumn() ?: '');
+    }
+
+    /**
+     * Cuentas en las que una factura tiene un débito referenciado hasta el
+     * corte (FacturaRadicada): el service decide si alguna es de
+     * radicación o de difícil cobro. Solo trae las cuentas que importan
+     * (las que empiezan por un prefijo de radicación o igual a la de
+     * difícil cobro) para no devolver toda la contabilidad de la factura.
+     *
+     * @param array<string, list<string>> $numerosPorDocumento CodiDocu => NumeDocu[]
+     * @param string[] $prefijosRadicacion prefijos LIKE (hasta 5 dígitos)
+     * @return array<string, list<string>> "doc|num" => cuentas
+     */
+    public function fetchCuentasDebitoPorFactura(array $numerosPorDocumento, string $fechaCorte, array $prefijosRadicacion, string $cuentaDificilCobro): array
+    {
+        $criterios = array_fill(0, count($prefijosRadicacion), 'd.CodiCont LIKE ?');
+        $params = array_map(static fn (string $p): string => $p . '%', $prefijosRadicacion);
+        if ($cuentaDificilCobro !== '') {
+            $criterios[] = 'd.CodiCont = ?';
+            $params[] = $cuentaDificilCobro;
+        }
+        if ($criterios === []) {
+            return [];
+        }
+        $critCuentas = implode(' OR ', $criterios);
+
+        $cuentas = [];
+        foreach ($this->lotes($numerosPorDocumento) as [$codiDocu, $numeros]) {
+            $ph = implode(',', array_fill(0, count($numeros), '?'));
+            $stmt = $this->pdo->prepare(
+                "SELECT DISTINCT d.TiDoRefe, d.NuDoRefe, d.CodiCont
+                 FROM EncaCont e
+                 INNER JOIN DetaCont d ON e.CodiInst = d.CodiInst AND e.CodiAno = d.Periodo
+                    AND e.CodiDocu = d.CodiDocu AND e.NumeDocu = d.NumeDocu
+                 INNER JOIN MaesDocu m ON e.CodiInst = m.CodiInst AND e.CodiDocu = m.CodiDocu
+                 WHERE e.CodiInst = ? AND e.Causado = 1 AND e.Anulado <> 1 AND d.TiDoRefe = ?
+                   AND d.NuDoRefe IN ({$ph}) AND d.Valor > 0 AND e.FechDocu <= ? AND ({$critCuentas})"
+            );
+            $stmt->execute([$this->codiInst, $codiDocu, ...$numeros, $fechaCorte, ...$params]);
+
+            foreach ($stmt->fetchAll() as $fila) {
+                $cuentas[$fila['TiDoRefe'] . '|' . $fila['NuDoRefe']][] = (string)$fila['CodiCont'];
+            }
+        }
+
+        return $cuentas;
+    }
+
+    /**
+     * Glosas en curso de cada factura (glosasencurso): documentos de glosa
+     * causados no anulados hasta el corte que referencian la factura,
+     * ordenados por CodiDocu/NumeDocu (SIHOS no ordena; el service usa la
+     * última, como el original).
+     *
+     * @param string[] $codigosGlosa
+     * @param array<string, list<string>> $numerosPorDocumento CodiDocu => NumeDocu[]
+     * @return array<string, list<array{CodiDocu:string,NumeDocu:string,ValoTota:float}>> "doc|num" => glosas
+     */
+    public function fetchGlosasPorFactura(array $codigosGlosa, array $numerosPorDocumento, string $fechaCorte): array
+    {
+        if ($codigosGlosa === []) {
+            return [];
+        }
+        $phGlosa = implode(',', array_fill(0, count($codigosGlosa), '?'));
+
+        $glosas = [];
+        foreach ($this->lotes($numerosPorDocumento) as [$codiDocu, $numeros]) {
+            $ph = implode(',', array_fill(0, count($numeros), '?'));
+            $stmt = $this->pdo->prepare(
+                "SELECT e.TiDoRefe, e.NuDoRefe, e.CodiDocu, e.NumeDocu, e.ValoTota
+                 FROM EncaCont e
+                 WHERE e.CodiInst = ? AND e.CodiDocu IN ({$phGlosa}) AND e.TiDoRefe = ? AND e.NuDoRefe IN ({$ph})
+                   AND e.Causado = 1 AND e.Anulado <> 1 AND e.FechDocu <= ?
+                 ORDER BY e.CodiDocu, e.NumeDocu"
+            );
+            $stmt->execute([$this->codiInst, ...$codigosGlosa, $codiDocu, ...$numeros, $fechaCorte]);
+
+            foreach ($stmt->fetchAll() as $fila) {
+                $glosas[$fila['TiDoRefe'] . '|' . $fila['NuDoRefe']][] = [
+                    'CodiDocu' => (string)$fila['CodiDocu'],
+                    'NumeDocu' => (string)$fila['NumeDocu'],
+                    'ValoTota' => (float)$fila['ValoTota'],
+                ];
+            }
+        }
+
+        return $glosas;
+    }
+
+    /**
+     * Anotaciones de cada glosa (AnotGlos hasta el corte), ya sumadas por
+     * condición como las 3 consultas de glosasencurso.
+     *
+     * @param array<string, list<string>> $numerosPorGlosa CodiDocu de glosa => NumeGlos[]
+     * @return array<string, array{AcepConc:float,RechConc:float,IpsCond:float,EapbCond:float}> "doc|num" => sumas
+     */
+    public function fetchAnotacionesGlosa(array $numerosPorGlosa, string $fechaCorte): array
+    {
+        $anotaciones = [];
+        foreach ($this->lotes($numerosPorGlosa) as [$codiDocu, $numeros]) {
+            $ph = implode(',', array_fill(0, count($numeros), '?'));
+            $stmt = $this->pdo->prepare(
+                "SELECT CodiDocu, NumeGlos,
+                        SUM(IF(TipoCond = 1, ValoAcep, 0)) AS AcepConc,
+                        SUM(IF(TipoCond = 1, ValoRech, 0)) AS RechConc,
+                        SUM(IF(TipoDeta = 1 AND TipoCond = 2, ValoAcep, 0)) AS IpsCond,
+                        SUM(IF(TipoDeta = 2 AND TipoCond = 2, ValoAcep, 0)) AS EapbCond
+                 FROM AnotGlos
+                 WHERE CodiInst = ? AND CodiDocu = ? AND NumeGlos IN ({$ph})
+                   AND Causado = 1 AND Anulado != 1 AND FechAnot <= ?
+                 GROUP BY CodiDocu, NumeGlos"
+            );
+            $stmt->execute([$this->codiInst, $codiDocu, ...$numeros, $fechaCorte]);
+
+            foreach ($stmt->fetchAll() as $fila) {
+                $anotaciones[$fila['CodiDocu'] . '|' . $fila['NumeGlos']] = [
+                    'AcepConc' => (float)$fila['AcepConc'],
+                    'RechConc' => (float)$fila['RechConc'],
+                    'IpsCond' => (float)$fila['IpsCond'],
+                    'EapbCond' => (float)$fila['EapbCond'],
+                ];
+            }
+        }
+
+        return $anotaciones;
+    }
+
     /**
      * Parte {CodiDocu => NumeDocu[]} en lotes de LOTE números.
      *
