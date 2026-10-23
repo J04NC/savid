@@ -148,3 +148,64 @@ $fmt = static fn (float $v): string => SihosDeterioroService::formatoMoneda($v);
     <?php endif; ?>
 
 </div>
+
+<script>
+(function () {
+    // Overlay de "cargando": la consulta a SIHOS tarda varios segundos.
+    var form = document.getElementById('sihosDeterioroForm');
+    if (form && typeof savidMostrarCargando === 'function') {
+        form.addEventListener('submit', function () {
+            savidMostrarCargando('Consultando deterioro de cartera…', true);
+        });
+    }
+
+    var detalle = document.getElementById('sihosDeterioroDetalle');
+    if (!detalle || typeof jQuery === 'undefined') {
+        return;
+    }
+
+    var aviso = document.getElementById('sihosDeterioroFiltroActivo');
+    var textoAviso = document.getElementById('sihosDeterioroFiltroTexto');
+
+    function api() {
+        return jQuery(detalle).DataTable();
+    }
+
+    // Deja el filtro de columna (coincidencia exacta con prefijo "=", ver
+    // SihosDeterioroService::paginarParaDataTable) y refleja el valor en el
+    // input de filtro del encabezado para que sea visible y editable.
+    function aplicarFiltro(columna, valor, etiqueta) {
+        var tabla = api();
+        var inputs = detalle.closest('.savid-dt-shell, .dt-container')
+            ? detalle.closest('.savid-dt-shell, .dt-container').querySelectorAll('thead tr.savid-dt-filters input')
+            : [];
+        tabla.columns().every(function (i) {
+            this.search(i === columna && valor !== '' ? '=' + valor : '');
+            if (inputs[i]) {
+                inputs[i].value = (i === columna && valor !== '') ? '=' + valor : '';
+            }
+        });
+        tabla.draw();
+
+        aviso.hidden = valor === '';
+        textoAviso.textContent = etiqueta || '';
+    }
+
+    // Delegado en document: DataTables reordena/repagina las filas de los resúmenes.
+    document.addEventListener('click', function (ev) {
+        var fila = ev.target.closest ? ev.target.closest('tr.sihos-deterioro-filtro') : null;
+        if (!fila) {
+            return;
+        }
+        var etiqueta = fila.dataset.col === '0'
+            ? fila.dataset.valor
+            : fila.cells[2].textContent.trim() + ' (' + fila.dataset.valor + ')';
+        aplicarFiltro(parseInt(fila.dataset.col, 10), fila.dataset.valor, etiqueta);
+        document.getElementById('sihosDeterioroDetalleTitulo').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+
+    document.getElementById('sihosDeterioroQuitarFiltro').addEventListener('click', function () {
+        aplicarFiltro(-1, '', '');
+    });
+})();
+</script>
