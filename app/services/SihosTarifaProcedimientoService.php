@@ -195,7 +195,7 @@ class SihosTarifaProcedimientoService
 
     /**
      * Lee y valida el archivo cargado, cruzándolo contra los catálogos de
-     * SIHOS (CodiProc, GrupQuir por manual) y las tarifas actuales del
+     * SIHOS (CodiProc, GrupQuir) y las tarifas actuales del
      * manual+plan elegido. Nunca escribe nada — solo arma la vista previa y,
      * si hay al menos una fila válida, la guarda en
      * SihosTarifaProcedimientoCache para que tarifaProcedimientoConfirmar()
@@ -233,7 +233,7 @@ class SihosTarifaProcedimientoService
         $repositorio = $this->repositorioLectura($config['configFila']);
 
         try {
-            $gruposValidos = array_flip($repositorio->fetchGruposQuirurgicosPorManual($codiManu));
+            $gruposValidos = array_flip($repositorio->fetchGruposQuirurgicos());
             $tarifasActuales = $repositorio->fetchTarifasPorManual($codiManu, $codiPlan);
         } catch (PDOException $e) {
             return ['ok' => false, 'error' => 'No se pudo consultar SIHOS: ' . $e->getMessage()];
@@ -300,7 +300,7 @@ class SihosTarifaProcedimientoService
             }
 
             if ($motivo === null && $fila['tipoTari'] === self::TIPO_TARI_GRUPO_QUIRURGICO && !isset($gruposValidos[$fila['grupQuir']])) {
-                $motivo = "El grupo quirúrgico '{$fila['grupQuir']}' no existe para el manual seleccionado.";
+                $motivo = "El grupo quirúrgico '{$fila['grupQuir']}' no existe en SIHOS (tabla GrupQuir).";
             }
 
             $indiUVB = null;

@@ -4607,19 +4607,18 @@ where e.CodiInst=:codiInst";
     }
 
     /**
-     * Códigos de grupo quirúrgico (`GrupQuir.CodiGrup`) ya configurados para
-     * un manual concreto — usado para validar la columna `GrupQuir` de la
-     * plantilla de carga. A diferencia del importador legado de SIHOS
-     * (`modulos/procesos/tarifas/importartarifa.class.php`), que valida
-     * contra TODOS los grupos sin filtrar por manual, aquí sí se filtra por
-     * `CodiManu` — el PK real de `GrupQuir` es (CodiGrup, CodiManu).
+     * Códigos de grupo quirúrgico (`GrupQuir.CodiGrup`) existentes — usado
+     * para validar la columna `GrupQuir` de la plantilla de carga. El PK real
+     * de `GrupQuir` es solo `CodiGrup` (un grupo sirve a todos los manuales;
+     * `CodiManu` es informativo), y SIHOS acepta en `TariProc` un grupo
+     * aunque su `CodiManu` sea otro. El valor de un procedimiento de grupo
+     * sale de la tarifa de cada componente del grupo en el manual.
      *
      * @return string[]
      */
-    public function fetchGruposQuirurgicosPorManual(string $codiManu): array
+    public function fetchGruposQuirurgicos(): array
     {
-        $stmt = $this->connect()->prepare('SELECT CodiGrup FROM GrupQuir WHERE CodiManu = ?');
-        $stmt->execute([$codiManu]);
+        $stmt = $this->connect()->query('SELECT CodiGrup FROM GrupQuir');
 
         return array_column($stmt->fetchAll(), 'CodiGrup');
     }
