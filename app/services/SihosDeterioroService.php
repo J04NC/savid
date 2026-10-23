@@ -147,4 +147,108 @@ class SihosDeterioroService
 
         return array_values($grupos);
     }
+
+    /**
+     * Pagina/ordena/filtra el detalle cacheado para DataTables server-side
+     * (SihosController::deterioroDatos()). El filtro de columna que empieza
+     * por "=" es una coincidencia exacta (lo usan los clics en las tablas
+     * resumen); sin "=", es "contiene".
+     *
+     * @param list<array<string, mixed>> $filas
+     * @param array<int, string> $columnSearches búsqueda por columna, index => texto
+     * @return array{data: list<list<string>>, recordsFiltered: int}
+     */
+    public function paginarParaDataTable(
+        array $filas,
+        int $start,
+        int $length,
+        int $orderColIndex,
+        string $orderDir,
+        string $globalSearch,
+        array $columnSearches
+    ): array {
+        $globalSearch = mb_strtolower(trim($globalSearch));
+        $columnSearches = array_filter(array_map('trim', $columnSearches), static fn (string $v): bool => $v !== '');
+
+        if ($globalSearch !== '' || $columnSearches !== []) {
+            $filas = array_values(array_filter($filas, function (array $fila) use ($globalSearch, $columnSearches): bool {
+                foreach ($columnSearches as $idx => $texto) {
+                    $clave = self::COLUMNAS_DETALLE[$idx] ?? null;
+                    if ($clave === null) {
+                        continue;
+                    }
+                    $valor = (string)($fila[$clave] ?? '');
+                    if (str_starts_with($texto, '=')) {
+                        if (strcasecmp($valor, substr($texto, 1)) !== 0) {
+                            return false;
+                        }
+                    } elseif (mb_stripos($valor, $texto) === false) {
+                        return false;
+                    }
+                }
+
+                if ($globalSearch !== '') {
+                    $haystack = mb_strtolower(implode(' ', array_map(
+                        static fn (string $clave): string => (string)($fila[$clave] ?? ''),
+                        self::COLUMNAS_DETALLE
+                    )));
+                    if (mb_stripos($haystack, $globalSearch) === false) {
+                        return false;
+                    }
+                }
+
+                return true;
+            }));
+        }
+
+        $recordsFiltered = count($filas);
+
+        $clave = self::COLUMNAS_DETALLE[$orderColIndex] ?? 'NombTipo';
+        $dir = strtolower($orderDir) === 'asc' ? 1 : -1;
+
+        usort($filas, static function (array $a, array $b) use ($clave, $dir): int {
+            if ($clave === 'Valor') {
+                return ($a['Valor'] <=> $b['Valor']) * $dir;
+            }
+
+            return strcasecmp((string)($a[$clave] ?? ''), (string)($b[$clave] ?? '')) * $dir;
+        });
+
+        $pagina = $length > 0 ? array_slice($filas, $start, $length) : $filas;
+
+        return [
+            'data' => array_map(static fn (array $fila): array => [
+                htmlspecialchars((string)$fila['NombTipo'], ENT_QUOTES, 'UTF-8'),
+                htmlspecialchars((string)$fila['FechDocu'], ENT_QUOTES, 'UTF-8'),
+                htmlspecialchars((string)$fila['Documento'], ENT_QUOTES, 'UTF-8'),
+                htmlspecialchars((string)$fila['Factura'], ENT_QUOTES, 'UTF-8'),
+                htmlspecialchars((string)$fila['NombTerc'], ENT_QUOTES, 'UTF-8'),
+                htmlspecialchars($fila['TiDoTerc'] . ' ' . $fila['NuDoTerc'], ENT_QUOTES, 'UTF-8'),
+                self::formatoMoneda($fila['Valor']),
+            ], $pagina),
+            'recordsFiltered' => $recordsFiltered,
+        ];
+    }
+
+    public static function formatoMoneda(float $valor): string
+    {
+        return '$' . number_format($valor, 0, ',', '.');
+    }
+
+    /**
+     * Filas planas (sin HTML) del detalle completo para el CSV.
+     *
+     * @param list<array<string, mixed>> $filas
+     * @return list<list<string|float>>
+     */
+    public function filasParaExportar(array $filas): array
+    {
+        return array_map(
+            static fn (array $fila): array => [
+                $fila['NombTipo'], $fila['FechDocu'], $fila['Documento'], $fila['Factura'],
+                $fila['NombTerc'], $fila['TiDoTerc'], $fila['NuDoTerc'], $fila['Valor'],
+            ],
+            $filas
+        );
+    }
 }
