@@ -23,14 +23,28 @@ class StorageService
 
     private static ?self $instance = null;
 
-    private StorageDriverInterface $driver;
+    private StorageDriverInterface $defaultDriver;
+
+    /**
+     * Driver distinto por zona (hoy solo acad_media puede tener uno propio,
+     * vía ACAD_MEDIA_STORAGE_DRIVER=s3 — los audios que suben los estudiantes
+     * crecen sin control a diferencia del resto del storage, ver commit que
+     * agregó esto). Las zonas sin entrada aquí usan $defaultDriver.
+     *
+     * @var array<string, StorageDriverInterface>
+     */
+    private array $driverOverrides = [];
 
     /** @var array<string, array{visibility: string, path: callable}> */
     private array $zones = [];
 
-    public function __construct(StorageDriverInterface $driver)
+    /**
+     * @param array<string, StorageDriverInterface> $driverOverrides zona => driver
+     */
+    public function __construct(StorageDriverInterface $defaultDriver, array $driverOverrides = [])
     {
-        $this->driver = $driver;
+        $this->defaultDriver = $defaultDriver;
+        $this->driverOverrides = $driverOverrides;
         $this->registerZones();
     }
 
@@ -50,21 +64,35 @@ class StorageService
 
     public static function createFromEnv(): self
     {
-        $driverName = strtolower(trim((string)(getenv('STORAGE_DRIVER') ?: 'local')));
         $publicPrefixes = self::publicPathPrefixes();
+        $defaultDriverName = strtolower(trim((string)(getenv('STORAGE_DRIVER') ?: 'local')));
+        $defaultDriver = self::buildDriver($defaultDriverName, $publicPrefixes);
 
+        $overrides = [];
+        $acadDriverName = strtolower(trim((string)(getenv('ACAD_MEDIA_STORAGE_DRIVER') ?: '')));
+        if ($acadDriverName !== '') {
+            $overrides[self::ZONE_ACAD_MEDIA] = self::buildDriver($acadDriverName, $publicPrefixes);
+        }
+
+        return new self($defaultDriver, $overrides);
+    }
+
+    /**
+     * @param list<string> $publicPrefixes
+     */
+    private static function buildDriver(string $driverName, array $publicPrefixes): StorageDriverInterface
+    {
         try {
-            $driver = match ($driverName) {
+            return match ($driverName) {
                 's3' => new S3StorageDriver($publicPrefixes),
                 'local' => new LocalStorageDriver(null, null, $publicPrefixes),
                 default => new LocalStorageDriver(null, null, $publicPrefixes),
             };
         } catch (RuntimeException $e) {
             error_log('StorageService: ' . $e->getMessage() . ' — usando driver local.');
-            $driver = new LocalStorageDriver(null, null, $publicPrefixes);
-        }
 
-        return new self($driver);
+            return new LocalStorageDriver(null, null, $publicPrefixes);
+        }
     }
 
     /**
@@ -84,13 +112,13 @@ class StorageService
     public function publicUrl(string $key): string
     {
         $key = $this->normalizeIncoming($key);
-        $url = $this->driver->publicUrl($key);
+        $url = $this->driverForKey($key)->publicUrl($key);
         if ($url !== null) {
             return $url;
         }
 
         if ($this->isPrivateKey($key)) {
-            return $this->driver->localPath($key);
+            return $this->driverForKey($key)->localPath($key);
         }
 
         throw new InvalidArgumentException('La clave no tiene URL pública: ' . $key);
@@ -116,7 +144,7 @@ class StorageService
     public function putContents(string $key, string $contents): string
     {
         $key = $this->normalizeIncoming($key);
-        $this->driver->putContents($key, $contents);
+        $this->driverForKey($key)->putContents($key, $contents);
 
         return $this->reference($key);
     }
@@ -135,7 +163,7 @@ class StorageService
         $key = $this->key($zone, $filename, ...$segments);
 
         try {
-            $this->driver->putFile($key, $tmp, true);
+            $this->driverForZone($zone)->putFile($key, $tmp, true);
         } catch (RuntimeException) {
             return null;
         }
@@ -160,7 +188,7 @@ class StorageService
         $key = $this->key($zone, $filename, ...$segments);
 
         try {
-            $this->driver->putFile($key, $localSourcePath, $move);
+            $this->driverForZone($zone)->putFile($key, $localSourcePath, $move);
         } catch (RuntimeException) {
             return null;
         }
@@ -175,7 +203,7 @@ class StorageService
             return null;
         }
 
-        return $this->driver->get($key);
+        return $this->driverForKey($key)->get($key);
     }
 
     public function exists(string $keyOrUrl): bool
@@ -185,7 +213,7 @@ class StorageService
             return false;
         }
 
-        return $this->driver->exists($key);
+        return $this->driverForKey($key)->exists($key);
     }
 
     public function delete(string $keyOrUrl): bool
@@ -195,7 +223,7 @@ class StorageService
             return false;
         }
 
-        return $this->driver->delete($key);
+        return $this->driverForKey($key)->delete($key);
     }
 
     public function localPath(string $keyOrUrl): ?string
@@ -205,7 +233,7 @@ class StorageService
             return null;
         }
 
-        return $this->driver->localPath($key);
+        return $this->driverForKey($key)->localPath($key);
     }
 
     /**
@@ -214,14 +242,15 @@ class StorageService
     public function localDirectory(string $zone, int|string ...$segments): string
     {
         $prefix = $this->key($zone, '', ...$segments);
-        if ($this->driver instanceof LocalStorageDriver) {
-            return $this->driver->localDirectory($prefix);
+        $driver = $this->driverForZone($zone);
+        if ($driver instanceof LocalStorageDriver) {
+            return $driver->localDirectory($prefix);
         }
-        if ($this->driver instanceof S3StorageDriver) {
-            return $this->driver->localDirectory($prefix);
+        if ($driver instanceof S3StorageDriver) {
+            return $driver->localDirectory($prefix);
         }
 
-        $path = rtrim($this->driver->localPath($prefix), '/');
+        $path = rtrim($driver->localPath($prefix), '/');
         if (!is_dir($path) && !@mkdir($path, 0755, true) && !is_dir($path)) {
             throw new RuntimeException('No se pudo crear el directorio de almacenamiento.');
         }
@@ -237,7 +266,7 @@ class StorageService
     {
         $prefix = $this->key($zone, '', ...$segments);
 
-        return $this->driver->listKeys($prefix, $globPattern);
+        return $this->driverForZone($zone)->listKeys($prefix, $globPattern);
     }
 
     public function isPublicReference(string $reference): bool
@@ -358,12 +387,35 @@ class StorageService
 
     private function reference(string $key): string
     {
-        $public = $this->driver->publicUrl($key);
+        $driver = $this->driverForKey($key);
+        $public = $driver->publicUrl($key);
         if ($public !== null) {
             return $public;
         }
 
-        return $this->driver->localPath($key);
+        return $driver->localPath($key);
+    }
+
+    private function driverForZone(string $zone): StorageDriverInterface
+    {
+        return $this->driverOverrides[$zone] ?? $this->defaultDriver;
+    }
+
+    /**
+     * Para operaciones que reciben una key ya armada (sin la zona explícita):
+     * infiere la zona por el segmento raíz de la key (ver zoneDefinitions())
+     * para saber si debe usar un driver distinto al por defecto.
+     */
+    private function driverForKey(string $key): StorageDriverInterface
+    {
+        foreach ($this->driverOverrides as $zone => $driver) {
+            $root = self::zoneDefinitions()[$zone]['root'] . '/';
+            if (str_starts_with($key, $root)) {
+                return $driver;
+            }
+        }
+
+        return $this->defaultDriver;
     }
 
     private function resolveKey(string $keyOrUrl): ?string
@@ -386,17 +438,20 @@ class StorageService
 
     private function absolutePathToKey(string $absolutePath): ?string
     {
-        if (!$this->driver instanceof LocalStorageDriver) {
+        // Una ruta absoluta de filesystem solo tiene sentido para el driver
+        // local (S3/R2 no tiene "ruta absoluta" real) — se resuelve siempre
+        // contra el driver por defecto, nunca contra un override de zona.
+        if (!$this->defaultDriver instanceof LocalStorageDriver) {
             return null;
         }
 
         $norm = str_replace('\\', '/', $absolutePath);
-        $publicRoot = rtrim(str_replace('\\', '/', $this->driver->publicRoot()), '/') . '/';
+        $publicRoot = rtrim(str_replace('\\', '/', $this->defaultDriver->publicRoot()), '/') . '/';
         if (str_starts_with($norm, $publicRoot)) {
             return ltrim(substr($norm, strlen($publicRoot)), '/');
         }
 
-        $privateRoot = rtrim(str_replace('\\', '/', $this->driver->privateRoot()), '/') . '/';
+        $privateRoot = rtrim(str_replace('\\', '/', $this->defaultDriver->privateRoot()), '/') . '/';
         if (str_starts_with($norm, $privateRoot)) {
             return ltrim(substr($norm, strlen($privateRoot)), '/');
         }
