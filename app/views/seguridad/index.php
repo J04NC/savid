@@ -82,6 +82,7 @@ $diasUmbral = $data['diasInactividadUmbral'];
                         <tr>
                             <th>Usuario</th>
                             <th>IP</th>
+                            <th>País</th>
                             <th>Fecha</th>
                         </tr>
                     </thead>
@@ -90,6 +91,7 @@ $diasUmbral = $data['diasInactividadUmbral'];
                             <tr>
                                 <td><?= htmlspecialchars((string)$row['username']) ?></td>
                                 <td><code><?= htmlspecialchars((string)$row['ip']) ?></code></td>
+                                <td><?= $row['pais'] !== null ? htmlspecialchars((string)$row['pais']) : '—' ?></td>
                                 <td><?= htmlspecialchars((string)$row['created_at']) ?></td>
                             </tr>
                         <?php endforeach; ?>

@@ -33,7 +33,7 @@ class SeguridadService
      * @return array{
      *   dosFactor: array{total: int, conDosFactor: int, porcentaje: float},
      *   sesionesPorEmpresa: list<array{empresa_id: ?int, empresa_nombre: string, activas: int}>,
-     *   intentosFallidos: list<array{username: string, ip: string, created_at: string}>,
+     *   intentosFallidos: list<array{username: string, ip: string, pais: ?string, created_at: string}>,
      *   totalFallidos24h: int,
      *   cuentasInactivas: list<array{id: int, username: string, ultimo_login: ?string, empresas: ?string}>,
      *   diasInactividadUmbral: int

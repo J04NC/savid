@@ -37,6 +37,25 @@ class RequestIpService
         return $remoteAddr !== null ? (string)$remoteAddr : null;
     }
 
+    /**
+     * Código de país ISO 3166-1 alpha-2 (ej. CO, US) que Cloudflare agrega
+     * automáticamente en CF-IPCountry a cada petición que pasa por su proxy
+     * (confirmado: app.savid.com.co y subdominios están "proxied" en la zona).
+     * Null si la petición no vino por Cloudflare (ej. túnel de ngrok) o el
+     * valor no es un código de país reconocible.
+     */
+    public static function currentCountry(): ?string
+    {
+        $raw = strtoupper(trim((string)($_SERVER['HTTP_CF_IPCOUNTRY'] ?? '')));
+
+        // "XX" = Cloudflare no pudo determinar el país; "T1" = salida de Tor.
+        if (!preg_match('/^[A-Z]{2}$/', $raw) || $raw === 'XX') {
+            return null;
+        }
+
+        return $raw;
+    }
+
     private static function remoteAddrIsTrustedProxy(?string $remoteAddr): bool
     {
         if ($remoteAddr === null || $remoteAddr === '') {

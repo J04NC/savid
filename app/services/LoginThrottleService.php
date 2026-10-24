@@ -83,7 +83,7 @@ class LoginThrottleService
         if ($username === '' || $ip === '') {
             return;
         }
-        $this->repo->record($username, $ip, false);
+        $this->repo->record($username, $ip, false, RequestIpService::currentCountry());
 
         // Notificar solo en el momento exacto en que se cruza el umbral (no en cada
         // intento posterior mientras ya está bloqueado: checkBlocked() corta el flujo
@@ -91,7 +91,7 @@ class LoginThrottleService
         $fails = $this->repo->countRecentFailuresSinceLastSuccess($username, $ip, self::VENTANA_MINUTOS);
         if ($fails === self::MAX_INTENTOS) {
             try {
-                (new SecurityAlertService())->notificarBloqueoFuerzaBruta($username, $ip);
+                (new SecurityAlertService())->notificarBloqueoFuerzaBruta($username, $ip, RequestIpService::currentCountry());
             } catch (Throwable $e) {
                 error_log('SecurityAlertService::notificarBloqueoFuerzaBruta: ' . $e->getMessage());
             }
@@ -101,7 +101,7 @@ class LoginThrottleService
         if ($ipFails === self::MAX_INTENTOS_IP) {
             try {
                 $usuariosDistintos = $this->repo->countDistinctUsernamesFailedByIp($ip, self::VENTANA_MINUTOS);
-                (new SecurityAlertService())->notificarBloqueoCredentialStuffing($ip, $usuariosDistintos);
+                (new SecurityAlertService())->notificarBloqueoCredentialStuffing($ip, $usuariosDistintos, RequestIpService::currentCountry());
             } catch (Throwable $e) {
                 error_log('SecurityAlertService::notificarBloqueoCredentialStuffing: ' . $e->getMessage());
             }
@@ -115,6 +115,6 @@ class LoginThrottleService
         if ($username === '' || $ip === '') {
             return;
         }
-        $this->repo->record($username, $ip, true);
+        $this->repo->record($username, $ip, true, RequestIpService::currentCountry());
     }
 }

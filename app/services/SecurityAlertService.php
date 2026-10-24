@@ -17,7 +17,7 @@ class SecurityAlertService
         $this->resend = new ResendService();
     }
 
-    public function notificarBloqueoFuerzaBruta(string $username, string $ip): void
+    public function notificarBloqueoFuerzaBruta(string $username, string $ip, ?string $pais = null): void
     {
         $destinatarios = $this->superAdminEmails();
         if (empty($destinatarios)) {
@@ -29,6 +29,7 @@ class SecurityAlertService
             <ul>
                 <li><strong>Usuario intentado:</strong> ' . htmlspecialchars($username, ENT_QUOTES, 'UTF-8') . '</li>
                 <li><strong>IP:</strong> ' . htmlspecialchars($ip, ENT_QUOTES, 'UTF-8') . '</li>
+                <li><strong>País:</strong> ' . htmlspecialchars($pais ?? 'desconocido', ENT_QUOTES, 'UTF-8') . '</li>
                 <li><strong>Fecha:</strong> ' . date('Y-m-d H:i:s') . '</li>
             </ul>
             <p>Puedes revisar el detalle en el Centro de seguridad del sistema.</p>
@@ -39,7 +40,7 @@ class SecurityAlertService
         }
     }
 
-    public function notificarBloqueoCredentialStuffing(string $ip, int $usuariosDistintos): void
+    public function notificarBloqueoCredentialStuffing(string $ip, int $usuariosDistintos, ?string $pais = null): void
     {
         $destinatarios = $this->superAdminEmails();
         if (empty($destinatarios)) {
@@ -51,6 +52,7 @@ class SecurityAlertService
             contra varias cuentas distintas (posible credential stuffing).</p>
             <ul>
                 <li><strong>IP:</strong> ' . htmlspecialchars($ip, ENT_QUOTES, 'UTF-8') . '</li>
+                <li><strong>País:</strong> ' . htmlspecialchars($pais ?? 'desconocido', ENT_QUOTES, 'UTF-8') . '</li>
                 <li><strong>Cuentas distintas afectadas:</strong> ' . (int)$usuariosDistintos . '</li>
                 <li><strong>Fecha:</strong> ' . date('Y-m-d H:i:s') . '</li>
             </ul>

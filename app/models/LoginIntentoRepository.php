@@ -9,13 +9,13 @@ class LoginIntentoRepository
         $this->pdo = $pdo;
     }
 
-    public function record(string $username, string $ip, bool $exitoso): void
+    public function record(string $username, string $ip, bool $exitoso, ?string $pais = null): void
     {
         $stmt = $this->pdo->prepare('
-            INSERT INTO login_intento (username, ip, exitoso, created_at)
-            VALUES (?, ?, ?, NOW(3))
+            INSERT INTO login_intento (username, ip, pais, exitoso, created_at)
+            VALUES (?, ?, ?, ?, NOW(3))
         ');
-        $stmt->execute([$username, $ip, $exitoso ? 1 : 0]);
+        $stmt->execute([$username, $ip, $pais, $exitoso ? 1 : 0]);
     }
 
     /**
@@ -133,12 +133,12 @@ class LoginIntentoRepository
      * Últimos intentos fallidos (uso global, exclusivo de vistas de superadmin — la tabla no
      * distingue empresa/sede).
      *
-     * @return list<array{username: string, ip: string, created_at: string}>
+     * @return list<array{username: string, ip: string, pais: ?string, created_at: string}>
      */
     public function listRecentFailures(int $limit = 20): array
     {
         $stmt = $this->pdo->prepare('
-            SELECT username, ip, created_at
+            SELECT username, ip, pais, created_at
             FROM login_intento
             WHERE exitoso = 0
             ORDER BY created_at DESC
