@@ -35,6 +35,16 @@ class AuthService
         $ip = (string)(RequestIpService::current() ?? '');
         $throttle = new LoginThrottleService();
 
+        // Chequeo por IP sola primero (más barato, cubre credential stuffing contra
+        // muchas cuentas distintas que el throttle por usuario+IP no detecta).
+        $ipBlockCheck = $throttle->checkIpBlocked($ip);
+        if ($ipBlockCheck['blocked']) {
+            return [
+                'success' => false,
+                'error' => 'Demasiados intentos fallidos desde esta conexión. Intente de nuevo en ' . $ipBlockCheck['retryAfterMinutes'] . ' minutos.',
+            ];
+        }
+
         $blockCheck = $throttle->checkBlocked($username, $ip);
         if ($blockCheck['blocked']) {
             return [

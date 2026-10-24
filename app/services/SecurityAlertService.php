@@ -39,6 +39,29 @@ class SecurityAlertService
         }
     }
 
+    public function notificarBloqueoCredentialStuffing(string $ip, int $usuariosDistintos): void
+    {
+        $destinatarios = $this->superAdminEmails();
+        if (empty($destinatarios)) {
+            return;
+        }
+
+        $html = '
+            <p>Se bloqueó temporalmente el inicio de sesión desde una IP por exceso de intentos fallidos
+            contra varias cuentas distintas (posible credential stuffing).</p>
+            <ul>
+                <li><strong>IP:</strong> ' . htmlspecialchars($ip, ENT_QUOTES, 'UTF-8') . '</li>
+                <li><strong>Cuentas distintas afectadas:</strong> ' . (int)$usuariosDistintos . '</li>
+                <li><strong>Fecha:</strong> ' . date('Y-m-d H:i:s') . '</li>
+            </ul>
+            <p>Puedes revisar el detalle en el Centro de seguridad del sistema.</p>
+        ';
+
+        foreach ($destinatarios as $email => $nombre) {
+            $this->resend->send($email, $nombre, 'Bloqueo por credential stuffing detectado - SAVID', $html);
+        }
+    }
+
     public function notificarSuscripcionPorVencer(string $empresaNombre, string $fechaFin, int $diasRestantes): void
     {
         $destinatarios = $this->superAdminEmails();

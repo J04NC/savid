@@ -73,6 +73,63 @@ class LoginIntentoRepository
     }
 
     /**
+     * Intentos fallidos desde esta IP contra cualquier usuario, en una ventana fija (sin
+     * reinicio por éxito: a diferencia del throttle por usuario+IP, aquí un login exitoso
+     * de un empleado no debe "limpiar" el conteo de otros intentos fallidos desde la misma
+     * IP compartida de oficina).
+     */
+    public function countRecentFailuresByIp(string $ip, int $windowMinutes): int
+    {
+        $stmt = $this->pdo->prepare('
+            SELECT COUNT(*)
+            FROM login_intento
+            WHERE ip = ?
+            AND exitoso = 0
+            AND created_at >= DATE_SUB(NOW(3), INTERVAL ? MINUTE)
+        ');
+        $stmt->execute([$ip, $windowMinutes]);
+
+        return (int)$stmt->fetchColumn();
+    }
+
+    /**
+     * Momento del intento fallido más antiguo dentro de la ventana, para calcular cuándo se
+     * libera el bloqueo por IP.
+     */
+    public function oldestFailureByIpInWindow(string $ip, int $windowMinutes): ?string
+    {
+        $stmt = $this->pdo->prepare('
+            SELECT MIN(created_at)
+            FROM login_intento
+            WHERE ip = ?
+            AND exitoso = 0
+            AND created_at >= DATE_SUB(NOW(3), INTERVAL ? MINUTE)
+        ');
+        $stmt->execute([$ip, $windowMinutes]);
+        $value = $stmt->fetchColumn();
+
+        return $value !== false && $value !== null ? (string)$value : null;
+    }
+
+    /**
+     * Cantidad de usuarios distintos contra los que falló esta IP en la ventana — señal de
+     * credential stuffing (muchas cuentas, 1-2 intentos cada una) para el correo de alerta.
+     */
+    public function countDistinctUsernamesFailedByIp(string $ip, int $windowMinutes): int
+    {
+        $stmt = $this->pdo->prepare('
+            SELECT COUNT(DISTINCT username)
+            FROM login_intento
+            WHERE ip = ?
+            AND exitoso = 0
+            AND created_at >= DATE_SUB(NOW(3), INTERVAL ? MINUTE)
+        ');
+        $stmt->execute([$ip, $windowMinutes]);
+
+        return (int)$stmt->fetchColumn();
+    }
+
+    /**
      * Últimos intentos fallidos (uso global, exclusivo de vistas de superadmin — la tabla no
      * distingue empresa/sede).
      *
