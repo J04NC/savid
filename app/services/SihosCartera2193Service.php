@@ -247,7 +247,7 @@ class SihosCartera2193Service
 
     public static function formatoMoneda(float $valor): string
     {
-        return '$' . number_format($valor, 0, ',', '.');
+        return '$' . number_format($valor, 2, ',', '.');
     }
 
     /**

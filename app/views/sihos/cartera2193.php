@@ -79,7 +79,7 @@ $edades = ['0 - 60 días', '61 - 90 días', '91 - 180 días', '181 - 360 días',
             <?php foreach ($reporte['tipos'] as $i => $tipo): ?>
                 <?php $t = $tipo['totales']; ?>
                 <h3 class="auditoria-title" style="font-size:1.1em; margin-top:28px;"><?= htmlspecialchars($tipo['NombTipo']) ?></h3>
-                <table class="savid-datatable seguridad-table" id="sihosCartera2193Tipo<?= (int)$i ?>"
+                <table class="savid-datatable seguridad-table savid-dt-fit" id="sihosCartera2193Tipo<?= (int)$i ?>"
                        data-dt-order="[[8,&quot;desc&quot;]]"
                        data-dt-scroll-wrap-class="sihos-auditoria-glosa-scroll">
                     <thead>
@@ -99,7 +99,7 @@ $edades = ['0 - 60 días', '61 - 90 días', '91 - 180 días', '181 - 360 días',
                             <tr>
                                 <td><?= htmlspecialchars($fila['TiDoTerc']) ?></td>
                                 <td><?= htmlspecialchars($fila['NuDoTerc']) ?></td>
-                                <td><?= htmlspecialchars($fila['NombTerc']) ?></td>
+                                <td class="savid-dt-fit-text" title="<?= htmlspecialchars($fila['NombTerc']) ?>"><?= htmlspecialchars($fila['NombTerc']) ?></td>
                                 <?php foreach ($fila['v'] as $valor): ?>
                                     <td style="text-align:right;" data-order="<?= $valor ?>"><?= $fmt($valor) ?></td>
                                 <?php endforeach; ?>
@@ -125,7 +125,7 @@ $edades = ['0 - 60 días', '61 - 90 días', '91 - 180 días', '181 - 360 días',
 
             <?php $g = $reporte['granTotal']; ?>
             <h3 class="auditoria-title" style="font-size:1.1em; margin-top:28px;">Total de cartera</h3>
-            <table class="seguridad-table" id="sihosCartera2193Total">
+            <table class="seguridad-table savid-dt-fit" id="sihosCartera2193Total">
                 <thead>
                     <tr>
                         <?php foreach ($edades as $edad): ?><th style="text-align:right;"><?= $edad ?></th><?php endforeach; ?>
