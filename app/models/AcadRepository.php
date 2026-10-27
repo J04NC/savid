@@ -232,15 +232,32 @@ class AcadRepository
         return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
     }
 
-    public function insertReferenceAudio(int $exerciseId, ?string $textoEn, string $ruta, int $orden): int
+    public function insertReferenceAudio(int $exerciseId, ?string $textoEn, string $ruta, int $orden, int $tamanoBytes): int
     {
         $stmt = $this->pdo->prepare('
-            INSERT INTO acad_exercise_reference_audio (exercise_id, texto_en, ruta, orden, created_at)
-            VALUES (?, ?, ?, ?, NOW(3))
+            INSERT INTO acad_exercise_reference_audio (exercise_id, texto_en, ruta, tamano_bytes, orden, created_at)
+            VALUES (?, ?, ?, ?, ?, NOW(3))
         ');
-        $stmt->execute([$exerciseId, $textoEn, $ruta, $orden]);
+        $stmt->execute([$exerciseId, $textoEn, $ruta, $tamanoBytes, $orden]);
 
         return (int)$this->pdo->lastInsertId();
+    }
+
+    /**
+     * Total de bytes usados por audios de Acad (referencia + grabaciones de
+     * estudiantes), solo filas vivas — ver AcadMediaQuotaService.
+     */
+    public function sumAcadMediaBytes(): int
+    {
+        $ref = (int)$this->pdo->query(
+            'SELECT COALESCE(SUM(tamano_bytes), 0) FROM acad_exercise_reference_audio WHERE deleted_at IS NULL'
+        )->fetchColumn();
+
+        $attempt = (int)$this->pdo->query(
+            'SELECT COALESCE(SUM(tamano_bytes), 0) FROM acad_attempt WHERE deleted_at IS NULL'
+        )->fetchColumn();
+
+        return $ref + $attempt;
     }
 
     public function deleteReferenceAudio(int $referenceAudioId): void
@@ -311,11 +328,11 @@ class AcadRepository
         $stmt = $this->pdo->prepare('
             INSERT INTO acad_attempt (
                 empresa_id, exercise_id, reference_audio_id, usuario_id, iniciado_at, enviado_at,
-                respuesta_texto, selected_option_id, audio_ruta, meta_json,
+                respuesta_texto, selected_option_id, audio_ruta, tamano_bytes, meta_json,
                 score, feedback_en, calificado_by, calificado_at, estado_id, created_at
             ) VALUES (
                 ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?,
+                ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?, NOW(3)
             )
         ');
@@ -329,6 +346,7 @@ class AcadRepository
             $data['respuesta_texto'] ?? null,
             $data['selected_option_id'] ?? null,
             $data['audio_ruta'] ?? null,
+            $data['tamano_bytes'] ?? null,
             $data['meta_json'] ?? null,
             $data['score'] ?? null,
             $data['feedback_en'] ?? null,
