@@ -8613,6 +8613,7 @@ table.savid-dt-fit thead th{
     white-space:normal;
     max-width:9rem;
     vertical-align:bottom;
+    text-align:center;
 }
 table.savid-dt-fit tbody td,
 table.savid-dt-fit tfoot th{

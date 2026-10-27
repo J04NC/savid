@@ -87,11 +87,11 @@ $edades = ['0 - 60 días', '61 - 90 días', '91 - 180 días', '181 - 360 días',
                             <th>Tipo doc.</th>
                             <th>Documento</th>
                             <th>Entidad</th>
-                            <?php foreach ($edades as $edad): ?><th style="text-align:right;"><?= $edad ?></th><?php endforeach; ?>
-                            <th style="text-align:right;">Total por cobrar con facturación radicada</th>
-                            <th style="text-align:right;">Facturación pendiente de radicar</th>
-                            <th style="text-align:right;">Glosa inicial (objeciones pendientes)</th>
-                            <?php if ($tipo['conGiro']): ?><th style="text-align:right;">Giro directo</th><?php endif; ?>
+                            <?php foreach ($edades as $edad): ?><th><?= $edad ?></th><?php endforeach; ?>
+                            <th>Total por cobrar con facturación radicada</th>
+                            <th>Facturación pendiente de radicar</th>
+                            <th>Glosa inicial (objeciones pendientes)</th>
+                            <?php if ($tipo['conGiro']): ?><th>Giro directo</th><?php endif; ?>
                         </tr>
                     </thead>
                     <tbody>
@@ -128,11 +128,11 @@ $edades = ['0 - 60 días', '61 - 90 días', '91 - 180 días', '181 - 360 días',
             <table class="seguridad-table savid-dt-fit" id="sihosCartera2193Total">
                 <thead>
                     <tr>
-                        <?php foreach ($edades as $edad): ?><th style="text-align:right;"><?= $edad ?></th><?php endforeach; ?>
-                        <th style="text-align:right;">Total radicada</th>
-                        <th style="text-align:right;">Pendiente de radicar</th>
-                        <th style="text-align:right;">Glosa inicial</th>
-                        <th style="text-align:right;">Giro directo</th>
+                        <?php foreach ($edades as $edad): ?><th><?= $edad ?></th><?php endforeach; ?>
+                        <th>Total radicada</th>
+                        <th>Pendiente de radicar</th>
+                        <th>Glosa inicial</th>
+                        <th>Giro directo</th>
                     </tr>
                 </thead>
                 <tbody>
