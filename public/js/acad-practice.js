@@ -11,6 +11,32 @@
         if (statusEl) statusEl.textContent = text;
     }
 
+    /**
+     * Safari (iOS/macOS) no soporta WebM: cuando graba con MediaRecorder sin
+     * pedir un mimeType explícito, produce audio/mp4 (AAC), no audio/webm
+     * como Chrome/Android. Si se etiqueta ese blob como "audio/webm" a la
+     * fuerza (como se hacía antes), el <audio> de vista previa no puede
+     * decodificarlo y muestra "Error" — hay que usar el mimeType real que
+     * MediaRecorder reporta. El servidor ya acepta audio/mp4 (whitelist en
+     * AcadAudioValidationService), así que solo hacía falta dejar de mentir
+     * sobre el tipo en el navegador.
+     */
+    function extensionForMime(mime) {
+        mime = (mime || "").split(";")[0].trim().toLowerCase();
+        var map = {
+            "audio/mpeg": "mp3",
+            "audio/mp4": "m4a",
+            "audio/x-m4a": "m4a",
+            "audio/webm": "webm",
+            "video/webm": "webm",
+            "audio/ogg": "ogg",
+            "application/ogg": "ogg",
+            "audio/wav": "wav",
+            "audio/x-wav": "wav",
+        };
+        return map[mime] || "webm";
+    }
+
     function submitForm(body) {
         setStatus("Submitting...");
         return fetch("?url=acad/practice", { method: "POST", body: body })
@@ -73,6 +99,7 @@
     document.querySelectorAll(".acad-tt-slot").forEach(initTongueTwisterSlot);
     initTongueTwisterReferenceDurations();
     initDialogue();
+    initTrueFalseFix();
 
     function initAudioSlot(slotEl) {
         var referenceAudioId = slotEl.getAttribute("data-reference-audio-id");
@@ -108,6 +135,7 @@
             deleteBtn.style.display = "none";
             confirmBtn.disabled = true;
             recordBtn.disabled = false;
+            recordBtn.classList.remove("sgd-doc-btn-danger");
         }
 
         if (navigator.mediaDevices && window.MediaRecorder) {
@@ -117,12 +145,15 @@
                     mediaRecorder = new MediaRecorder(stream);
                     mediaRecorder.ondataavailable = function (e) { if (e.data.size > 0) chunks.push(e.data); };
                     mediaRecorder.onstop = function () {
-                        var blob = new Blob(chunks, { type: "audio/webm" });
-                        showTake(blob, "audio/webm");
+                        recordBtn.classList.remove("sgd-doc-btn-danger");
+                        var actualMime = mediaRecorder.mimeType || "audio/webm";
+                        var blob = new Blob(chunks, { type: actualMime });
+                        showTake(blob, actualMime);
                         stream.getTracks().forEach(function (t) { t.stop(); });
                     };
                     mediaRecorder.start();
                     recordBtn.disabled = true;
+                    recordBtn.classList.add("sgd-doc-btn-danger");
                     stopBtn.disabled = false;
                     slotStatus("Recording...");
                 }).catch(function () {
@@ -153,7 +184,7 @@
                 slotStatus("Record or choose an audio file first.");
                 return;
             }
-            var ext = chosenBlob.mime.indexOf("webm") !== -1 ? "webm" : "audio";
+            var ext = extensionForMime(chosenBlob.mime);
             var body = new FormData();
             body.set("exercise_id", exerciseId);
             body.set("reference_audio_id", referenceAudioId);
@@ -452,6 +483,7 @@
             deleteBtn.style.display = "none";
             confirmBtn.disabled = true;
             recordBtn.disabled = false;
+            recordBtn.classList.remove("sgd-doc-btn-danger");
         }
 
         if (navigator.mediaDevices && window.MediaRecorder) {
@@ -461,13 +493,15 @@
                     mediaRecorder = new MediaRecorder(stream);
                     mediaRecorder.ondataavailable = function (e) { if (e.data.size > 0) chunks.push(e.data); };
                     mediaRecorder.onstop = function () {
+                        recordBtn.classList.remove("sgd-doc-btn-danger");
                         durationMs = Date.now() - recordStartedAt;
-                        showTake(new Blob(chunks, { type: "audio/webm" }));
+                        showTake(new Blob(chunks, { type: mediaRecorder.mimeType || "audio/webm" }));
                         stream.getTracks().forEach(function (t) { t.stop(); });
                     };
                     recordStartedAt = Date.now();
                     mediaRecorder.start();
                     recordBtn.disabled = true;
+                    recordBtn.classList.add("sgd-doc-btn-danger");
                     stopBtn.disabled = false;
                     ttStatus("Recording...");
                 }).catch(function () {
@@ -502,7 +536,7 @@
             body.set("exercise_id", exerciseId);
             body.set("reference_audio_id", referenceAudioId);
             body.set("duration_ms", String(durationMs));
-            body.set("archivo", chosenBlob, "recording.webm");
+            body.set("archivo", chosenBlob, "recording." + extensionForMime(chosenBlob.type));
 
             confirmBtn.disabled = true;
             ttStatus("Saving...");
@@ -601,6 +635,87 @@
             }
 
             playNext();
+        });
+    }
+
+    /**
+     * "True/False (with correction)": tocar True/False marca la respuesta de
+     * ese enunciado (resaltado); al marcar False aparece un textarea para
+     * escribir la corrección (se oculta y se limpia si vuelve a marcar
+     * True). Se autocalifica la parte V/F al instante; las correcciones de
+     * los marcados como False quedan para que el profesor las revise — el
+     * backend decide eso, aquí solo se manda lo que el estudiante marcó.
+     */
+    function initTrueFalseFix() {
+        var statements = document.querySelectorAll(".acad-tf-statement");
+        var submitBtn = document.getElementById("acadTrueFalseSubmit");
+        var tfStatus = document.getElementById("acadTrueFalseStatus");
+        if (!statements.length || !submitBtn) return;
+
+        function tfSetStatus(text) {
+            if (tfStatus) tfStatus.textContent = text;
+        }
+
+        statements.forEach(function (stmtEl) {
+            var btns = stmtEl.querySelectorAll(".acad-tf-btn");
+            var correction = stmtEl.querySelector(".acad-tf-correction");
+
+            btns.forEach(function (btn) {
+                btn.addEventListener("click", function () {
+                    btns.forEach(function (b) { b.classList.remove("sgd-doc-btn-primary"); });
+                    btn.classList.add("sgd-doc-btn-primary");
+                    stmtEl.setAttribute("data-answer", btn.getAttribute("data-value"));
+
+                    if (btn.getAttribute("data-value") === "false") {
+                        correction.style.display = "block";
+                    } else {
+                        correction.style.display = "none";
+                        correction.value = "";
+                    }
+                });
+            });
+        });
+
+        submitBtn.addEventListener("click", function () {
+            var answers = {};
+            var missing = 0;
+            statements.forEach(function (stmtEl) {
+                var answer = stmtEl.getAttribute("data-answer");
+                if (!answer) {
+                    missing++;
+                    return;
+                }
+                var optionId = stmtEl.getAttribute("data-option-id");
+                var correction = stmtEl.querySelector(".acad-tf-correction");
+                answers[optionId] = { answer: answer, correction: answer === "false" ? correction.value : "" };
+            });
+
+            if (missing > 0) {
+                tfSetStatus("Mark True or False for every statement first.");
+                return;
+            }
+
+            var body = new URLSearchParams();
+            body.set("exercise_id", exerciseId);
+            body.set("answers", JSON.stringify(answers));
+
+            tfSetStatus("Submitting...");
+            submitBtn.disabled = true;
+
+            fetch("?url=acad/practice", { method: "POST", body: body })
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (data.success) {
+                        tfSetStatus(data.message + " (" + data.score + "/" + data.max_score + ")");
+                    } else {
+                        tfSetStatus(data.message || "Error submitting answer.");
+                        submitBtn.disabled = false;
+                    }
+                })
+                .catch(function () {
+                    tfSetStatus("Network error.");
+                    submitBtn.disabled = false;
+                });
         });
     }
 })();
