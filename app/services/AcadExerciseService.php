@@ -94,6 +94,11 @@ class AcadExerciseService
             return $validated;
         }
 
+        $bytes = (int)(@filesize((string)$file['tmp_name']) ?: 0);
+        if ((new AcadMediaQuotaService())->wouldExceed($bytes)) {
+            return ['success' => false, 'message' => 'Audio storage limit reached. Contact an administrator.'];
+        }
+
         $name = 'ref_' . bin2hex(random_bytes(8)) . '.' . $validated['ext'];
         $path = StorageService::instance()->putUploadedFile(
             StorageService::ZONE_ACAD_MEDIA,
@@ -107,7 +112,7 @@ class AcadExerciseService
         }
 
         $textoEn = trim((string)($post['texto_en'] ?? ''));
-        $id = $this->appendReferenceAudio($exerciseId, $textoEn !== '' ? $textoEn : null, $path);
+        $id = $this->appendReferenceAudio($exerciseId, $textoEn !== '' ? $textoEn : null, $path, $bytes);
 
         return ['success' => true, 'message' => 'Reference audio added.', 'id' => $id, 'path' => $path];
     }
@@ -146,14 +151,24 @@ class AcadExerciseService
             return ['success' => false, 'message' => 'Text is too long (max ' . self::TTS_MAX_TEXT_LENGTH . ' characters).'];
         }
 
-        $path = $this->synthesizeToStorage($empresaId, $exerciseId, $text, self::TTS_VOICE);
-        if ($path === null) {
+        $synth = $this->synthesizeToStorage($empresaId, $exerciseId, $text, self::TTS_VOICE);
+        if ($synth['quota_exceeded']) {
+            return ['success' => false, 'message' => 'Audio storage limit reached. Contact an administrator.'];
+        }
+        if ($synth['path'] === null) {
             return ['success' => false, 'message' => 'Speech synthesis failed.'];
         }
 
-        $id = $this->appendReferenceAudio($exerciseId, $text, $path);
+        // La etiqueta que ve el estudiante es un campo aparte, opcional, del
+        // texto que se manda a sintetizar — para tipos como SENTENCE_ORDER
+        // no debe delatar la respuesta (ej. la oración ya ordenada) solo
+        // porque se usó esa misma frase para generar el audio de apoyo. Si
+        // se deja en blanco, no se guarda ninguna etiqueta (practice.php ya
+        // omite el <strong> cuando texto_en está vacío).
+        $label = trim((string)($post['generate_label'] ?? ''));
+        $id = $this->appendReferenceAudio($exerciseId, $label !== '' ? $label : null, $synth['path'], $synth['bytes']);
 
-        return ['success' => true, 'message' => 'Reference audio generated.', 'id' => $id, 'path' => $path];
+        return ['success' => true, 'message' => 'Reference audio generated.', 'id' => $id, 'path' => $synth['path']];
     }
 
     /**
@@ -161,11 +176,15 @@ class AcadExerciseService
      * ejercicio. Extraído de generateReferenceAudio() para reutilizarlo
      * también en generateDialogueAudio(), que sintetiza N turnos con DOS
      * voces distintas (una por rol) en vez de una sola.
+     *
+     * @return array{path: ?string, bytes: int, quota_exceeded: bool}
      */
-    private function synthesizeToStorage(int $empresaId, int $exerciseId, string $text, string $voice): ?string
+    private function synthesizeToStorage(int $empresaId, int $exerciseId, string $text, string $voice): array
     {
+        $fail = ['path' => null, 'bytes' => 0, 'quota_exceeded' => false];
+
         if (!is_executable(self::TTS_BIN)) {
-            return null;
+            return $fail;
         }
 
         $tmpPath = sys_get_temp_dir() . '/acad_tts_' . bin2hex(random_bytes(8)) . '.mp3';
@@ -176,7 +195,7 @@ class AcadExerciseService
             $pipes
         );
         if (!is_resource($process)) {
-            return null;
+            return $fail;
         }
         fclose($pipes[1]);
         fclose($pipes[2]);
@@ -185,7 +204,14 @@ class AcadExerciseService
         if (!is_readable($tmpPath) || filesize($tmpPath) === 0) {
             @unlink($tmpPath);
 
-            return null;
+            return $fail;
+        }
+
+        $bytes = (int)filesize($tmpPath);
+        if ((new AcadMediaQuotaService())->wouldExceed($bytes)) {
+            @unlink($tmpPath);
+
+            return ['path' => null, 'bytes' => 0, 'quota_exceeded' => true];
         }
 
         $name = 'tts_' . bin2hex(random_bytes(8)) . '.mp3';
@@ -199,7 +225,7 @@ class AcadExerciseService
         );
         @unlink($tmpPath);
 
-        return $path;
+        return ['path' => $path, 'bytes' => $bytes, 'quota_exceeded' => false];
     }
 
     /**
@@ -207,7 +233,7 @@ class AcadExerciseService
      * (mismo criterio "siguiente múltiplo de 10" usado por addReferenceAudio
      * y generateReferenceAudio).
      */
-    private function appendReferenceAudio(int $exerciseId, ?string $textoEn, string $path): int
+    private function appendReferenceAudio(int $exerciseId, ?string $textoEn, string $path, int $tamanoBytes): int
     {
         $existing = $this->repo->getReferenceAudiosByExercise($exerciseId);
         $orden = 10;
@@ -215,7 +241,7 @@ class AcadExerciseService
             $orden = max($orden, (int)$ra['orden'] + 10);
         }
 
-        return $this->repo->insertReferenceAudio($exerciseId, $textoEn, $path, $orden);
+        return $this->repo->insertReferenceAudio($exerciseId, $textoEn, $path, $orden, $tamanoBytes);
     }
 
     /**
@@ -273,14 +299,20 @@ class AcadExerciseService
         $generated = 0;
         foreach ($turns as $turn) {
             $voice = (int)$turn['blank_index'] === 1 ? $voiceRole1 : $voiceRole2;
-            $path = $this->synthesizeToStorage($empresaId, $exerciseId, (string)$turn['texto_en'], $voice);
-            if ($path === null) {
+            $synth = $this->synthesizeToStorage($empresaId, $exerciseId, (string)$turn['texto_en'], $voice);
+            if ($synth['quota_exceeded']) {
+                return [
+                    'success' => false,
+                    'message' => "Audio storage limit reached on turn {$turn['orden']}. {$generated} turn(s) were generated before this failure.",
+                ];
+            }
+            if ($synth['path'] === null) {
                 return [
                     'success' => false,
                     'message' => "Speech synthesis failed on turn {$turn['orden']}. {$generated} turn(s) were generated before this failure.",
                 ];
             }
-            $this->repo->insertReferenceAudio($exerciseId, (string)$turn['texto_en'], $path, (int)$turn['orden']);
+            $this->repo->insertReferenceAudio($exerciseId, (string)$turn['texto_en'], $synth['path'], (int)$turn['orden'], $synth['bytes']);
             $generated++;
         }
 
