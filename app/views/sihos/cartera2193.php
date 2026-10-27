@@ -6,6 +6,7 @@
 /** @var ?string $nit */
 /** @var array<string,string> $tiposDisponibles CodiTipo => NombTipo */
 /** @var ?array $reporte */
+/** @var ?array $trabajo Cálculo en segundo plano en curso: token, estado, facturas, segundos */
 
 $fmt = static fn (float $v): string => SihosCartera2193Service::formatoMoneda($v);
 $edades = ['0 - 60 días', '61 - 90 días', '91 - 180 días', '181 - 360 días', 'Más de 360 días'];
@@ -60,7 +61,13 @@ $edades = ['0 - 60 días', '61 - 90 días', '91 - 180 días', '181 - 360 días',
             </div>
         </form>
 
-        <?php if ($reporte === null): ?>
+        <?php if ($trabajo !== null): ?>
+            <div class="field-note" id="sihosCartera2193Progreso" style="margin:16px 0;">
+                ⏳ Generando el reporte en segundo plano… <strong id="sihosCartera2193Facturas"><?= (int)$trabajo['facturas'] ?></strong> factura(s) procesadas
+                · <span id="sihosCartera2193Segundos"><?= (int)$trabajo['segundos'] ?></span> s.
+                Puede tardar varios minutos si son muchas entidades; esta página se actualiza sola al terminar.
+            </div>
+        <?php elseif ($reporte === null): ?>
             <p class="auditoria-subtitle">Elija la fecha de corte y presione Consultar.</p>
         <?php elseif (!$reporte['ok']): ?>
             <p class="modal-form-alert">⚠️ <?= htmlspecialchars($reporte['error']) ?></p>
@@ -163,4 +170,25 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 });
+
+<?php if (!empty($trabajo)): ?>
+(function () {
+    var url = '?url=sihos/cartera2193Estado&empresa_id=<?= (int)$empresaId ?>&job=<?= htmlspecialchars($trabajo['token'], ENT_QUOTES) ?>';
+    function consultar() {
+        fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.json(); })
+            .then(function (e) {
+                if (e.estado === 'pendiente' || e.estado === 'ejecutando') {
+                    document.getElementById('sihosCartera2193Facturas').textContent = e.facturas;
+                    document.getElementById('sihosCartera2193Segundos').textContent = e.segundos;
+                    setTimeout(consultar, 3000);
+                } else {
+                    window.location.reload();
+                }
+            })
+            .catch(function () { setTimeout(consultar, 5000); });
+    }
+    setTimeout(consultar, 2000);
+})();
+<?php endif; ?>
 </script>
