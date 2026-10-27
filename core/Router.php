@@ -254,6 +254,9 @@ class Router
          */
         $sihosDeterioroAccionMethods = ['deterioroDatos', 'deterioroExportar'];
 
+        /* Misma razón: sihos/cartera2193Estado (avance JSON del cálculo en segundo plano) — su pantalla es sihos/cartera2193. */
+        $sihosCartera2193AccionMethods = ['cartera2193Estado'];
+
         /*
          * Misma razón: sihos/auditoriaGlosaBuscarAdministradora (autocompletado
          * AJAX del filtro de administradora) no tiene ítem de menú propio — su
@@ -359,6 +362,9 @@ class Router
             && !($controllerName === 'SihosController'
                 && in_array($method, $sihosDeterioroAccionMethods, true)
                 && PermisoService::can('sihos/deterioro', 'ver'))
+            && !($controllerName === 'SihosController'
+                && in_array($method, $sihosCartera2193AccionMethods, true)
+                && PermisoService::can('sihos/cartera2193', 'ver'))
             && !($controllerName === 'SihosController'
                 && in_array($method, $sihosAuditoriaGlosaAccionMethods, true)
                 && PermisoService::can('sihos/auditoriaGlosa', 'ver'))

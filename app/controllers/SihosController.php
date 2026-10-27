@@ -17,6 +17,7 @@ class SihosController
     private SihosTarifaProcedimientoService $tarifaProcedimientoService;
     private SihosDeterioroService $deterioroService;
     private SihosCartera2193Service $cartera2193Service;
+    private SihosCartera2193JobService $cartera2193JobService;
 
     public function __construct()
     {
@@ -35,6 +36,7 @@ class SihosController
         $this->tarifaProcedimientoService = new SihosTarifaProcedimientoService();
         $this->deterioroService = new SihosDeterioroService();
         $this->cartera2193Service = new SihosCartera2193Service();
+        $this->cartera2193JobService = new SihosCartera2193JobService();
     }
 
     /**
@@ -1506,16 +1508,37 @@ class SihosController
 
         $tiposDisponibles = [];
         $reporte = null;
+        $trabajo = null;
         if ($empresaId !== null && $configurado) {
             $listado = $this->cartera2193Service->listarTiposUsuario($empresaId);
             $tiposDisponibles = $listado['tipos'] ?? [];
+            $userId = (int)($_SESSION['user_id'] ?? 0);
 
             if (isset($_GET['buscar'])) {
-                // Una EPS grande son decenas de miles de facturas: el reporte puede tardar varios minutos.
-                set_time_limit(1800);
-                SihosMemoryGuard::ejecutar(512, function () use ($empresaId, $fechaCorte, $tiposElegidos, $nit, &$reporte): void {
-                    $reporte = $this->cartera2193Service->buildReporte($empresaId, $fechaCorte, $tiposElegidos, $nit);
-                });
+                // Con todas las entidades son varios minutos (Cloudflare corta a ~100 s): se calcula en segundo plano.
+                $inicio = $this->cartera2193JobService->iniciar($empresaId, $userId, $fechaCorte, $tiposElegidos, $nit);
+                if (!$inicio['ok']) {
+                    $reporte = ['ok' => false, 'error' => $inicio['error']];
+                } else {
+                    $params = $_GET;
+                    unset($params['buscar']);
+                    $params['job'] = $inicio['token'];
+                    header('Location: ?' . http_build_query($params));
+
+                    return;
+                }
+            } elseif (($token = trim((string)($_GET['job'] ?? ''))) !== '') {
+                $estado = $this->cartera2193JobService->estado($empresaId, $userId, $token);
+                if ($estado === null) {
+                    $reporte = ['ok' => false, 'error' => 'El resultado de este reporte expiró o no existe. Vuelva a consultar.'];
+                } elseif ($estado['estado'] === 'error') {
+                    $reporte = ['ok' => false, 'error' => $estado['error'] ?? 'No se pudo generar el reporte.'];
+                } elseif ($estado['estado'] === 'listo') {
+                    $reporte = $this->cartera2193JobService->resultado($empresaId, $userId, $token)
+                        ?? ['ok' => false, 'error' => 'El resultado de este reporte expiró o no existe. Vuelva a consultar.'];
+                } else {
+                    $trabajo = ['token' => $token] + $estado;
+                }
             }
         }
 
@@ -1524,5 +1547,17 @@ class SihosController
 
         $view = BASE_PATH . '/app/views/sihos/cartera2193.php';
         require BASE_PATH . '/app/views/layouts/main.php';
+    }
+
+    /** Avance del cálculo en segundo plano de cartera2193 (la pantalla lo consulta cada pocos segundos). */
+    public function cartera2193Estado(): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+
+        $scope = $this->connectionService->buildScope($_GET);
+        $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : null;
+        $estado = $empresaId === null ? null : $this->cartera2193JobService->estado($empresaId, (int)($_SESSION['user_id'] ?? 0), trim((string)($_GET['job'] ?? '')));
+
+        echo json_encode($estado ?? ['estado' => 'inexistente'], JSON_UNESCAPED_UNICODE);
     }
 }
