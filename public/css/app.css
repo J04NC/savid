@@ -8598,3 +8598,25 @@ label.sgd-word-tool.sgd-word-import-trigger{
     max-height:160px;
     overflow-y:auto;
 }
+/* Tablas "ajustadas al contenido" (opt-in con la clase savid-dt-fit en la
+   <table>): cada columna toma el ancho de sus valores; los títulos de
+   columna se parten en varias líneas y el texto largo (td.savid-dt-fit-text,
+   con el valor completo en title) se corta con "…" en una sola línea. */
+table.savid-dt-fit{
+    width:auto !important;
+    min-width:0;
+}
+table.savid-dt-fit thead th{
+    white-space:normal;
+    max-width:9rem;
+    vertical-align:bottom;
+}
+table.savid-dt-fit tbody td,
+table.savid-dt-fit tfoot th{
+    white-space:nowrap;
+}
+table.savid-dt-fit td.savid-dt-fit-text{
+    max-width:20rem;
+    overflow:hidden;
+    text-overflow:ellipsis;
+}
