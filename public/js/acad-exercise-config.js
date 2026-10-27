@@ -11,6 +11,28 @@
         return d.innerHTML;
     }
 
+    /**
+     * Safari no soporta WebM: MediaRecorder sin mimeType explícito produce
+     * audio/mp4 (AAC) ahí, no audio/webm como en Chrome/Android. Hay que
+     * nombrar el archivo según el tipo real reportado por el navegador, no
+     * asumir siempre webm (ver misma lógica en acad-practice.js).
+     */
+    function extensionForMime(mime) {
+        mime = (mime || "").split(";")[0].trim().toLowerCase();
+        var map = {
+            "audio/mpeg": "mp3",
+            "audio/mp4": "m4a",
+            "audio/x-m4a": "m4a",
+            "audio/webm": "webm",
+            "video/webm": "webm",
+            "audio/ogg": "ogg",
+            "application/ogg": "ogg",
+            "audio/wav": "wav",
+            "audio/x-wav": "wav",
+        };
+        return map[mime] || "webm";
+    }
+
     function currentExerciseId() {
         var hid = document.getElementById("crud_id");
         var id = hid ? parseInt(hid.value, 10) : 0;
@@ -420,6 +442,78 @@
     }
 
     /**
+     * "True/False (with correction)": lista de enunciados, cada uno con su
+     * texto y si es verdadero o falso tal como está escrito. A diferencia de
+     * FILL_BLANKS/SENTENCE_ORDER no hay señuelos ni cobertura que validar —
+     * cada fila es autosuficiente.
+     */
+    function renderTrueFalseEditor(container, exerciseId) {
+        container.innerHTML =
+            "<h3>Statements (True/False)</h3>" +
+            '<p class="crud-hint">Write each statement and mark whether it\'s true or false as written. The reading text/context goes in the Prompt field above.</p>' +
+            "<div id=\"acadTfList\"></div>" +
+            "<button type=\"button\" id=\"acadTfAdd\" class=\"sgd-doc-btn\">＋ Add statement</button> " +
+            "<button type=\"button\" id=\"acadTfSave\" class=\"sgd-doc-btn sgd-doc-btn-primary\">Save statements</button> " +
+            "<span id=\"acadTfSaveStatus\"></span>";
+
+        var list = qs("#acadTfList", container);
+
+        function addRow(texto, isTrue) {
+            var row = document.createElement("div");
+            row.className = "acad-tf-row";
+            row.style.margin = "6px 0";
+            row.innerHTML =
+                '<select class="acad-tf-row-value">' +
+                '<option value="1"' + (isTrue === false ? "" : " selected") + '>True</option>' +
+                '<option value="0"' + (isTrue === false ? " selected" : "") + '>False</option>' +
+                '</select> ' +
+                '<input type="text" class="acad-tf-row-text form-input" style="width:60%" placeholder="Statement text" value="">' +
+                ' <button type="button" class="acad-tf-row-remove sgd-doc-btn sgd-doc-btn-danger">✕</button>';
+            row.querySelector(".acad-tf-row-text").value = texto || "";
+            row.querySelector(".acad-tf-row-remove").addEventListener("click", function () { row.remove(); });
+            list.appendChild(row);
+        }
+
+        fetch("?url=acad/exerciseTrueFalseStatements&exercise_id=" + exerciseId)
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data.success && Array.isArray(data.statements) && data.statements.length) {
+                    data.statements.forEach(function (s) { addRow(s.texto_en, s.is_true); });
+                } else {
+                    addRow("", true);
+                    addRow("", false);
+                }
+            })
+            .catch(function () { addRow("", true); addRow("", false); });
+
+        qs("#acadTfAdd", container).addEventListener("click", function () { addRow("", true); });
+
+        qs("#acadTfSave", container).addEventListener("click", function () {
+            var statements = [];
+            list.querySelectorAll(".acad-tf-row").forEach(function (row) {
+                statements.push({
+                    texto_en: row.querySelector(".acad-tf-row-text").value,
+                    is_true: row.querySelector(".acad-tf-row-value").value === "1",
+                });
+            });
+
+            var status = qs("#acadTfSaveStatus", container);
+            status.textContent = "Saving...";
+
+            var body = new URLSearchParams();
+            body.set("exercise_id", String(exerciseId));
+            body.set("statements", JSON.stringify(statements));
+
+            fetch("?url=acad/exerciseTrueFalseStatements", { method: "POST", body: body })
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    status.textContent = data.message || (data.success ? "Saved." : "Error.");
+                })
+                .catch(function () { status.textContent = "Network error."; });
+        });
+    }
+
+    /**
      * Lista de N audios de referencia del ejercicio, cada uno con reproductor
      * y botón de borrar, más un panel para agregar uno nuevo (grabado en el
      * navegador con MediaRecorder, igual que el widget del estudiante, o
@@ -441,6 +535,7 @@
             '<div style="margin-top:14px;padding-top:10px;border-top:1px dashed #444;">' +
             '<span class="crud-hint">Or generate with an AI voice (no recording needed):</span><br>' +
             '<input type="text" id="acadRefAudioTtsText" class="form-input" style="width:60%;margin-top:6px;" placeholder="Text to speak, e.g. Good morning."> ' +
+            '<input type="text" id="acadRefAudioTtsLabel" class="form-input" style="width:220px;margin-top:6px;" placeholder="Label (optional — blank to hide, e.g. for Sentence order)"> ' +
             '<button type="button" id="acadRefAudioTtsGenerate" class="sgd-doc-btn sgd-doc-btn-primary">🔊 Generate voice</button> ' +
             '<span id="acadRefAudioTtsStatus"></span>' +
             '</div>';
@@ -455,6 +550,7 @@
         var addBtn = qs("#acadRefAudioAdd", container);
         var status = qs("#acadRefAudioStatus", container);
         var ttsText = qs("#acadRefAudioTtsText", container);
+        var ttsLabel = qs("#acadRefAudioTtsLabel", container);
         var ttsBtn = qs("#acadRefAudioTtsGenerate", container);
         var ttsStatus = qs("#acadRefAudioTtsStatus", container);
 
@@ -512,11 +608,13 @@
                     mediaRecorder = new MediaRecorder(stream);
                     mediaRecorder.ondataavailable = function (e) { if (e.data.size > 0) chunks.push(e.data); };
                     mediaRecorder.onstop = function () {
-                        showTake(new Blob(chunks, { type: "audio/webm" }));
+                        recordBtn.classList.remove("sgd-doc-btn-danger");
+                        showTake(new Blob(chunks, { type: mediaRecorder.mimeType || "audio/webm" }));
                         stream.getTracks().forEach(function (t) { t.stop(); });
                     };
                     mediaRecorder.start();
                     recordBtn.disabled = true;
+                    recordBtn.classList.add("sgd-doc-btn-danger");
                     stopBtn.disabled = false;
                     status.textContent = "Recording...";
                 }).catch(function () {
@@ -544,8 +642,7 @@
                 status.textContent = "Record or choose an audio file first.";
                 return;
             }
-            var mime = chosenBlob.type || "audio/webm";
-            var ext = mime.indexOf("webm") !== -1 ? "webm" : "audio";
+            var ext = extensionForMime(chosenBlob.type);
             var body = new FormData();
             body.set("exercise_id", String(exerciseId));
             body.set("texto_en", labelInput.value || "");
@@ -584,6 +681,7 @@
             var body = new URLSearchParams();
             body.set("exercise_id", String(exerciseId));
             body.set("generate_text", text);
+            body.set("generate_label", (ttsLabel.value || "").trim());
 
             ttsStatus.textContent = "Generating voice…";
             ttsBtn.disabled = true;
@@ -595,6 +693,7 @@
                     ttsBtn.disabled = false;
                     if (data.success) {
                         ttsText.value = "";
+                        ttsLabel.value = "";
                         loadList();
                     }
                 })
@@ -660,6 +759,8 @@
             renderSentenceOrderEditor(sections.options, exerciseId);
         } else if (typeCode === "DIALOGUE") {
             renderDialogueEditor(sections.options, exerciseId);
+        } else if (typeCode === "TRUE_FALSE_FIX") {
+            renderTrueFalseEditor(sections.options, exerciseId);
         } else {
             sections.options.innerHTML = "";
         }
