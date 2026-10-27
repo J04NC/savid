@@ -63,9 +63,10 @@ class SihosCartera2193Service
 
     /**
      * @param string[] $tiposUsuario CodiTipo elegidos; vacío = todos
+     * @param (callable(int):void)|null $progreso recibe las facturas procesadas tras cada lote
      * @return array<string,mixed>
      */
-    public function buildReporte(int $empresaId, string $fechaCorte, array $tiposUsuario, ?string $nit = null): array
+    public function buildReporte(int $empresaId, string $fechaCorte, array $tiposUsuario, ?string $nit = null, ?callable $progreso = null): array
     {
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $fechaCorte)) {
             return ['ok' => false, 'error' => 'La fecha de corte es inválida.'];
@@ -77,7 +78,7 @@ class SihosCartera2193Service
         }
 
         try {
-            return $this->calcular($conexion['repo'], $fechaCorte, $tiposUsuario, $nit);
+            return $this->calcular($conexion['repo'], $fechaCorte, $tiposUsuario, $nit, $progreso);
         } catch (PDOException $e) {
             error_log('SihosCartera2193Service: ' . $e->getMessage());
 
@@ -115,7 +116,7 @@ class SihosCartera2193Service
      * @param string[] $tiposUsuario
      * @return array<string,mixed>
      */
-    private function calcular(SihosCartera2193Repository $repo, string $fechaCorte, array $tiposUsuario, ?string $nit): array
+    private function calcular(SihosCartera2193Repository $repo, string $fechaCorte, array $tiposUsuario, ?string $nit, ?callable $progreso = null): array
     {
         $catalogo = $repo->fetchTiposUsuario();
         $elegidos = $tiposUsuario === [] ? array_keys($catalogo) : array_values(array_intersect($tiposUsuario, array_keys($catalogo)));
@@ -150,6 +151,9 @@ class SihosCartera2193Service
                 $this->procesarLote($repo, $lote, $contexto, $acumulados);
                 $totalFacturas += count($lote);
                 $lote = [];
+                if ($progreso !== null) {
+                    $progreso($totalFacturas);
+                }
             }
         }
         if ($lote !== []) {
