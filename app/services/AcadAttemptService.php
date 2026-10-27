@@ -49,6 +49,7 @@ class AcadAttemptService
             'OPEN_TEXT' => $this->submitWriting($empresaId, $usuarioId, $exercise, $post),
             'FILL_BLANKS' => $this->submitFillBlanks($empresaId, $usuarioId, $exercise, $post),
             'SENTENCE_ORDER' => $this->submitSentenceOrder($empresaId, $usuarioId, $exercise, $post),
+            'TRUE_FALSE_FIX' => $this->submitTrueFalseFix($empresaId, $usuarioId, $exercise, $post),
             default => ['success' => false, 'message' => 'Use the audio upload endpoint for this exercise type.'],
         };
     }
@@ -250,6 +251,85 @@ class AcadAttemptService
     }
 
     /**
+     * "True/False (with correction)": califica al instante la parte
+     * objetiva (verdadero/falso de cada enunciado, proporcional). Si el
+     * estudiante marcó algún enunciado como falso, sus correcciones
+     * escritas pasan a la cola de revisión del profesor — el puntaje ya
+     * calculado queda guardado de una vez, el profesor solo lo ajusta si
+     * hace falta después de leer las correcciones. Si no marcó ninguno como
+     * falso (nada que corregir), el intento queda autocalificado sin entrar
+     * a la cola.
+     *
+     * @param array<string, mixed> $exercise
+     */
+    private function submitTrueFalseFix(int $empresaId, int $usuarioId, array $exercise, array $post): array
+    {
+        $submitted = json_decode((string)($post['answers'] ?? '{}'), true);
+        if (!is_array($submitted)) {
+            $submitted = [];
+        }
+
+        $statements = $this->repo->getOptionsByExercise((int)$exercise['id']);
+        if ($statements === []) {
+            return ['success' => false, 'message' => 'This exercise has no statements configured yet.'];
+        }
+
+        $correctCount = 0;
+        $correctionLines = [];
+        $needsReview = false;
+
+        foreach ($statements as $i => $statement) {
+            $optionId = (int)$statement['id'];
+            $entry = $submitted[(string)$optionId] ?? $submitted[$optionId] ?? null;
+            $givenAnswer = is_array($entry) ? strtolower(trim((string)($entry['answer'] ?? ''))) : '';
+            $expected = $statement['es_correcta'] ? 'true' : 'false';
+
+            if ($givenAnswer === $expected) {
+                $correctCount++;
+            }
+
+            if ($givenAnswer === 'false') {
+                $needsReview = true;
+                $correction = is_array($entry) ? trim((string)($entry['correction'] ?? '')) : '';
+                $correctionLines[] = ($i + 1) . ') ' . $statement['texto_en']
+                    . "\n   -> " . ($correction !== '' ? $correction : '(no correction written)');
+            }
+        }
+
+        $total = count($statements);
+        $maxScore = (float)$exercise['max_score'];
+        $score = round(($correctCount / $total) * $maxScore, 2);
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s.v');
+
+        $attemptId = $this->repo->insertAttempt([
+            'empresa_id' => $empresaId,
+            'exercise_id' => (int)$exercise['id'],
+            'usuario_id' => $usuarioId,
+            'iniciado_at' => $now,
+            'enviado_at' => $now,
+            'respuesta_texto' => $correctionLines !== [] ? implode("\n\n", $correctionLines) : null,
+            'score' => $score,
+            'calificado_at' => $needsReview ? null : $now,
+            'estado_id' => $needsReview ? AcadRepository::ESTADO_PENDIENTE : AcadRepository::ESTADO_AUTO_CALIFICADO,
+        ]);
+
+        $message = "{$correctCount} of {$total} correct.";
+        if ($needsReview) {
+            $message .= ' Your corrections were submitted for review.';
+        }
+
+        return [
+            'success' => true,
+            'message' => $message,
+            'attempt_id' => $attemptId,
+            'correct_count' => $correctCount,
+            'total' => $total,
+            'score' => $score,
+            'max_score' => $maxScore,
+        ];
+    }
+
+    /**
      * @param array<string, mixed> $files
      * @return array<string, mixed>
      */
@@ -298,6 +378,11 @@ class AcadAttemptService
             return $validated;
         }
 
+        $bytes = (int)(@filesize((string)$file['tmp_name']) ?: 0);
+        if ((new AcadMediaQuotaService())->wouldExceed($bytes)) {
+            return ['success' => false, 'message' => 'Audio storage limit reached. Contact an administrator.'];
+        }
+
         $name = 'attempt_' . bin2hex(random_bytes(8)) . '.' . $validated['ext'];
         $path = StorageService::instance()->putUploadedFile(
             StorageService::ZONE_ACAD_MEDIA,
@@ -332,6 +417,7 @@ class AcadAttemptService
             'iniciado_at' => $now,
             'enviado_at' => $now,
             'audio_ruta' => $path,
+            'tamano_bytes' => $bytes,
             'meta_json' => $metaJson,
             'estado_id' => AcadRepository::ESTADO_PENDIENTE,
         ]);
