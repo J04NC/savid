@@ -8602,10 +8602,13 @@ label.sgd-word-tool.sgd-word-import-trigger{
    <table>): cada columna toma el ancho de sus valores; los títulos de
    columna se parten en varias líneas y el texto largo (td.savid-dt-fit-text,
    con el valor completo en title) se corta con "…" en una sola línea. */
+.savid-dt-shell table.dataTable.savid-dt-fit,
 table.savid-dt-fit{
     width:auto !important;
     min-width:0;
 }
+/* Más específico que ".savid-dt-shell table.dataTable thead th" (nowrap) de datatables-savid.css. */
+.savid-dt-shell table.dataTable.savid-dt-fit thead th,
 table.savid-dt-fit thead th{
     white-space:normal;
     max-width:9rem;
