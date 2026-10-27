@@ -374,4 +374,79 @@ class AcadExerciseOptionService
 
         return ['success' => true, 'message' => 'Saved ' . count($clean) . ' turns.'];
     }
+
+    /**
+     * "True/False (with correction)": otra vez la misma tabla
+     * acad_exercise_option — cada fila es un enunciado sobre el texto de
+     * acad_exercise.prompt_en. es_correcta indica si el enunciado, tal como
+     * está escrito, es verdadero o falso (no hay noción de "señuelo" aquí,
+     * a diferencia de FILL_BLANKS/SENTENCE_ORDER).
+     *
+     * @return array<string, mixed>
+     */
+    public function listTrueFalseStatements(int $exerciseId, array $query = []): array
+    {
+        try {
+            $empresaId = $this->scope->requireEmpresaId($query);
+        } catch (RuntimeException $e) {
+            return ['success' => false, 'message' => $e->getMessage()];
+        }
+
+        $exercise = $this->repo->findExercise($empresaId, $exerciseId);
+        if ($exercise === null) {
+            return ['success' => false, 'message' => 'Exercise not found.'];
+        }
+
+        $statements = array_map(static fn (array $o) => [
+            'id' => (int)$o['id'],
+            'texto_en' => (string)$o['texto_en'],
+            'is_true' => (bool)$o['es_correcta'],
+            'orden' => (int)$o['orden'],
+        ], $this->repo->getOptionsByExercise($exerciseId));
+
+        return ['success' => true, 'statements' => $statements];
+    }
+
+    /**
+     * @param list<array<string, mixed>> $statements
+     * @return array<string, mixed>
+     */
+    public function saveTrueFalseStatements(int $exerciseId, array $statements, array $query = []): array
+    {
+        try {
+            $empresaId = $this->scope->requireEmpresaId($query);
+        } catch (RuntimeException $e) {
+            return ['success' => false, 'message' => $e->getMessage()];
+        }
+
+        $exercise = $this->repo->findExercise($empresaId, $exerciseId);
+        if ($exercise === null) {
+            return ['success' => false, 'message' => 'Exercise not found.'];
+        }
+
+        $clean = [];
+        foreach ($statements as $statement) {
+            if (!is_array($statement)) {
+                continue;
+            }
+            $texto = trim((string)($statement['texto_en'] ?? ''));
+            if ($texto === '') {
+                continue;
+            }
+            $clean[] = ['texto_en' => mb_substr($texto, 0, 500), 'is_true' => !empty($statement['is_true'])];
+        }
+
+        if ($clean === []) {
+            return ['success' => false, 'message' => 'Add at least one statement.'];
+        }
+
+        $this->repo->deleteOptionsByExercise($exerciseId);
+        $orden = 10;
+        foreach ($clean as $statement) {
+            $this->repo->insertOption($exerciseId, $statement['texto_en'], $statement['is_true'], $orden);
+            $orden += 10;
+        }
+
+        return ['success' => true, 'message' => 'Saved ' . count($clean) . ' statement(s).'];
+    }
 }

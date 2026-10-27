@@ -36,7 +36,7 @@ class AcadPracticeViewService
     {
         $exercise = $exerciseId > 0 ? $this->repo->findExercise($empresaId, $exerciseId) : null;
         $options = [];
-        if ($exercise !== null && in_array($exercise['exercise_type_codigo'], ['MULTIPLE_CHOICE', 'FILL_BLANKS', 'SENTENCE_ORDER', 'DIALOGUE'], true)) {
+        if ($exercise !== null && in_array($exercise['exercise_type_codigo'], ['MULTIPLE_CHOICE', 'FILL_BLANKS', 'SENTENCE_ORDER', 'DIALOGUE', 'TRUE_FALSE_FIX'], true)) {
             $options = $this->repo->getOptionsByExercise($exerciseId);
             if (in_array($exercise['exercise_type_codigo'], ['FILL_BLANKS', 'SENTENCE_ORDER'], true)) {
                 shuffle($options);

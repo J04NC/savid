@@ -250,6 +250,38 @@ class AcadController
     }
 
     /**
+     * JSON: enunciados (TRUE_FALSE_FIX) de un ejercicio de verdadero/falso
+     * con corrección (acción "configurar" embebida en el CRUD genérico de
+     * acad_exercise, igual que exerciseOptions()/exerciseWordBank()/
+     * exerciseSentenceOrder()/exerciseDialogueTurns()).
+     */
+    public function exerciseTrueFalseStatements(): void
+    {
+        $exerciseId = (int)($_GET['exercise_id'] ?? $_POST['exercise_id'] ?? 0);
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            if (!PermisoService::can('acad_exercise', 'configurar')) {
+                $this->jsonResponse(['success' => false, 'message' => 'No permission.']);
+
+                return;
+            }
+            $statements = json_decode((string)($_POST['statements'] ?? '[]'), true);
+            $result = $this->optionService->saveTrueFalseStatements($exerciseId, is_array($statements) ? $statements : [], $_GET);
+            $this->jsonResponse($result);
+
+            return;
+        }
+
+        if (!PermisoService::can('acad_exercise', 'configurar')) {
+            $this->jsonResponse(['success' => false, 'message' => 'No permission.']);
+
+            return;
+        }
+
+        $this->jsonResponse($this->optionService->listTrueFalseStatements($exerciseId, $_GET));
+    }
+
+    /**
      * JSON: audios de referencia de un ejercicio (N por ejercicio).
      * GET lista, POST con "archivo" agrega uno nuevo (grabado o subido),
      * POST con "generate_text" lo genera con texto a voz, POST con
