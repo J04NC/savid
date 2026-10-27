@@ -8416,6 +8416,24 @@ label.sgd-word-tool.sgd-word-import-trigger{
     font-style:italic;
 }
 
+/* Academic: ejercicio "True/False (with correction)" */
+.acad-tf-statement{
+    margin:12px 0;
+    padding:10px 12px;
+    border-radius:8px;
+    background:rgba(127,127,127,.08);
+}
+
+.acad-tf-text{
+    margin:0 0 8px;
+    font-size:15px;
+}
+
+.acad-tf-toggle{
+    display:flex;
+    gap:8px;
+}
+
 /* SIHOS — Interfaz Laboratorio: pestañas Homologación/Solicitudes/Resultados */
 .sihos-interlab-tabs{
     display:flex;

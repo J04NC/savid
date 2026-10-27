@@ -23,6 +23,7 @@ $isFillBlanks = $exercise !== null && $exercise['exercise_type_codigo'] === 'FIL
 $isSentenceOrder = $exercise !== null && $exercise['exercise_type_codigo'] === 'SENTENCE_ORDER';
 $isTongueTwister = $exercise !== null && $exercise['exercise_type_codigo'] === 'TONGUE_TWISTER';
 $isDialogue = $exercise !== null && $exercise['exercise_type_codigo'] === 'DIALOGUE';
+$isTrueFalseFix = $exercise !== null && $exercise['exercise_type_codigo'] === 'TRUE_FALSE_FIX';
 ?>
 <div class="module-container">
     <?php if (!$exercise): ?>
@@ -278,6 +279,23 @@ $isDialogue = $exercise !== null && $exercise['exercise_type_codigo'] === 'DIALO
                     <button type="button" id="acadDialoguePlayAll" class="sgd-doc-btn sgd-doc-btn-primary" style="margin-top:14px;">▶ Play full conversation</button>
                     <p id="acadDialogueStatus" class="field-note"></p>
                 <?php endif; ?>
+            <?php elseif ($isTrueFalseFix): ?>
+                <?php if ($options === []): ?>
+                    <p class="sgd-doc-empty">This exercise is not configured yet (no statements).</p>
+                <?php else: ?>
+                    <?php foreach ($options as $opt): ?>
+                        <div class="acad-tf-statement" data-option-id="<?= (int)$opt['id'] ?>">
+                            <p class="acad-tf-text"><?= acadH($opt['texto_en']) ?></p>
+                            <div class="acad-tf-toggle">
+                                <button type="button" class="sgd-doc-btn acad-tf-btn" data-value="true">True</button>
+                                <button type="button" class="sgd-doc-btn acad-tf-btn" data-value="false">False</button>
+                            </div>
+                            <textarea class="acad-tf-correction form-input" style="width:100%;display:none;margin-top:6px;" rows="2" placeholder="Write the correct version of this statement…"></textarea>
+                        </div>
+                    <?php endforeach; ?>
+                    <button type="button" id="acadTrueFalseSubmit" class="sgd-doc-btn sgd-doc-btn-primary" style="margin-top:10px;">Submit answer</button>
+                <?php endif; ?>
+                <p id="acadTrueFalseStatus" class="field-note"></p>
             <?php endif; ?>
         </section>
     <?php endif; ?>
