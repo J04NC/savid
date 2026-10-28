@@ -1100,6 +1100,26 @@ document.addEventListener('DOMContentLoaded', function () {
     // tardar hasta 12-20s con un rango de meses reales — se muestra el
     // overlay antes de dejar navegar; desaparece solo cuando la página
     // nueva reemplaza esta (ver savidMostrarCargando en app.js).
+    // El rango debe quedar dentro de un mismo año (la validación real está en
+    // el servicio; esto solo evita elegir un "Hasta" fuera del año de "Desde").
+    var inputDesde = document.getElementById('sihosFechaInicio');
+    var inputHasta = document.getElementById('sihosFechaFin');
+    var limitarHasta = function () {
+        if (!inputDesde || !inputHasta || !inputDesde.value) {
+            return;
+        }
+        var anio = inputDesde.value.substring(0, 4);
+        inputHasta.min = inputDesde.value;
+        inputHasta.max = anio + '-12-31';
+        if (inputHasta.value && inputHasta.value.substring(0, 4) !== anio) {
+            inputHasta.value = '';
+        }
+    };
+    if (inputDesde) {
+        inputDesde.addEventListener('change', limitarHasta);
+        limitarHasta();
+    }
+
     var form = document.getElementById('sihosCruceForm');
     if (form && typeof savidMostrarCargando === 'function') {
         form.addEventListener('submit', function () {

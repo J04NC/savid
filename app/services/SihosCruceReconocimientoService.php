@@ -76,6 +76,13 @@ class SihosCruceReconocimientoService
             return ['ok' => false, 'error' => 'Rango de fechas inválido.'];
         }
 
+        // Un solo año por reporte: el presupuesto se ejecuta por vigencia y
+        // varios documentos (REC, RRN, etc.) reinician su consecutivo cada
+        // año, así que "CodiDocu-NumeDocu" solo es único dentro de un año.
+        if (substr($fechaIni, 0, 4) !== substr($fechaFin, 0, 4)) {
+            return ['ok' => false, 'error' => 'El rango debe estar dentro de un mismo año. Para abarcar dos años, genere un reporte por cada uno.'];
+        }
+
         $dias = (new DateTime($fechaIni))->diff(new DateTime($fechaFin))->days;
         if ($dias > self::RANGO_MAXIMO_DIAS) {
             return [
