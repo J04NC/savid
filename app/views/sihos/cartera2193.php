@@ -183,6 +183,12 @@ document.addEventListener('DOMContentLoaded', function () {
         return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
     }
     function pintar() {
+        // app.js cierra el overlay en el "pageshow" de toda carga de página (savidOcultarCargandoForzado):
+        // si se cerró, se vuelve a abrir; el trabajo sigue en curso y la pantalla debe seguir bloqueada.
+        var overlay = document.getElementById('savidCargandoOverlay');
+        if (!overlay || !overlay.classList.contains('activo')) {
+            savidMostrarCargando('Generando cartera 2193…', true);
+        }
         var texto = document.querySelector('#savidCargandoOverlay .savid-cargando-texto');
         if (texto) {
             texto.textContent = 'Generando cartera 2193… ' + mmss(Math.floor((Date.now() - inicio) / 1000))
@@ -207,8 +213,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Bloquea la pantalla (sin botón de cerrar) y cuenta los segundos en el navegador cada 1 s.
     if (typeof savidMostrarCargando === 'function') {
-        savidMostrarCargando('Generando cartera 2193…', true);
         pintar();
+        window.addEventListener('pageshow', function () { setTimeout(pintar, 0); });
         setInterval(function () { if (!terminado) { pintar(); } }, 1000);
     }
     setTimeout(consultar, 2000);
