@@ -488,8 +488,8 @@ $sihosReclasificarCuentaVigenciaActualMasivoJsV = is_readable($assetSihosReclasi
             </div>
 
             <p class="field-note">
-                Diferencia por "Reconocimiento" de tesorería (rendimientos financieros, saldos de vigencia anterior, disponibilidad inicial): <strong><?= sihosFormatoMoneda($dif['totalDiferenciaReconocimientoTesoreria']) ?></strong> —
-                esperada, nunca tiene contrapartida en la 43 porque no es ingreso por facturación de pacientes. Se muestra aparte, abajo, para no tapar las diferencias reales.
+                Diferencia por "Reconocimiento" de tesorería (rendimientos financieros, saldos de vigencia anterior, disponibilidad inicial, ajustes): <strong><?= sihosFormatoMoneda($dif['totalDiferenciaReconocimientoTesoreria']) ?></strong> —
+                esperada, nunca tiene contrapartida en la 43 porque no es ingreso por facturación de pacientes. Las reversiones de reconocimientos (documento de reversión, p. ej. RRN) restan de este valor. Se muestra aparte, abajo, para no tapar las diferencias reales.
             </p>
 
             <h4 class="auditoria-title" style="font-size:14px; margin-top:16px;">Por tipo de usuario</h4>
@@ -604,7 +604,7 @@ $sihosReclasificarCuentaVigenciaActualMasivoJsV = is_readable($assetSihosReclasi
                 </div>
             <?php endif; ?>
 
-            <h4 class="auditoria-title" style="font-size:14px; margin-top:16px;">Reconocimiento de tesorería (informativo, no requiere acción) (<?= count($dif['detalleReconocimientoTesoreria']) ?>)</h4>
+            <h4 class="auditoria-title" style="font-size:14px; margin-top:16px;">Reconocimiento de tesorería y ajustes (informativo, no requiere acción) (<?= count($dif['detalleReconocimientoTesoreria']) ?>)</h4>
             <?php if ($dif['detalleReconocimientoTesoreria'] === []): ?>
                 <p class="field-note">Sin documentos de este tipo en el rango.</p>
             <?php else: ?>

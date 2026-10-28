@@ -337,15 +337,22 @@ class SihosExternalRepository
      * se depende de una lista de TipoComp (caso FE-710802/NCF-45356). Si el
      * documento no tiene cartera o su neto es 0, rige la regla por TipoComp.
      *
+     * $codigosSiempreResta: documentos cuyo presupuesto SIEMPRE resta, sin
+     * importar TipoComp ni cartera (p. ej. la reversión de reconocimientos,
+     * DocuApli=77: DetaPlan guarda el valor en positivo y no tiene
+     * contabilidad que dé el signo).
+     *
      * @param string[] $codigosPresupuesto
      * @param string[] $codigosSignoInvertido
+     * @param string[] $codigosSiempreResta
      * @return array<string, array{CodiDocu:string,NumeDocu:string,FechDocu:string,CentCost:?string,TipoUsua:?string,Valor:float}> indexado por "CodiDocu-NumeDocu"
      */
     public function fetchPresupuestoReconocidoPorDocumento(
         array $codigosPresupuesto,
         array $codigosSignoInvertido,
         string $fechaIni,
-        string $fechaFin
+        string $fechaFin,
+        array $codigosSiempreResta = []
     ): array {
         if ($codigosPresupuesto === []) {
             return [];
@@ -354,6 +361,14 @@ class SihosExternalRepository
         $phPres = implode(',', array_fill(0, count($codigosPresupuesto), '?'));
         $condicionSigno = '0 = 1';
         $paramsSigno = [];
+        $condicionSiempreResta = '0 = 1';
+        $paramsSiempreResta = [];
+
+        if ($codigosSiempreResta !== []) {
+            $phResta = implode(',', array_fill(0, count($codigosSiempreResta), '?'));
+            $condicionSiempreResta = "EP.CodiDocu IN ({$phResta})";
+            $paramsSiempreResta = $codigosSiempreResta;
+        }
 
         if ($codigosSignoInvertido !== []) {
             $phSigno = implode(',', array_fill(0, count($codigosSignoInvertido), '?'));
@@ -364,6 +379,8 @@ class SihosExternalRepository
         $sql = "
             SELECT EP.CodiDocu, EP.NumeDocu, MIN(EP.FechDocu) AS FechDocu, MIN(EP.CentCost) AS CentCost, MIN(EP.TipoUsua) AS TipoUsua,
                    SUM(CASE
+                           WHEN {$condicionSiempreResta}
+                               THEN DP.Valor * -1
                            WHEN CA.NetoCartera IS NOT NULL AND ABS(CA.NetoCartera) >= 0.005
                                THEN IF(CA.NetoCartera < 0, DP.Valor * -1, DP.Valor)
                            WHEN EP.TipoComp IN ('5', '0', '21') AND ({$condicionSigno})
@@ -394,9 +411,11 @@ class SihosExternalRepository
             GROUP BY EP.CodiDocu, EP.NumeDocu
         ";
         $stmt = $this->connect()->prepare($sql);
-        // Orden posicional: los "?" de $condicionSigno van en el SELECT, luego
+        // Orden posicional: los "?" de $condicionSiempreResta y $condicionSigno
+        // (en ese orden) van en el SELECT, luego
         // los del subselect de cartera (LEFT JOIN) y al final los del WHERE.
         $stmt->execute([
+            ...$paramsSiempreResta,
             ...$paramsSigno,
             $this->codiInst(), ...$codigosPresupuesto, $fechaIni, $fechaFin,
             $this->codiInst(), ...$codigosPresupuesto, $fechaIni, $fechaFin,

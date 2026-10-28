@@ -23,6 +23,8 @@ class SihosCruceReconocimientoService
     private const DOCU_APLI_NOTA = [127];
     private const DOCU_APLI_NOTA_GENERICA = [3];
     private const DOCU_APLI_RECONOCIMIENTO_TESORERIA = [40];
+    /** "Reversión de reconocimientos" (p. ej. RRN): resta del reconocimiento manual de tesorería. */
+    private const DOCU_APLI_REVERSION_RECONOCIMIENTO = [77];
     private const DOCU_APLI_DAC = [125];
 
     /*
@@ -414,9 +416,16 @@ class SihosCruceReconocimientoService
         // como "diferencia".
         $codigosNotaGenericaContable = $repository->resolveCodigosDocumentoPorAplicacionContable(self::DOCU_APLI_NOTA_GENERICA);
         $codigosDac = $repository->resolveCodigosDocumentoPorAplicacion(self::DOCU_APLI_DAC);
-        $codigosReconocimientoTesoreria = $repository->resolveCodigosDocumentoPorAplicacionSinFiltroPresupuesto(
-            self::DOCU_APLI_RECONOCIMIENTO_TESORERIA
+        // Reconocimientos (suman) y sus reversiones (restan): se tratan juntos,
+        // aparte de la facturación, en la misma tabla informativa. Por
+        // DocuApli, nunca por código literal.
+        $codigosReversionReconocimiento = $repository->resolveCodigosDocumentoPorAplicacionSinFiltroPresupuesto(
+            self::DOCU_APLI_REVERSION_RECONOCIMIENTO
         );
+        $codigosReconocimientoTesoreria = array_values(array_unique([
+            ...$repository->resolveCodigosDocumentoPorAplicacionSinFiltroPresupuesto(self::DOCU_APLI_RECONOCIMIENTO_TESORERIA),
+            ...$codigosReversionReconocimiento,
+        ]));
         // Faltaba $codigosNotaGenerica aquí (bug real, confirmado con datos:
         // NC-3571 sobre FE-657005, empresa 18) — una nota "genérica" (NC/NT,
         // DocuApli=3) con TipoComp=5 ("Devolución Factura") también debe
@@ -440,7 +449,8 @@ class SihosCruceReconocimientoService
             $codigosPresupuesto,
             $codigosSignoInvertido,
             $fechaIni,
-            $fechaFin
+            $fechaFin,
+            $codigosReversionReconocimiento
         );
         $porContabilidad = $repository->fetchContabilidad43PorDocumento($fechaIni, $fechaFin);
         $nombresTipoUsua = $repository->fetchTipoUsuarioNombres();
@@ -449,6 +459,15 @@ class SihosCruceReconocimientoService
             $fechaIni,
             $fechaFin
         );
+        // Los rubros de una reversión también restan (DetaPlan los guarda en positivo).
+        foreach ($rubrosReconocimientoTesoreria as $claveRubro => $listaRubros) {
+            if (in_array(explode('-', (string)$claveRubro, 2)[0], $codigosReversionReconocimiento, true)) {
+                $rubrosReconocimientoTesoreria[$claveRubro] = array_map(
+                    static fn (array $r): array => [...$r, 'Valor' => $r['Valor'] * -1],
+                    $listaRubros
+                );
+            }
+        }
 
         $claves = array_unique([...array_keys($porPresupuesto), ...array_keys($porContabilidad)]);
 
