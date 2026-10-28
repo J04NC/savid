@@ -201,7 +201,7 @@ $sihosReclasificarCuentaVigenciaActualMasivoJsV = is_readable($assetSihosReclasi
                         $muestraSeleccionReclasificarVigenciaActual = ($seccion['accionReclasificarVigenciaActualMasivo'] ?? false) && $puedeReversarCuenta;
                         $tablaId = $muestraSeleccionMasiva ? 'sihosConstruirDetaPlanTable' : ($muestraSeleccionReclasificar ? 'sihosReclasificarCuentaTable' : ($muestraSeleccionEliminarDetaPlan ? 'sihosEliminarDetaPlanMasivoTable' : ($muestraSeleccionReversar ? 'sihosReversarCuentaMasivoTable' : ($muestraSeleccionReclasificarVigenciaActual ? 'sihosReclasificarCuentaVigenciaActualMasivoTable' : ''))));
                         ?>
-                        <table class="seguridad-table" <?= $tablaId !== '' ? 'id="' . $tablaId . '"' : '' ?>>
+                        <table class="seguridad-table savid-dt-fit" <?= $tablaId !== '' ? 'id="' . $tablaId . '"' : '' ?>>
                             <?php if ($seccion['tipo'] === 'factura'): ?>
                                 <thead><tr><th>Documento</th><th>Fecha</th><th>Valor total</th><th>Tercero</th><th>Centro de costo</th><th>Opciones</th></tr></thead>
                                 <tbody>
@@ -295,7 +295,7 @@ $sihosReclasificarCuentaVigenciaActualMasivoJsV = is_readable($assetSihosReclasi
                                         <td><?= sihosFormatoMoneda($f['Presupuesto']) ?></td>
                                         <td><?= htmlspecialchars($f['FacturaCodiDocu'] . '-' . $f['FacturaNumeDocu']) ?></td>
                                         <td><?= htmlspecialchars($f['FacturaFecha']) ?></td>
-                                        <td><?= htmlspecialchars($f['CuentasUsadas']) ?></td>
+                                        <td class="savid-dt-fit-text" title="<?= htmlspecialchars($f['CuentasUsadas']) ?>"><?= htmlspecialchars($f['CuentasUsadas']) ?></td>
                                         <td>
                                             <?php if ($puedeReversarCuenta): ?>
                                                 <button type="button" class="auditoria-btn-primary btnSihosReclasificarCuentaVigenciaActual"
@@ -497,7 +497,7 @@ $sihosReclasificarCuentaVigenciaActualMasivoJsV = is_readable($assetSihosReclasi
                 <p class="field-note">Sin datos en este rango.</p>
             <?php else: ?>
                 <div style="overflow-x:auto;">
-                    <table class="seguridad-table">
+                    <table class="seguridad-table savid-dt-fit">
                         <thead>
                             <tr>
                                 <th>Tipo de usuario</th>
@@ -531,7 +531,7 @@ $sihosReclasificarCuentaVigenciaActualMasivoJsV = is_readable($assetSihosReclasi
                 <p class="field-note">Sin diferencias en este rango.</p>
             <?php else: ?>
                 <div style="overflow-x:auto;">
-                    <table class="seguridad-table">
+                    <table class="seguridad-table savid-dt-fit">
                         <thead><tr><th>Documento</th><th>Fecha</th><th>Tipo de usuario</th><th>Presupuesto</th><th>Contabilidad</th><th>Diferencia</th><th>Documento relacionado</th><th>Fecha relacionado</th><th>Cuenta real (si no es 43)</th><th>Opciones</th></tr></thead>
                         <tbody>
                         <?php foreach ($dif['detalle'] as $f): ?>
@@ -556,7 +556,7 @@ $sihosReclasificarCuentaVigenciaActualMasivoJsV = is_readable($assetSihosReclasi
                                 <td><?= sihosFormatoMoneda($f['diferencia']) ?></td>
                                 <td><?= $tieneRelacionado ? htmlspecialchars($f['RelacionadoCodiDocu'] . '-' . $f['RelacionadoNumeDocu']) : '—' ?></td>
                                 <td><?= $tieneRelacionado ? htmlspecialchars((string)$f['RelacionadoFecha']) : '—' ?></td>
-                                <td><?= $f['CuentaReal'] !== null ? htmlspecialchars($f['CuentaReal']) : '—' ?></td>
+                                <td class="savid-dt-fit-text"<?= $f['CuentaReal'] !== null ? ' title="' . htmlspecialchars($f['CuentaReal']) . '"' : '' ?>><?= $f['CuentaReal'] !== null ? htmlspecialchars($f['CuentaReal']) : '—' ?></td>
                                 <td>
                                     <button type="button" class="auditoria-btn-primary btnSihosAuditarReferencias"
                                             data-empresa-id="<?= (int)$empresaId ?>"
@@ -575,7 +575,7 @@ $sihosReclasificarCuentaVigenciaActualMasivoJsV = is_readable($assetSihosReclasi
                 <p class="field-note">Sin movimientos de otras cuentas 43 en el rango.</p>
             <?php else: ?>
                 <div style="overflow-x:auto;">
-                    <table class="seguridad-table">
+                    <table class="seguridad-table savid-dt-fit">
                         <thead><tr><th>Documento</th><th>Fecha</th><th>Tipo de usuario</th><th>Cuenta</th><th>Valor</th><th>Documento relacionado</th><th>Opciones</th></tr></thead>
                         <tbody>
                         <?php foreach ($dif['detalleOtrasCuentas43'] as $f): ?>
@@ -609,7 +609,7 @@ $sihosReclasificarCuentaVigenciaActualMasivoJsV = is_readable($assetSihosReclasi
                 <p class="field-note">Sin documentos de este tipo en el rango.</p>
             <?php else: ?>
                 <div style="overflow-x:auto;">
-                    <table class="seguridad-table">
+                    <table class="seguridad-table savid-dt-fit">
                         <thead><tr><th>Documento</th><th>Fecha</th><th>Presupuesto</th><th>Rubros</th></tr></thead>
                         <tbody>
                         <?php foreach ($dif['detalleReconocimientoTesoreria'] as $f): ?>
@@ -642,7 +642,7 @@ $sihosReclasificarCuentaVigenciaActualMasivoJsV = is_readable($assetSihosReclasi
                             <span class="close-modal" id="sihosVerRubrosCerrar" role="button" tabindex="0" aria-label="Cerrar">&times;</span>
                         </div>
                         <div style="padding:16px; overflow-x:auto;">
-                            <table class="seguridad-table">
+                            <table class="seguridad-table savid-dt-fit">
                                 <thead><tr><th>Rubro</th><th>Nombre</th><th style="text-align:right;">Valor</th></tr></thead>
                                 <tbody id="sihosVerRubrosBody"></tbody>
                                 <tfoot>
