@@ -610,7 +610,7 @@ $sihosReclasificarCuentaVigenciaActualMasivoJsV = is_readable($assetSihosReclasi
             <?php else: ?>
                 <div style="overflow-x:auto;">
                     <table class="seguridad-table">
-                        <thead><tr><th>Documento</th><th>Fecha</th><th>Presupuesto</th><th>Contabilidad</th><th>Diferencia</th><th>Rubros</th></tr></thead>
+                        <thead><tr><th>Documento</th><th>Fecha</th><th>Presupuesto</th><th>Rubros</th></tr></thead>
                         <tbody>
                         <?php foreach ($dif['detalleReconocimientoTesoreria'] as $f): ?>
                             <?php $documentoRec = $f['CodiDocu'] . '-' . $f['NumeDocu']; ?>
@@ -618,8 +618,6 @@ $sihosReclasificarCuentaVigenciaActualMasivoJsV = is_readable($assetSihosReclasi
                                 <td><?= htmlspecialchars($documentoRec) ?></td>
                                 <td><?= htmlspecialchars($f['FechDocu']) ?></td>
                                 <td><?= sihosFormatoMoneda($f['presupuesto']) ?></td>
-                                <td><?= sihosFormatoMoneda($f['contabilidad']) ?></td>
-                                <td><?= sihosFormatoMoneda($f['diferencia']) ?></td>
                                 <td>
                                     <?php if ($f['rubros'] !== []): ?>
                                         <button type="button" class="auditoria-btn-primary btnSihosVerRubros"
