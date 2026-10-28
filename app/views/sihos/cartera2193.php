@@ -172,23 +172,46 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 
 <?php if (!empty($trabajo)): ?>
-(function () {
+document.addEventListener('DOMContentLoaded', function () {
     var url = '?url=sihos/cartera2193Estado&empresa_id=<?= (int)$empresaId ?>&job=<?= htmlspecialchars($trabajo['token'], ENT_QUOTES) ?>';
+    var inicio = Date.now() - <?= (int)$trabajo['segundos'] ?> * 1000;
+    var facturas = <?= (int)$trabajo['facturas'] ?>;
+    var terminado = false;
+
+    function mmss(seg) {
+        var m = Math.floor(seg / 60), s = seg % 60;
+        return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+    }
+    function pintar() {
+        var texto = document.querySelector('#savidCargandoOverlay .savid-cargando-texto');
+        if (texto) {
+            texto.textContent = 'Generando cartera 2193… ' + mmss(Math.floor((Date.now() - inicio) / 1000))
+                + ' · ' + facturas.toLocaleString('es-CO') + ' facturas procesadas';
+        }
+    }
     function consultar() {
         fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.json(); })
             .then(function (e) {
                 if (e.estado === 'pendiente' || e.estado === 'ejecutando') {
-                    document.getElementById('sihosCartera2193Facturas').textContent = e.facturas;
-                    document.getElementById('sihosCartera2193Segundos').textContent = e.segundos;
+                    facturas = e.facturas;
+                    inicio = Date.now() - e.segundos * 1000;
                     setTimeout(consultar, 3000);
                 } else {
+                    terminado = true;
                     window.location.reload();
                 }
             })
             .catch(function () { setTimeout(consultar, 5000); });
     }
+
+    // Bloquea la pantalla (sin botón de cerrar) y cuenta los segundos en el navegador cada 1 s.
+    if (typeof savidMostrarCargando === 'function') {
+        savidMostrarCargando('Generando cartera 2193…', true);
+        pintar();
+        setInterval(function () { if (!terminado) { pintar(); } }, 1000);
+    }
     setTimeout(consultar, 2000);
-})();
+});
 <?php endif; ?>
 </script>
