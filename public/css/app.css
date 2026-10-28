@@ -8601,11 +8601,13 @@ label.sgd-word-tool.sgd-word-import-trigger{
 /* Tablas "ajustadas al contenido" (opt-in con la clase savid-dt-fit en la
    <table>): cada columna toma el ancho de sus valores; los títulos de
    columna se parten en varias líneas y el texto largo (td.savid-dt-fit-text,
-   con el valor completo en title) se corta con "…" en una sola línea. */
+   con el valor completo en title) se corta con "…" en una sola línea.
+   Con pocas columnas la tabla se estira al 100% del contenedor (min-width);
+   con muchas, crece hasta su ancho natural y el contenedor da el scroll. */
 .savid-dt-shell table.dataTable.savid-dt-fit,
 table.savid-dt-fit{
     width:auto !important;
-    min-width:0;
+    min-width:100%;
 }
 /* Más específico que ".savid-dt-shell table.dataTable thead th" (nowrap) de datatables-savid.css. */
 .savid-dt-shell table.dataTable.savid-dt-fit thead th,
