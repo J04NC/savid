@@ -341,7 +341,7 @@ class Router
         }
 
         if (SessionManager::userLogged()
-            && !in_array($controllerName, ['LoginController', 'HealthController', 'PrivacidadController', 'AvisolegalController', 'DashboardController', 'ModuleController', 'ContextController'], true)
+            && !in_array($controllerName, ['LoginController', 'HealthController', 'PrivacidadController', 'AvisolegalController', 'DashboardController', 'ModuleController', 'ContextController', 'CuentaController'], true)
             && class_exists('PermisoService')
             && !($controllerName === 'UsuarioController' && in_array($method, $usuarioJsonLookupMethods, true))
             && !($controllerName === 'EmpresaController' && in_array($method, $empresaJsonApiMethods, true))

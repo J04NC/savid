@@ -91,6 +91,8 @@ if ($sessionIdleMin < 0) {
 
 <a href="?url=dashboard/refreshAssets" title="Actualizar JS y CSS (evitar caché antigua)">🧹</a>
 
+<a href="?url=cuenta/cambiarPassword" title="Cambiar mi contraseña">🔑</a>
+
 <a href="?url=login/logout" title="Cerrar sesión">🚪</a>
 
 <button id="toggleTheme" class="theme-icon">
