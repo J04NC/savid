@@ -1,0 +1,32 @@
+# Archivos que Cursor NO debe leer ni indexar ni enviar a sus servidores.
+# Política: datos y credenciales de SAVID/SIHOS no salen de este servidor.
+
+# Credenciales y configuración local
+config/
+.env
+**/.env
+**/.env.*
+**/conex.php
+
+# SIHOS (sistema externo, puede contener datos clínicos) y su copia anterior
+sihos/
+.sihosant/
+
+# Datos generados en runtime (reportes, importaciones, respaldos, logs, subidas)
+storage/
+var/
+public/uploads/
+docs/
+*.log
+*.sql
+*.sql.gz
+*.xls
+*.xlsx
+*.csv
+*.docx
+*.pdf
+
+# Binarios y dependencias
+vendor/
+composer.phar
+*.tgz

@@ -1,0 +1,35 @@
+---
+description: Reglas del proyecto SAVID (arquitectura, confidencialidad, commits)
+alwaysApply: true
+---
+
+# SAVID — reglas obligatorias
+
+La fuente de verdad es `CLAUDE.md` y `README.md` en la raíz: léelos antes de cambiar código.
+Responde siempre en español. El usuario no programa: explica en lenguaje simple qué cambiaste y por qué.
+
+## Arquitectura (PHP MVC-lite, sin framework)
+Flujo: `public/index.php → core/Router.php → Controller → Service → Repository → PDO`.
+- NUNCA SQL (`prepare`/`query`) en `app/controllers`. El acceso a datos va en `app/models` (repositorios).
+- La lógica de negocio va en `app/services`. Los controllers solo manejan HTTP.
+- Una clase por archivo, nombre de archivo = nombre de clase, sin namespaces.
+- Respuestas JSON: `['success' => bool, 'message' => ...]`.
+- No dupliques permisos/breadcrumbs: usa `PermisoService`, `MenuService`, `SgdScopeService`.
+
+## Confidencialidad (no negociable)
+- No leas, imprimas ni busques en `config/`, `.env`, `sihos/`, `.sihosant/` ni en ningún `conex.php`.
+- Nunca escribas contraseñas, tokens o connection strings en archivos, commits o chat.
+- No imprimas datos personales ni clínicos (nombres, documentos, diagnósticos, resultados). Enmascara ejemplos.
+- SIHOS es solo lectura salvo `SihosExternalWriteRepository` para correcciones contables puntuales.
+- Respeta siempre el filtro `empresa_id`/`sede_id`; nunca cruces datos entre empresas.
+- No envíes datos fuera del servidor.
+
+## Git
+- Hay un hook `.githooks/pre-commit`: bloquea commits de más de 200 líneas y SQL nuevo en controllers. Haz micro-commits.
+- Antes de empezar, verifica que `git status` esté limpio; no mezcles tus cambios con trabajo sin commitear de otra herramienta.
+- No hagas `push` sin que el usuario lo pida.
+- Trabaja en la rama `desarrollo-sistema`, nunca directo en `main`.
+
+## Verificación
+No hay tests ni linter. Tras un cambio, ejecuta `php -l` sobre los archivos tocados y el humo:
+`rg "->prepare\(|->query\(" app/controllers` debe salir vacío.
