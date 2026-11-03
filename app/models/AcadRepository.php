@@ -439,6 +439,16 @@ class AcadRepository
         $stmt->execute([$score, $feedbackEn, $calificadoBy, self::ESTADO_CALIFICADO, $attemptId]);
     }
 
+    /** ¿El intento pertenece a un estudiante visible para esas sedes? (null = sin restricción). */
+    public function isAttemptVisibleToSedes(int $attemptId, ?array $sedeIds): bool
+    {
+        [$sedeSql, $sedeParams] = $this->attemptSedeFilter($sedeIds);
+        $stmt = $this->pdo->prepare('SELECT 1 FROM acad_attempt a WHERE a.id = ? AND a.deleted_at IS NULL' . $sedeSql . ' LIMIT 1');
+        $stmt->execute([$attemptId, ...$sedeParams]);
+
+        return $stmt->fetchColumn() !== false;
+    }
+
     /** @return list<array<string, mixed>> */
     public function findPendingAttempts(int $empresaId, ?array $sedeIds = null): array
     {

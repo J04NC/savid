@@ -34,7 +34,8 @@ class AcadAttemptService
         $userId = (int)($_SESSION['user_id'] ?? 0);
         $empresaSesion = (int)($_SESSION['empresa_id'] ?? 0);
         $esDueno = $userId > 0 && (int)$row['usuario_id'] === $userId;
-        $puedeCalificar = PermisoService::can('acad/grading', 'ver');
+        $puedeCalificar = PermisoService::can('acad/grading', 'ver')
+            && $this->repo->isAttemptVisibleToSedes($attemptId, $this->scope->visibleSedeIds());
         $permitido = $this->scope->isSuperAdmin()
             || ((int)$row['empresa_id'] === $empresaSesion && ($esDueno || $puedeCalificar));
         if (!$permitido) {
@@ -478,6 +479,9 @@ class AcadAttemptService
         }
 
         $attempt = $this->repo->findAttempt($empresaId, $attemptId);
+        if ($attempt !== null && !$this->repo->isAttemptVisibleToSedes($attemptId, $this->scope->visibleSedeIds($query))) {
+            $attempt = null; // otra sede: se trata como inexistente
+        }
         if ($attempt === null) {
             return ['success' => false, 'message' => 'Attempt not found.'];
         }
