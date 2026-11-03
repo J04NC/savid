@@ -8626,3 +8626,12 @@ table.savid-dt-fit td.savid-dt-fit-text{
     overflow:hidden;
     text-overflow:ellipsis;
 }
+
+/* 2193 CARTERA: celdas de valor con detalle por clic. */
+td.cartera2193-detalle{
+    cursor:pointer;
+}
+td.cartera2193-detalle:hover{
+    text-decoration:underline;
+    background:rgba(29,209,161,.12);
+}
