@@ -9,6 +9,12 @@
 /** @var ?array $trabajo Cálculo en segundo plano en curso: token, estado, facturas, segundos */
 
 $fmt = static fn (float $v): string => SihosCartera2193Service::formatoMoneda($v);
+/** Celda de valor; si no es cero, al hacer clic abre el detalle factura a factura (ver script al final). */
+$celdaDetalle = static function (float $valor, string $col) use ($fmt): string {
+    $clic = abs($valor) >= 0.005 ? ' class="cartera2193-detalle" data-col="' . $col . '" title="Clic para ver las facturas"' : '';
+
+    return '<td style="text-align:right;"' . $clic . ' data-order="' . $valor . '" data-valor="' . $valor . '">' . $fmt($valor) . '</td>';
+};
 $edades = ['0 - 60 días', '61 - 90 días', '91 - 180 días', '181 - 360 días', 'Más de 360 días'];
 ?>
 
@@ -103,16 +109,16 @@ $edades = ['0 - 60 días', '61 - 90 días', '91 - 180 días', '181 - 360 días',
                     </thead>
                     <tbody>
                         <?php foreach ($tipo['filas'] as $fila): ?>
-                            <tr>
+                            <tr data-ti="<?= htmlspecialchars($fila['TiDoTerc']) ?>" data-nu="<?= htmlspecialchars($fila['NuDoTerc']) ?>" data-tipo="<?= htmlspecialchars((string)$tipo['CodiTipo']) ?>">
                                 <td><?= htmlspecialchars($fila['TiDoTerc']) ?></td>
                                 <td><?= htmlspecialchars($fila['NuDoTerc']) ?></td>
                                 <td class="savid-dt-fit-text" title="<?= htmlspecialchars($fila['NombTerc']) ?>"><?= htmlspecialchars($fila['NombTerc']) ?></td>
-                                <?php foreach ($fila['v'] as $valor): ?>
-                                    <td style="text-align:right;" data-order="<?= $valor ?>"><?= $fmt($valor) ?></td>
+                                <?php foreach ($fila['v'] as $e => $valor): ?>
+                                    <?= $celdaDetalle($valor, 'e' . $e) ?>
                                 <?php endforeach; ?>
-                                <td style="text-align:right;" data-order="<?= $fila['total'] ?>"><?= $fmt($fila['total']) ?></td>
-                                <td style="text-align:right;" data-order="<?= $fila['pend'] ?>"><?= $fmt($fila['pend']) ?></td>
-                                <td style="text-align:right;" data-order="<?= $fila['glosa'] ?>"><?= $fmt($fila['glosa']) ?></td>
+                                <?= $celdaDetalle($fila['total'], 'rad') ?>
+                                <?= $celdaDetalle($fila['pend'], 'pend') ?>
+                                <?= $celdaDetalle($fila['glosa'], 'glosa') ?>
                                 <?php if ($tipo['conGiro']): ?><td style="text-align:right;" data-order="<?= $fila['giro'] ?>"><?= $fmt($fila['giro']) ?></td><?php endif; ?>
                             </tr>
                         <?php endforeach; ?>
@@ -160,9 +166,22 @@ $edades = ['0 - 60 días', '61 - 90 días', '91 - 180 días', '181 - 360 días',
 </div>
 
 <script>
+var SIHOS_CARTERA2193 = { empresaId: <?= (int)($empresaId ?? 0) ?>, fechaCorte: <?= json_encode($fechaCorte) ?> };
 // La vista se inserta en main.php ANTES de cargar app.js y jQuery: sin esperar
 // a DOMContentLoaded, savidMostrarCargando aún no existe cuando corre este script.
 document.addEventListener('DOMContentLoaded', function () {
+    // Clic en una celda de valor: modal con las facturas que la forman (delegado: DataTables reordena/filtra las filas).
+    document.addEventListener('click', function (ev) {
+        var td = ev.target.closest && ev.target.closest('td.cartera2193-detalle');
+        var tr = td && td.closest('tr[data-nu]');
+        if (!tr || typeof openModalGod !== 'function') { return; }
+        var q = new URLSearchParams({
+            empresa_id: SIHOS_CARTERA2193.empresaId, fecha_corte: SIHOS_CARTERA2193.fechaCorte,
+            ti: tr.dataset.ti, nu: tr.dataset.nu, tipo: tr.dataset.tipo, col: td.dataset.col, valor: td.dataset.valor
+        });
+        openModalGod('sihos/cartera2193Detalle&' + q.toString(), 'xl', 'Calculando las facturas… puede tardar si el deudor tiene muchas.');
+    });
+
     var form = document.getElementById('sihosCartera2193Form');
     if (form && typeof savidMostrarCargando === 'function') {
         form.addEventListener('submit', function () {
