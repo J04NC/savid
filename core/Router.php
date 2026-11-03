@@ -254,8 +254,8 @@ class Router
          */
         $sihosDeterioroAccionMethods = ['deterioroDatos', 'deterioroExportar'];
 
-        /* Misma razón: sihos/cartera2193Estado (avance JSON del cálculo en segundo plano) — su pantalla es sihos/cartera2193. */
-        $sihosCartera2193AccionMethods = ['cartera2193Estado'];
+        /* Misma razón: sihos/cartera2193Estado (avance JSON del cálculo en segundo plano) y sihos/cartera2193Detalle (modal de facturas de una celda) — su pantalla es sihos/cartera2193. */
+        $sihosCartera2193AccionMethods = ['cartera2193Estado', 'cartera2193Detalle'];
 
         /*
          * Misma razón: sihos/auditoriaGlosaBuscarAdministradora (autocompletado

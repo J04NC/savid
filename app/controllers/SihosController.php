@@ -1560,4 +1560,28 @@ class SihosController
 
         echo json_encode($estado ?? ['estado' => 'inexistente'], JSON_UNESCAPED_UNICODE);
     }
+
+    /** Detalle factura a factura de una celda del 2193 (fragmento HTML para el modal global). */
+    public function cartera2193Detalle(): void
+    {
+        $scope = $this->connectionService->buildScope($_GET);
+        $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : null;
+        $fechaCorte = trim((string)($_GET['fecha_corte'] ?? ''));
+        $tiDoTerc = preg_replace('/[^A-Za-z]/', '', (string)($_GET['ti'] ?? '')) ?? '';
+        $nuDoTerc = preg_replace('/[^0-9A-Za-z-]/', '', (string)($_GET['nu'] ?? '')) ?? '';
+        $tipoUsua = preg_replace('/[^0-9]/', '', (string)($_GET['tipo'] ?? '')) ?? '';
+        $columna = trim((string)($_GET['col'] ?? ''));
+
+        $detalle = ['ok' => false, 'error' => 'Seleccione una empresa para ver el detalle.'];
+        if ($empresaId !== null && $tiDoTerc !== '' && $nuDoTerc !== '' && $tipoUsua !== '') {
+            // Un deudor muy grande son decenas de miles de facturas: puede tardar varios segundos.
+            set_time_limit(600);
+            SihosMemoryGuard::ejecutar(512, function () use (&$detalle, $empresaId, $fechaCorte, $tiDoTerc, $nuDoTerc, $tipoUsua, $columna): void {
+                $detalle = $this->cartera2193Service->detalleDeudor($empresaId, $fechaCorte, $tiDoTerc, $nuDoTerc, $tipoUsua, $columna);
+            });
+        }
+
+        $celda = (float)($_GET['valor'] ?? 0);
+        require BASE_PATH . '/app/views/sihos/cartera2193_detalle.php';
+    }
 }
