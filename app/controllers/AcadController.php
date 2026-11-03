@@ -324,6 +324,51 @@ class AcadController
         $this->jsonResponse($this->exerciseService->listReferenceAudios($_GET, $exerciseId));
     }
 
+    /**
+     * Entrega la grabación de voz de un intento (?url=acad/audioIntento/ID).
+     * La autorización (dueño o quien califica, misma empresa) vive en
+     * AcadAttemptService; aquí solo se emiten las cabeceras HTTP. Soporta
+     * Range porque Safari no reproduce audio sin respuestas 206.
+     */
+    public function audioIntento(string $id = '0'): void
+    {
+        $audio = $this->attemptService->getAttemptAudioForSession((int)$id);
+        if ($audio === null) {
+            http_response_code(404);
+            exit;
+        }
+
+        $data = $audio['data'];
+        $total = strlen($data);
+        $inicio = 0;
+        $fin = $total - 1;
+        $status = 200;
+        if (preg_match('/^bytes=(\d*)-(\d*)$/', (string)($_SERVER['HTTP_RANGE'] ?? ''), $m) && ($m[1] !== '' || $m[2] !== '')) {
+            if ($m[1] === '') {
+                $inicio = max(0, $total - (int)$m[2]);
+            } else {
+                $inicio = (int)$m[1];
+                $fin = $m[2] !== '' ? min((int)$m[2], $total - 1) : $fin;
+            }
+            if ($inicio > $fin || $inicio >= $total) {
+                http_response_code(416);
+                header('Content-Range: bytes */' . $total);
+                exit;
+            }
+            $status = 206;
+            header('Content-Range: bytes ' . $inicio . '-' . $fin . '/' . $total);
+        }
+
+        http_response_code($status);
+        header('Content-Type: ' . $audio['mime']);
+        header('Accept-Ranges: bytes');
+        header('Content-Length: ' . ($fin - $inicio + 1));
+        header('Cache-Control: private, no-store');
+        header('X-Content-Type-Options: nosniff');
+        echo substr($data, $inicio, $fin - $inicio + 1);
+        exit;
+    }
+
     public function grading(): void
     {
         if (!PermisoService::can('acad/grading', 'ver')) {

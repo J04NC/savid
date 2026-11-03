@@ -383,6 +383,9 @@ class Router
             && !($controllerName === 'AcadController'
                 && in_array($method, $acadExerciseConfigJsonMethods, true)
                 && PermisoService::can('acad_exercise', 'configurar'))
+            // Audio de un intento: sin ítem de menú propio; AcadAttemptService
+            // decide por intento (dueño o calificador de la misma empresa).
+            && !($controllerName === 'AcadController' && $method === 'audioIntento')
             && !PermisoService::can($rutaCompleta, 'ver')) {
             self::logAccesoDenegado("sin permiso 'ver' sobre {$rutaCompleta}");
             http_response_code(403);

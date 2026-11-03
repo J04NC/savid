@@ -321,6 +321,25 @@ class AcadRepository
     }
 
     /**
+     * Datos mínimos para decidir quién puede escuchar la grabación de un
+     * intento (sin filtrar por empresa: el service compara contra la sesión).
+     *
+     * @return array{id: int|string, empresa_id: int|string, usuario_id: int|string, audio_ruta: string}|null
+     */
+    public function findAttemptAudio(int $attemptId): ?array
+    {
+        $stmt = $this->pdo->prepare('
+            SELECT id, empresa_id, usuario_id, audio_ruta
+            FROM acad_attempt
+            WHERE id = ? AND audio_ruta IS NOT NULL AND deleted_at IS NULL
+            LIMIT 1
+        ');
+        $stmt->execute([$attemptId]);
+
+        return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
+
+    /**
      * @param array<string, mixed> $data
      */
     public function insertAttempt(array $data): int

@@ -16,6 +16,43 @@ class AcadAttemptService
     }
 
     /**
+     * Contenido de la grabación de un intento si el usuario de la sesión
+     * puede escucharla: el propio estudiante, o quien puede calificar en la
+     * misma empresa (superadmin: cualquiera). Devuelve null si no existe o
+     * no tiene derecho — sin distinguir los casos, para no revelar qué ids
+     * existen.
+     *
+     * @return array{data: string, mime: string}|null
+     */
+    public function getAttemptAudioForSession(int $attemptId): ?array
+    {
+        $row = $attemptId > 0 ? $this->repo->findAttemptAudio($attemptId) : null;
+        if ($row === null) {
+            return null;
+        }
+
+        $userId = (int)($_SESSION['user_id'] ?? 0);
+        $empresaSesion = (int)($_SESSION['empresa_id'] ?? 0);
+        $esDueno = $userId > 0 && (int)$row['usuario_id'] === $userId;
+        $puedeCalificar = PermisoService::can('acad/grading', 'ver');
+        $permitido = $this->scope->isSuperAdmin()
+            || ((int)$row['empresa_id'] === $empresaSesion && ($esDueno || $puedeCalificar));
+        if (!$permitido) {
+            return null;
+        }
+
+        $data = StorageService::instance()->get((string)$row['audio_ruta']);
+        if ($data === null) {
+            return null;
+        }
+
+        $ext = strtolower(pathinfo((string)$row['audio_ruta'], PATHINFO_EXTENSION));
+        $mimes = ['webm' => 'audio/webm', 'ogg' => 'audio/ogg', 'mp3' => 'audio/mpeg', 'm4a' => 'audio/mp4', 'mp4' => 'audio/mp4', 'wav' => 'audio/wav'];
+
+        return ['data' => $data, 'mime' => $mimes[$ext] ?? 'application/octet-stream'];
+    }
+
+    /**
      * @return list<array<string, mixed>>
      */
     public function listPending(int $empresaId): array
