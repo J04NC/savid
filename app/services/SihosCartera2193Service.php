@@ -130,16 +130,7 @@ class SihosCartera2193Service
         }
         $codigosRgl = $repo->resolveCodigosPorAplicacion(self::DOCU_APLI_RGL);
 
-        $contexto = [
-            'catalogo' => $catalogo,
-            'codigosRgl' => $codigosRgl,
-            'fechaCorte' => $fechaCorte,
-            'excluidas' => $repo->fetchCuentasExcluidasSaldo(),
-            'dificilCobro' => $repo->fetchCuentaDificilCobro(),
-            'prefijosRadicacion' => $this->prefijosRadicacion($catalogo),
-            'codigosGlosa' => $repo->resolveCodigosPorAplicacion(self::DOCU_APLI_GLOSA),
-            'limites' => $this->limitesEdad($fechaCorte),
-        ];
+        $contexto = $this->armarContexto($repo, $fechaCorte, $catalogo, $codigosRgl);
 
         // Las facturas llegan fila a fila y se procesan por lotes: en memoria solo queda el acumulado por deudor.
         $acumulados = [];
@@ -255,6 +246,28 @@ class SihosCartera2193Service
     }
 
     /**
+     * Contexto fijo del reporte (catálogos y límites de edad), común al
+     * cálculo completo y al detalle por deudor.
+     *
+     * @param array<string, array{NombTipo:string,CodiCont:string,CodiRadi:string}> $catalogo
+     * @param string[] $codigosRgl
+     * @return array<string,mixed>
+     */
+    private function armarContexto(SihosCartera2193Repository $repo, string $fechaCorte, array $catalogo, array $codigosRgl): array
+    {
+        return [
+            'catalogo' => $catalogo,
+            'codigosRgl' => $codigosRgl,
+            'fechaCorte' => $fechaCorte,
+            'excluidas' => $repo->fetchCuentasExcluidasSaldo(),
+            'dificilCobro' => $repo->fetchCuentaDificilCobro(),
+            'prefijosRadicacion' => $this->prefijosRadicacion($catalogo),
+            'codigosGlosa' => $repo->resolveCodigosPorAplicacion(self::DOCU_APLI_GLOSA),
+            'limites' => $this->limitesEdad($fechaCorte),
+        ];
+    }
+
+    /**
      * Calcula saldo, radicación, glosa y edad de un lote de facturas y lo
      * suma al acumulado por deudor y tipo de usuario.
      *
@@ -264,10 +277,26 @@ class SihosCartera2193Service
      */
     private function procesarLote(SihosCartera2193Repository $repo, array $facturas, array $c, array &$acumulados): void
     {
-        $numerosPorDocumento = [];
-        foreach ($facturas as $f) {
-            $numerosPorDocumento[$f['CodiDocu']][] = (string)$f['NumeDocu'];
+        foreach ($this->evaluarLote($repo, $facturas, $c) as $e) {
+            $f = $e['factura'];
+            $llave = $f['TiDoTerc'] . '|' . $f['NuDoTerc'] . '|' . $f['TipoUsua'];
+            $acumulados[$llave] ??= ['rad' => array_fill(0, 5, 0.0), 'pend' => array_fill(0, 5, 0.0), 'glos' => array_fill(0, 5, 0.0)];
+            $acumulados[$llave][$e['radicada'] ? 'rad' : 'pend'][$e['edad']] += $e['saldo'];
+            $acumulados[$llave]['glos'][$e['edad']] += $e['glosa'];
         }
+    }
+
+    /**
+     * Saldo, radicación, glosa y edad de cada factura de un lote (regla única
+     * del reporte: la usan el acumulado y el detalle por clic).
+     *
+     * @param list<array<string,mixed>> $facturas
+     * @param array<string,mixed> $c contexto fijo del reporte (ver armarContexto())
+     * @return list<array{factura:array<string,mixed>,saldo:float,radicada:bool,glosa:float,edad:int}>
+     */
+    private function evaluarLote(SihosCartera2193Repository $repo, array $facturas, array $c): array
+    {
+        $numerosPorDocumento = $this->numerosPorDocumento($facturas);
 
         $saldos = $repo->fetchSaldosPorFactura($numerosPorDocumento, $c['fechaCorte'], $c['excluidas']);
         $cuentasDebito = $repo->fetchCuentasDebitoPorFactura($numerosPorDocumento, $c['fechaCorte'], $c['prefijosRadicacion'], $c['dificilCobro']);
@@ -280,6 +309,7 @@ class SihosCartera2193Service
         }
         $anotaciones = $repo->fetchAnotacionesGlosa($numerosPorGlosa, $c['fechaCorte']);
 
+        $evaluadas = [];
         foreach ($facturas as $f) {
             $tipo = $c['catalogo'][(string)$f['TipoUsua']];
             $clave = $f['CodiDocu'] . '|' . $f['NumeDocu'];
@@ -288,13 +318,25 @@ class SihosCartera2193Service
             $saldo = $this->saldoFactura($saldos[$clave . '|' . $f['TiDoTerc'] . '|' . $f['NuDoTerc']] ?? [], $tipo['CodiCont'], $esRgl);
             $radicada = $this->estaRadicada($cuentasDebito[$clave] ?? [], $tipo, $c['dificilCobro']);
             $glosa = ($radicada && $saldo < 0) ? 0.0 : $this->glosaEnCurso($glosas[$clave] ?? [], $anotaciones);
-            $edad = $this->edad((string)$f['FechEdad'], $c['limites']);
 
-            $llave = $f['TiDoTerc'] . '|' . $f['NuDoTerc'] . '|' . $f['TipoUsua'];
-            $acumulados[$llave] ??= ['rad' => array_fill(0, 5, 0.0), 'pend' => array_fill(0, 5, 0.0), 'glos' => array_fill(0, 5, 0.0)];
-            $acumulados[$llave][$radicada ? 'rad' : 'pend'][$edad] += $saldo;
-            $acumulados[$llave]['glos'][$edad] += $glosa;
+            $evaluadas[] = ['factura' => $f, 'saldo' => $saldo, 'radicada' => $radicada, 'glosa' => $glosa, 'edad' => $this->edad((string)$f['FechEdad'], $c['limites'])];
         }
+
+        return $evaluadas;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $facturas
+     * @return array<string, list<string>> CodiDocu => NumeDocu[]
+     */
+    private function numerosPorDocumento(array $facturas): array
+    {
+        $numeros = [];
+        foreach ($facturas as $f) {
+            $numeros[$f['CodiDocu']][] = (string)$f['NumeDocu'];
+        }
+
+        return $numeros;
     }
 
     /**
