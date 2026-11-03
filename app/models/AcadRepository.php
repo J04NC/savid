@@ -479,6 +479,18 @@ class AcadRepository
     /* Progreso agregado                                                   */
     /* ------------------------------------------------------------------ */
 
+    /**
+     * Solo cuenta el ÚLTIMO intento de cada (estudiante, ejercicio, audio de
+     * referencia): repetir un ejercicio sustituye la nota anterior en
+     * promedios y conteos, no se suma a ella. Requiere el alias "a".
+     */
+    private const SOLO_ULTIMO_INTENTO = ' AND NOT EXISTS (
+        SELECT 1 FROM acad_attempt n
+        WHERE n.empresa_id = a.empresa_id AND n.usuario_id = a.usuario_id
+          AND n.exercise_id = a.exercise_id AND n.reference_audio_id <=> a.reference_audio_id
+          AND n.deleted_at IS NULL AND n.id > a.id
+    )';
+
     /** @return list<array<string, mixed>> */
     public function progressByStudent(int $empresaId): array
     {
@@ -493,7 +505,8 @@ class AcadRepository
             FROM acad_enrolment en
             INNER JOIN usuario u ON u.id = en.usuario_id
             INNER JOIN acad_level lv ON lv.id = en.level_id
-            LEFT JOIN acad_attempt a ON a.usuario_id = en.usuario_id AND a.empresa_id = en.empresa_id AND a.deleted_at IS NULL
+            LEFT JOIN acad_attempt a ON a.usuario_id = en.usuario_id AND a.empresa_id = en.empresa_id AND a.deleted_at IS NULL'
+            . self::SOLO_ULTIMO_INTENTO . '
             WHERE en.empresa_id = ? AND en.deleted_at IS NULL
             GROUP BY u.id, u.username, en.level_id, lv.codigo
             ORDER BY u.username
@@ -520,7 +533,8 @@ class AcadRepository
             FROM acad_attempt a
             INNER JOIN acad_exercise e ON e.id = a.exercise_id
             INNER JOIN acad_skill s ON s.id = e.skill_id
-            WHERE a.empresa_id = ? AND a.usuario_id = ? AND a.deleted_at IS NULL
+            WHERE a.empresa_id = ? AND a.usuario_id = ? AND a.deleted_at IS NULL'
+            . self::SOLO_ULTIMO_INTENTO . '
             GROUP BY s.codigo
             ORDER BY s.codigo
         ');
