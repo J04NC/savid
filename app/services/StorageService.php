@@ -18,6 +18,9 @@ class StorageService
 
     public const ZONE_ACAD_MEDIA = 'acad_media';
 
+    /** Grabaciones de voz de estudiantes (Academic): privadas, se sirven vía acad/audioIntento con permiso. */
+    public const ZONE_ACAD_ATTEMPTS = 'acad_attempts';
+
     /** Cache efímero (TTL corto, ver SihosAuditoriaGlosaCache) de reportes SIHOS pesados — nunca público. */
     public const ZONE_SIHOS_REPORTES = 'sihos_reportes';
 
@@ -308,6 +311,7 @@ class StorageService
             self::ZONE_USUARIOS => ['visibility' => 'public', 'root' => 'usuarios'],
             self::ZONE_SGD_IMPORTS => ['visibility' => 'private', 'root' => 'sgd_imports'],
             self::ZONE_ACAD_MEDIA => ['visibility' => 'public', 'root' => 'acad'],
+            self::ZONE_ACAD_ATTEMPTS => ['visibility' => 'private', 'root' => 'acad_attempts'],
             self::ZONE_SIHOS_REPORTES => ['visibility' => 'private', 'root' => 'sihos_reportes'],
         ];
     }
@@ -373,6 +377,13 @@ class StorageService
                     ['acad'],
                     array_map(static fn ($s) => (string)$s, $segments),
                     ['media']
+                ),
+            ],
+            self::ZONE_ACAD_ATTEMPTS => [
+                'visibility' => $definiciones[self::ZONE_ACAD_ATTEMPTS]['visibility'],
+                'path' => static fn (array $segments): array => array_merge(
+                    ['acad_attempts'],
+                    array_map(static fn ($s) => (string)$s, $segments)
                 ),
             ],
             self::ZONE_SIHOS_REPORTES => [

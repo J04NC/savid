@@ -422,7 +422,7 @@ class AcadAttemptService
 
         $name = 'attempt_' . bin2hex(random_bytes(8)) . '.' . $validated['ext'];
         $path = StorageService::instance()->putUploadedFile(
-            StorageService::ZONE_ACAD_MEDIA,
+            StorageService::ZONE_ACAD_ATTEMPTS,
             $name,
             $file,
             $empresaId,
@@ -459,7 +459,7 @@ class AcadAttemptService
             'estado_id' => AcadRepository::ESTADO_PENDIENTE,
         ]);
 
-        return ['success' => true, 'message' => 'Recording submitted for grading.', 'attempt_id' => $attemptId, 'path' => $path];
+        return ['success' => true, 'message' => 'Recording submitted for grading.', 'attempt_id' => $attemptId];
     }
 
     /**
