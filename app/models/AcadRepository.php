@@ -440,8 +440,9 @@ class AcadRepository
     }
 
     /** @return list<array<string, mixed>> */
-    public function findPendingAttempts(int $empresaId): array
+    public function findPendingAttempts(int $empresaId, ?array $sedeIds = null): array
     {
+        [$sedeSql, $sedeParams] = $this->attemptSedeFilter($sedeIds);
         $stmt = $this->pdo->prepare('
             SELECT a.*, e.titulo_en AS exercise_titulo_en, e.skill_id, s.codigo AS skill_codigo,
                    e.max_score, u.username AS estudiante_username,
@@ -451,10 +452,11 @@ class AcadRepository
             INNER JOIN acad_skill s ON s.id = e.skill_id
             INNER JOIN usuario u ON u.id = a.usuario_id
             LEFT JOIN acad_exercise_reference_audio ra ON ra.id = a.reference_audio_id
-            WHERE a.empresa_id = ? AND a.estado_id = ? AND a.deleted_at IS NULL
+            WHERE a.empresa_id = ? AND a.estado_id = ? AND a.deleted_at IS NULL'
+            . $sedeSql . '
             ORDER BY a.enviado_at ASC, a.id ASC
         ');
-        $stmt->execute([$empresaId, self::ESTADO_PENDIENTE]);
+        $stmt->execute([$empresaId, self::ESTADO_PENDIENTE, ...$sedeParams]);
 
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
@@ -480,6 +482,31 @@ class AcadRepository
     /* ------------------------------------------------------------------ */
 
     /**
+     * Filtro por sede para consultas sobre acad_attempt (alias "a"): el
+     * estudiante es visible si ninguna de sus matrículas tiene sede, o si
+     * alguna está en $sedeIds. null = sin filtro.
+     *
+     * @param list<int>|null $sedeIds
+     * @return array{0: string, 1: list<int>} SQL (empieza con AND) y parámetros
+     */
+    private function attemptSedeFilter(?array $sedeIds): array
+    {
+        if ($sedeIds === null) {
+            return ['', []];
+        }
+
+        $base = 'FROM acad_enrolment se WHERE se.empresa_id = a.empresa_id AND se.usuario_id = a.usuario_id AND se.deleted_at IS NULL';
+        $sql = " AND (NOT EXISTS (SELECT 1 {$base} AND se.sede_id IS NOT NULL)";
+        $params = [];
+        if ($sedeIds !== []) {
+            $sql .= " OR EXISTS (SELECT 1 {$base} AND se.sede_id IN (" . implode(',', array_fill(0, count($sedeIds), '?')) . '))';
+            $params = array_map('intval', $sedeIds);
+        }
+
+        return [$sql . ')', $params];
+    }
+
+    /**
      * Solo cuenta el ÚLTIMO intento de cada (estudiante, ejercicio, audio de
      * referencia): repetir un ejercicio sustituye la nota anterior en
      * promedios y conteos, no se suma a ella. Requiere el alias "a".
@@ -492,8 +519,14 @@ class AcadRepository
     )';
 
     /** @return list<array<string, mixed>> */
-    public function progressByStudent(int $empresaId): array
+    public function progressByStudent(int $empresaId, ?array $sedeIds = null): array
     {
+        $sedeSql = '';
+        $sedeParams = [];
+        if ($sedeIds !== null) {
+            $sedeSql = ' AND (en.sede_id IS NULL' . ($sedeIds !== [] ? ' OR en.sede_id IN (' . implode(',', array_fill(0, count($sedeIds), '?')) . ')' : '') . ')';
+            $sedeParams = array_map('intval', $sedeIds);
+        }
         $stmt = $this->pdo->prepare('
             SELECT
                 u.id AS usuario_id, u.username,
@@ -507,7 +540,7 @@ class AcadRepository
             INNER JOIN acad_level lv ON lv.id = en.level_id
             LEFT JOIN acad_attempt a ON a.usuario_id = en.usuario_id AND a.empresa_id = en.empresa_id AND a.deleted_at IS NULL'
             . self::SOLO_ULTIMO_INTENTO . '
-            WHERE en.empresa_id = ? AND en.deleted_at IS NULL
+            WHERE en.empresa_id = ? AND en.deleted_at IS NULL' . $sedeSql . '
             GROUP BY u.id, u.username, en.level_id, lv.codigo
             ORDER BY u.username
         ');
@@ -515,7 +548,7 @@ class AcadRepository
             self::ESTADO_CALIFICADO, self::ESTADO_AUTO_CALIFICADO,
             self::ESTADO_PENDIENTE,
             self::ESTADO_CALIFICADO, self::ESTADO_AUTO_CALIFICADO,
-            $empresaId,
+            $empresaId, ...$sedeParams,
         ]);
 
         return $stmt->fetchAll(PDO::FETCH_ASSOC);

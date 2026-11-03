@@ -57,7 +57,7 @@ class AcadAttemptService
      */
     public function listPending(int $empresaId): array
     {
-        return $empresaId > 0 ? $this->repo->findPendingAttempts($empresaId) : [];
+        return $empresaId > 0 ? $this->repo->findPendingAttempts($empresaId, $this->scope->visibleSedeIds()) : [];
     }
 
     /**

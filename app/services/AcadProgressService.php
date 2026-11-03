@@ -26,7 +26,7 @@ class AcadProgressService
             return ['success' => false, 'message' => $e->getMessage()];
         }
 
-        $rows = $this->repo->progressByStudent($empresaId);
+        $rows = $this->repo->progressByStudent($empresaId, $this->scope->visibleSedeIds($query));
         $students = array_map(static function (array $row): array {
             $intentos = (int)$row['intentos'];
             $calificados = (int)$row['calificados'];

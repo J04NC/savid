@@ -44,6 +44,21 @@ class AcadScopeService
         ]);
     }
 
+    /**
+     * Sedes cuyos estudiantes puede ver el usuario de la sesión, según sus
+     * asignaciones en usuario_sede. null = sin restricción (superadmin).
+     * Una matrícula sin sede la ve todo el personal de la empresa, igual que
+     * ReportScopeService::canAccessRecord().
+     *
+     * @return list<int>|null
+     */
+    public function visibleSedeIds(array $query = []): ?array
+    {
+        $scope = $this->buildScope($query);
+
+        return $scope['esSuperAdmin'] ? null : array_values(array_map('intval', $scope['allowedSedeIds']));
+    }
+
     public function requireEmpresaId(array $query = []): int
     {
         $scope = $this->buildScope($query);
