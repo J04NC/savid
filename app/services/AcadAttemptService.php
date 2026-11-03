@@ -407,6 +407,10 @@ class AcadAttemptService
             if (!$isTongueTwister && $this->repo->findAttemptForReferenceAudio($empresaId, $exerciseId, $referenceAudioId, $usuarioId) !== null) {
                 return ['success' => false, 'message' => 'This recording is already confirmed.'];
             }
+        } elseif (!$isTongueTwister && $this->repo->findAttemptWithoutReferenceAudio($empresaId, $exerciseId, $usuarioId) !== null) {
+            // Sin audio de referencia (ejercicio de un solo audio): una sola
+            // grabación confirmada por estudiante, igual que con slots.
+            return ['success' => false, 'message' => 'This recording is already confirmed.'];
         }
 
         $file = $files['archivo'] ?? null;

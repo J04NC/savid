@@ -395,6 +395,19 @@ class AcadRepository
         return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
     }
 
+    /** Intento de audio activo sin audio de referencia asociado (ejercicio de un solo audio). */
+    public function findAttemptWithoutReferenceAudio(int $empresaId, int $exerciseId, int $usuarioId): ?array
+    {
+        $stmt = $this->pdo->prepare('
+            SELECT * FROM acad_attempt
+            WHERE empresa_id = ? AND exercise_id = ? AND usuario_id = ? AND reference_audio_id IS NULL AND deleted_at IS NULL
+            ORDER BY id DESC LIMIT 1
+        ');
+        $stmt->execute([$empresaId, $exerciseId, $usuarioId]);
+
+        return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
+
     /**
      * Historial COMPLETO (no solo el último) de tomas confirmadas de un
      * estudiante para un audio de referencia — usado por TONGUE_TWISTER, que
