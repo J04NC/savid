@@ -86,6 +86,98 @@ class SihosCartera2193Service
         }
     }
 
+    /**
+     * Facturas que forman una celda del reporte (detalle por clic): las de un
+     * deudor y tipo de usuario, con la misma regla de evaluarLote() que el
+     * acumulado, así que la suma coincide con el valor de la celda.
+     *
+     * @param string $columna e0..e4 (radicada por edad), rad (total radicada), pend o glosa
+     * @return array<string,mixed> ok, filas, total, nombre, tipo | error
+     */
+    public function detalleDeudor(int $empresaId, string $fechaCorte, string $tiDoTerc, string $nuDoTerc, string $tipoUsua, string $columna): array
+    {
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $fechaCorte) || !preg_match('/^(e[0-4]|rad|pend|glosa)$/', $columna)) {
+            return ['ok' => false, 'error' => 'Parámetros inválidos para el detalle.'];
+        }
+
+        $conexion = $this->abrirRepositorio($empresaId);
+        if (isset($conexion['error'])) {
+            return ['ok' => false, 'error' => $conexion['error']];
+        }
+        $repo = $conexion['repo'];
+
+        try {
+            $catalogo = $repo->fetchTiposUsuario();
+            if (!isset($catalogo[$tipoUsua])) {
+                return ['ok' => false, 'error' => 'Tipo de usuario inválido.'];
+            }
+            $contexto = $this->armarContexto($repo, $fechaCorte, $catalogo, $repo->resolveCodigosPorAplicacion(self::DOCU_APLI_RGL));
+
+            $facturas = [];
+            foreach ($repo->fetchFacturas($repo->resolveCodigosPorAplicacion(self::DOCU_APLI_FACTURA), $fechaCorte, [$tipoUsua], $nuDoTerc) as $f) {
+                if ($f['TiDoTerc'] === $tiDoTerc) {
+                    $facturas[] = $f;
+                }
+            }
+
+            $filas = [];
+            foreach (array_chunk($facturas, self::FACTURAS_POR_LOTE) as $lote) {
+                $fechas = $repo->fetchFechasFacturas($this->numerosPorDocumento($lote));
+                foreach ($this->evaluarLote($repo, $lote, $contexto) as $e) {
+                    $valor = $this->valorDeColumna($e, $columna);
+                    if ($valor === 0.0) {
+                        continue;
+                    }
+                    $f = $e['factura'];
+                    $fe = $fechas[$f['CodiDocu'] . '|' . $f['NumeDocu']] ?? ['FechDocu' => '', 'FechRadi' => ''];
+                    $filas[] = [
+                        'CodiDocu' => (string)$f['CodiDocu'],
+                        'NumeDocu' => (string)$f['NumeDocu'],
+                        'FechDocu' => $fe['FechDocu'],
+                        'FechRadi' => $fe['FechRadi'],
+                        'FechEdad' => (string)$f['FechEdad'],
+                        'edad' => $e['edad'],
+                        'radicada' => $e['radicada'],
+                        'saldo' => $e['saldo'],
+                        'glosa' => $e['glosa'],
+                        'valor' => $valor,
+                    ];
+                }
+            }
+
+            $nombres = $repo->fetchNombresTerceros([[$tiDoTerc, $nuDoTerc]]);
+        } catch (PDOException $e) {
+            error_log('SihosCartera2193Service: ' . $e->getMessage());
+
+            return ['ok' => false, 'error' => 'No se pudo consultar SIHOS. Verifique la conexión e intente de nuevo.'];
+        }
+
+        usort($filas, static fn (array $a, array $b): int => abs($b['valor']) <=> abs($a['valor']));
+
+        return [
+            'ok' => true,
+            'filas' => $filas,
+            'total' => round(array_sum(array_column($filas, 'valor')), 2),
+            'nombre' => $nombres[$tiDoTerc . '|' . $nuDoTerc] ?? '',
+            'tipo' => $catalogo[$tipoUsua]['NombTipo'],
+        ];
+    }
+
+    /**
+     * Aporte de una factura evaluada a la columna pedida (0.0 = no aplica).
+     *
+     * @param array{saldo:float,radicada:bool,glosa:float,edad:int} $e
+     */
+    private function valorDeColumna(array $e, string $columna): float
+    {
+        return match (true) {
+            $columna === 'glosa' => $e['glosa'],
+            $columna === 'pend' => $e['radicada'] ? 0.0 : $e['saldo'],
+            $columna === 'rad' => $e['radicada'] ? $e['saldo'] : 0.0,
+            default => ($e['radicada'] && $e['edad'] === (int)substr($columna, 1)) ? $e['saldo'] : 0.0,
+        };
+    }
+
     /** @return array{repo?:SihosCartera2193Repository,error?:string} */
     private function abrirRepositorio(int $empresaId): array
     {
