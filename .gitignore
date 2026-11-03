@@ -3,6 +3,8 @@
 /public/uploads/
 /docs/
 /storage/sgd_imports/
+# Grabaciones de voz de estudiantes (Academic): datos personales, nunca se versionan
+/storage/acad_attempts/
 /storage/sihos_reportes/
 /storage/backups/*
 !/storage/backups/.gitkeep
