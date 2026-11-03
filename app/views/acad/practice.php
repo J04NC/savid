@@ -101,7 +101,7 @@ $isTrueFalseFix = $exercise !== null && $exercise['exercise_type_codigo'] === 'T
                     </p>
                     <?php if ($slotAttempt): ?>
                         <div class="field-note">
-                            Your recording: <audio controls src="<?= acadH($slotAttempt['audio_ruta']) ?>"></audio><br>
+                            Your recording: <audio controls src="?url=acad/audioIntento/<?= (int)$slotAttempt['id'] ?>"></audio><br>
                             Status: <strong><?= acadH($estadoLabels[(int)$slotAttempt['estado_id']] ?? 'Pending') ?></strong>
                             <?php if ($slotAttempt['score'] !== null): ?>
                                 — Score: <?= htmlspecialchars((string)round((float)$slotAttempt['score'], 1), ENT_QUOTES, 'UTF-8') ?> / <?= htmlspecialchars((string)round((float)$exercise['max_score'], 1), ENT_QUOTES, 'UTF-8') ?>
@@ -213,7 +213,7 @@ $isTrueFalseFix = $exercise !== null && $exercise['exercise_type_codigo'] === 'T
                                 }
                             ?>
                                 <div>
-                                    #<?= $i + 1 ?> — <audio controls src="<?= acadH($att['audio_ruta']) ?>" style="height:28px;vertical-align:middle;"></audio>
+                                    #<?= $i + 1 ?> — <audio controls src="?url=acad/audioIntento/<?= (int)$att['id'] ?>" style="height:28px;vertical-align:middle;"></audio>
                                     <?= $ms !== null ? htmlspecialchars(number_format($ms / 1000, 1), ENT_QUOTES, 'UTF-8') . 's' . $trend : '' ?>
                                 </div>
                             <?php endforeach; ?>
@@ -258,7 +258,7 @@ $isTrueFalseFix = $exercise !== null && $exercise['exercise_type_codigo'] === 'T
                             <?php if ($t['isMine'] && $t['audio']): ?>
                                 <?php if ($t['attempt']): ?>
                                     <div class="field-note">
-                                        Your recording: <audio controls class="acad-dlg-my-recording" src="<?= acadH($t['attempt']['audio_ruta']) ?>"></audio>
+                                        Your recording: <audio controls class="acad-dlg-my-recording" src="?url=acad/audioIntento/<?= (int)$t['attempt']['id'] ?>"></audio>
                                     </div>
                                 <?php else: ?>
                                     <div class="acad-audio-slot" data-reference-audio-id="<?= (int)$t['audio']['id'] ?>">

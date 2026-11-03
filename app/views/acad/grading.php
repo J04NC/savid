@@ -41,7 +41,7 @@ if (!function_exists('acadH')) {
                                 <td><span class="sgd-doc-badge"><?= acadH($a['skill_codigo']) ?></span></td>
                                 <td>
                                     <?php if (!empty($a['audio_ruta'])): ?>
-                                        <audio controls src="<?= acadH($a['audio_ruta']) ?>"></audio>
+                                        <audio controls src="?url=acad/audioIntento/<?= (int)$a['id'] ?>"></audio>
                                     <?php else: ?>
                                         <span title="<?= acadH($a['respuesta_texto']) ?>">
                                             <?= acadH(mb_substr((string)($a['respuesta_texto'] ?? ''), 0, 140)) ?>
