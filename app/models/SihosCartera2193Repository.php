@@ -106,6 +106,38 @@ class SihosCartera2193Repository
     }
 
     /**
+     * Fecha de la factura y de radicación (detalle por clic). Se pide aparte
+     * y no en fetchFacturas() para no alterar su DISTINCT, que define los
+     * totales del reporte.
+     *
+     * @param array<string, list<string>> $numerosPorDocumento CodiDocu => NumeDocu[]
+     * @return array<string, array{FechDocu:string,FechRadi:string}> "doc|num" => fechas
+     */
+    public function fetchFechasFacturas(array $numerosPorDocumento): array
+    {
+        $fechas = [];
+        foreach ($this->lotes($numerosPorDocumento) as [$codiDocu, $numeros]) {
+            $ph = implode(',', array_fill(0, count($numeros), '?'));
+            $stmt = $this->pdo->prepare(
+                "SELECT NumeDocu, MIN(FechDocu) AS FechDocu, MAX(FechRadi) AS FechRadi
+                 FROM EncaCont
+                 WHERE CodiInst = ? AND CodiDocu = ? AND NumeDocu IN ({$ph}) AND Causado = 1 AND Anulado <> 1
+                 GROUP BY NumeDocu"
+            );
+            $stmt->execute([$this->codiInst, $codiDocu, ...$numeros]);
+
+            foreach ($stmt->fetchAll() as $fila) {
+                $fechas[$codiDocu . '|' . $fila['NumeDocu']] = [
+                    'FechDocu' => (string)$fila['FechDocu'],
+                    'FechRadi' => (string)($fila['FechRadi'] ?? ''),
+                ];
+            }
+        }
+
+        return $fechas;
+    }
+
+    /**
      * Cuentas que ConsultaSaldosConta() excluye del saldo: las de impuestos
      * (TablImpu, de la institución) y las de ReteCREE.
      *
