@@ -83,6 +83,7 @@ $urlDescarga = static fn (string $archivo): string => '?url=sihos/liquidacionDes
             <p>
                 <a class="auditoria-btn-primary" href="<?= htmlspecialchars($urlDescarga('detalle')) ?>">⬇ Descargar detalle (CSV)</a>
                 <a class="auditoria-btn-primary" href="<?= htmlspecialchars($urlDescarga('resumen')) ?>">⬇ Descargar resumen mensual (CSV)</a>
+                <a class="auditoria-btn-primary" href="<?= htmlspecialchars($urlDescarga('especialistas')) ?>">⬇ Descargar especialistas (CSV)</a>
             </p>
             <?php if ($reporte['sinEspecialidad'] > 0 || $reporte['sinProfesional'] > 0 || $reporte['tiposOtros'] !== []): ?>
                 <p class="modal-form-alert">
@@ -143,6 +144,42 @@ $urlDescarga = static fn (string $archivo): string => '?url=sihos/liquidacionDes
                                 <td style="text-align:right;" data-order="<?= (float)($porMes[$mes] ?? 0) ?>"><?= $fmt((float)($porMes[$mes] ?? 0)) ?></td>
                             <?php endforeach; ?>
                             <td style="text-align:right;" data-order="<?= array_sum($porMes) ?>"><strong><?= $fmt((float)array_sum($porMes)) ?></strong></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+
+            <h3 class="auditoria-title" style="font-size:1.1em; margin-top:28px;">Especialistas (<?= count($reporte['especialistas']) ?>)</h3>
+            <p class="field-note">Todos los profesionales con líneas en el rango. "Producción médica" es su trabajo en consulta, interconsulta, procedimiento y cirugía; "otras actividades" es el resto (laboratorio, imágenes, estancia…). El CSV trae además cantidad y valor por cada actividad.</p>
+            <table class="savid-datatable seguridad-table savid-dt-fit" id="sihosLiquidacionEspecialistas"
+                   data-dt-order="[[9,&quot;desc&quot;]]"
+                   data-dt-scroll-wrap-class="sihos-auditoria-glosa-scroll">
+                <thead>
+                    <tr>
+                        <th>Tipo doc.</th><th>Cédula</th><th>Profesional</th><th>Registro prof.</th><th>Especialidad</th><th>Activo SIHOS</th>
+                        <th>Líneas</th><th>Valor producción médica</th><th>Valor otras actividades</th><th>Valor total</th><th>Valor institucional</th>
+                        <th>Meses activos</th><th>Días activos</th><th>Primera fecha</th><th>Última fecha</th><th>Prom. mensual</th><th>Valor por día</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($reporte['especialistas'] as $e): ?>
+                        <tr>
+                            <td><?= htmlspecialchars($e['tipoDoc']) ?></td>
+                            <td><?= htmlspecialchars($e['cedula']) ?></td>
+                            <td class="savid-dt-fit-text" title="<?= htmlspecialchars($e['nombre']) ?>"><?= htmlspecialchars($e['nombre']) ?></td>
+                            <td><?= htmlspecialchars($e['registro']) ?></td>
+                            <td class="savid-dt-fit-text"><?= htmlspecialchars($e['especialidad']) ?></td>
+                            <td><?= htmlspecialchars($e['activo']) ?></td>
+                            <td style="text-align:right;"><?= $num((float)$e['lineas']) ?></td>
+                            <?php foreach (['prodMedica', 'otras', 'total', 'institucional'] as $campo): ?>
+                                <td style="text-align:right;" data-order="<?= (float)$e[$campo] ?>"><?= $fmt((float)$e[$campo]) ?></td>
+                            <?php endforeach; ?>
+                            <td style="text-align:right;"><?= (int)$e['mesesActivos'] ?></td>
+                            <td style="text-align:right;"><?= (int)$e['diasActivos'] ?></td>
+                            <td><?= htmlspecialchars($e['primera']) ?></td>
+                            <td><?= htmlspecialchars($e['ultima']) ?></td>
+                            <td style="text-align:right;" data-order="<?= (float)$e['promMensual'] ?>"><?= $fmt((float)$e['promMensual']) ?></td>
+                            <td style="text-align:right;" data-order="<?= (float)$e['valorPorDia'] ?>"><?= $fmt((float)$e['valorPorDia']) ?></td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
