@@ -51,10 +51,11 @@ class SihosLiquidacionService
     /**
      * @param resource $detalle handle abierto para escribir el CSV de detalle
      * @param resource $resumen handle abierto para escribir el CSV de resumen
+     * @param resource $especialistas handle abierto para escribir el CSV de especialistas
      * @param callable(int):void|null $progreso recibe las líneas procesadas
      * @return array<string,mixed>
      */
-    public function generar(int $empresaId, string $desde, string $hasta, $detalle, $resumen, ?callable $progreso = null): array
+    public function generar(int $empresaId, string $desde, string $hasta, $detalle, $resumen, $especialistas, ?callable $progreso = null): array
     {
         $error = self::validarRango($desde, $hasta);
         if ($error !== null) {
@@ -74,8 +75,9 @@ class SihosLiquidacionService
         $repo = new SihosLiquidacionRepository($pdo, $codiInst);
         $clasif = new SihosLiquidacionClasificador($repo->fetchTiposServicio());
 
-        $this->escribirFila($detalle, self::COLUMNAS_DETALLE);
+        self::escribirFila($detalle, self::COLUMNAS_DETALLE);
         $agregado = [];
+        $porEspecialista = new SihosLiquidacionEspecialistas();
         $res = ['ok' => true, 'desde' => $desde, 'lineas' => 0, 'hasta' => $hasta, 'totales' => $this->vacio(),
             'sinEspecialidad' => 0, 'sinProfesional' => 0, 'tiposOtros' => [], 'porActividad' => [], 'porMesEspecialidad' => []];
 
@@ -89,17 +91,18 @@ class SihosLiquidacionService
                 $esp = trim((string)$f['NombEspe']) !== '' ? trim((string)$f['NombEspe']) : 'SIN ESPECIALIDAD';
                 $valores = [1, (float)$f['CantServ'], (float)$f['ValoEAPB'], (float)$f['ValoUsua'], (float)$f['ValoTota']];
 
-                $this->escribirFila($detalle, [
+                self::escribirFila($detalle, [
                     $f['FechFact'], $f['CodiDocu'], $f['NumeFact'], $f['CodiAdmi'], $f['NombAdmi'],
                     $f['NombTipoCont'], $f['NumeCont'], $f['DescCont'], $f['NombServOrig'], $f['NombServEgre'],
                     $clasif->nombreTipoServicio($tipoLinea), $clasif->nombreTipoServicio($tipoCups), $componente, $actividad, $prod,
                     $f['CodiCups'], $f['NombProc'], $esp, $f['CedulaProf'], $f['NombreProf'],
-                    $this->num($valores[1]), $this->num($valores[2]), $this->num($valores[3]), $this->num($valores[4]),
+                    self::num($valores[1]), self::num($valores[2]), self::num($valores[3]), self::num($valores[4]),
                 ]);
 
                 $mes = substr((string)$f['FechFact'], 0, 7);
                 $clave = implode("\x1f", [$mes, $esp, (string)$f['CedulaProf'], (string)$f['NombreProf'], $actividad, $componente, $prod]);
                 $this->sumar($agregado[$clave], $valores);
+                $porEspecialista->agregar($f, $esp, $actividad, $componente, $prod, $valores);
                 $this->sumar($res['totales'], $valores);
                 $this->sumar($res['porActividad'][$actividad][$prod], $valores);
                 if ($prod === 'Sí') {
@@ -119,10 +122,12 @@ class SihosLiquidacionService
         $res['lineas'] = (int)$res['totales'][0];
 
         ksort($agregado);
-        $this->escribirFila($resumen, self::COLUMNAS_RESUMEN);
+        self::escribirFila($resumen, self::COLUMNAS_RESUMEN);
         foreach ($agregado as $clave => $v) {
-            $this->escribirFila($resumen, [...explode("\x1f", $clave), $v[0], $this->num($v[1]), $this->num($v[2]), $this->num($v[3]), $this->num($v[4])]);
+            self::escribirFila($resumen, [...explode("\x1f", $clave), $v[0], self::num($v[1]), self::num($v[2]), self::num($v[3]), self::num($v[4])]);
         }
+        $res['especialistas'] = $porEspecialista->filas();
+        SihosLiquidacionEspecialistas::escribirCsv($especialistas, $res['especialistas']);
         ksort($res['porMesEspecialidad']);
         ksort($res['porActividad']);
         arsort($res['tiposOtros']);
@@ -162,13 +167,13 @@ class SihosLiquidacionService
     }
 
     /** Entero si no tiene decimales; si no, coma decimal (Excel es-CO con separador ";"). */
-    private function num(float $v): string
+    public static function num(float $v): string
     {
         return floor($v) === $v ? (string)(int)$v : rtrim(rtrim(number_format($v, 2, ',', ''), '0'), ',');
     }
 
     /** @param resource $fh @param array<int,mixed> $fila */
-    private function escribirFila($fh, array $fila): void
+    public static function escribirFila($fh, array $fila): void
     {
         // Un texto que empiece por = + @ lo evaluaría Excel como fórmula.
         $fila = array_map(static fn ($c) => is_string($c) && $c !== '' && in_array($c[0], ['=', '+', '@'], true) ? "'" . $c : $c, $fila);

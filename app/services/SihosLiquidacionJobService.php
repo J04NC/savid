@@ -14,7 +14,7 @@ class SihosLiquidacionJobService
     private const TTL_SECONDS = 21600;
     /** Sin latido durante este tiempo el trabajo se da por interrumpido. */
     private const SIN_LATIDO_SEGUNDOS = 300;
-    private const ARCHIVOS = ['detalle', 'resumen'];
+    private const ARCHIVOS = ['detalle', 'resumen', 'especialistas'];
 
     private function storage(): StorageService
     {
@@ -72,7 +72,10 @@ class SihosLiquidacionJobService
         $estado['estado'] = 'ejecutando';
         $this->guardarEstado($empresaId, $token, $estado);
 
-        $tmp = ['detalle' => tempnam(sys_get_temp_dir(), 'liqd'), 'resumen' => tempnam(sys_get_temp_dir(), 'liqr')];
+        $tmp = [];
+        foreach (self::ARCHIVOS as $parte) {
+            $tmp[$parte] = tempnam(sys_get_temp_dir(), 'liq');
+        }
         try {
             $fh = [];
             foreach ($tmp as $parte => $ruta) {
@@ -83,7 +86,7 @@ class SihosLiquidacionJobService
 
             $ultimoLatido = 0;
             $reporte = (new SihosLiquidacionService())->generar(
-                $empresaId, (string)$estado['desde'], (string)$estado['hasta'], $fh['detalle'], $fh['resumen'],
+                $empresaId, (string)$estado['desde'], (string)$estado['hasta'], $fh['detalle'], $fh['resumen'], $fh['especialistas'],
                 function (int $lineas) use (&$estado, $empresaId, $token, &$ultimoLatido): void {
                     if (time() - $ultimoLatido >= 2) {
                         $ultimoLatido = time();
