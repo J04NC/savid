@@ -22,7 +22,13 @@ class SihosLiquidacionClasificador
 
     public const COMPONENTE_PRINCIPAL = 'Principal';
     public const COMPONENTE_SALA = 'Derechos de sala';
-    private const COMPONENTES_INSTITUCIONALES = [self::COMPONENTE_SALA, 'Materiales de cirugía'];
+    public const COMPONENTES_INSTITUCIONALES = [self::COMPONENTE_SALA, 'Materiales de cirugía'];
+
+    /** Todas las actividades que puede devolver actividad(), en el orden de las columnas del CSV de especialistas. */
+    public const ACTIVIDADES = [
+        'Consulta', 'Interconsulta', 'Procedimiento', 'Cirugía', 'Laboratorio', 'Imágenes',
+        'Apoyo diagnóstico', 'Estancia', 'Transporte', 'Derechos de sala', 'Otros',
+    ];
 
     /** Actividades cuya producción se atribuye al profesional (CodiMedi). */
     private const ACTIVIDADES_MEDICAS = ['Consulta', 'Interconsulta', 'Procedimiento', 'Cirugía'];

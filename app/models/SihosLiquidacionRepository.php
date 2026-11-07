@@ -54,7 +54,7 @@ class SihosLiquidacionRepository
                        e.CodiAdmi, a.NombAdmi, e.TipoCont, tc.NombTipo AS NombTipoCont, e.NumeCont, c.DescCont,
                        e.CodiServ AS ServOrig, so.NombServ AS NombServOrig, e.ServEgre, se.NombServ AS NombServEgre,
                        d.TipoDeta, d.TipoServ, cp.TipoServ AS TipoServCups, cp.CodiCups, cp.NombProc,
-                       d.CodiMedi, u.CC AS CedulaProf, u.Nombre AS NombreProf, ce.NombEspe,
+                       d.CodiMedi, u.TipoDocu AS TipoDocuProf, u.CC AS CedulaProf, u.Nombre AS NombreProf, u.RegiProf, u.Activo AS ActivoProf, ce.NombEspe,
                        d.CantServ, d.ValoEAPB, d.ValoUsua, d.ValoTota
                 FROM EncaFact e
                 INNER JOIN DetaFact d ON (e.CodiInst = d.CodiInst AND e.CodiAno = d.CodiAno AND e.CodiDocu = d.CodiDocu AND e.NumeFact = d.NumeFact)
