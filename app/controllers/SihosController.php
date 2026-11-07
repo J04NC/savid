@@ -18,6 +18,7 @@ class SihosController
     private SihosDeterioroService $deterioroService;
     private SihosCartera2193Service $cartera2193Service;
     private SihosCartera2193JobService $cartera2193JobService;
+    private SihosLiquidacionJobService $liquidacionJobService;
 
     public function __construct()
     {
@@ -37,6 +38,7 @@ class SihosController
         $this->deterioroService = new SihosDeterioroService();
         $this->cartera2193Service = new SihosCartera2193Service();
         $this->cartera2193JobService = new SihosCartera2193JobService();
+        $this->liquidacionJobService = new SihosLiquidacionJobService();
     }
 
     /**
@@ -1583,5 +1585,93 @@ class SihosController
 
         $celda = (float)($_GET['valor'] ?? 0);
         require BASE_PATH . '/app/views/sihos/cartera2193_detalle.php';
+    }
+
+    /**
+     * GET ?url=sihos/liquidacion&empresa_id=N&desde=YYYY-MM-DD&hasta=YYYY-MM-DD
+     * Liquidación: producción por actividad y profesional (líneas de liquidaciones
+     * confirmadas) del rango elegido; sin valores por defecto. Se calcula en
+     * segundo plano al presionar "Consultar" (name="buscar") y deja dos CSV.
+     */
+    public function liquidacion(): void
+    {
+        $scope = $this->connectionService->buildScope($_GET);
+        $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : null;
+        $configurado = $empresaId !== null && $this->connectionService->buildConfigView($empresaId)['configurado'];
+
+        $desde = trim((string)($_GET['desde'] ?? ''));
+        $hasta = trim((string)($_GET['hasta'] ?? ''));
+        $reporte = null;
+        $trabajo = null;
+        $tokenJob = trim((string)($_GET['job'] ?? ''));
+        if ($empresaId !== null && $configurado) {
+            $userId = (int)($_SESSION['user_id'] ?? 0);
+
+            if (isset($_GET['buscar'])) {
+                $inicio = $this->liquidacionJobService->iniciar($empresaId, $userId, $desde, $hasta);
+                if (!$inicio['ok']) {
+                    $reporte = ['ok' => false, 'error' => $inicio['error']];
+                } else {
+                    $params = $_GET;
+                    unset($params['buscar']);
+                    $params['job'] = $inicio['token'];
+                    header('Location: ?' . http_build_query($params));
+
+                    return;
+                }
+            } elseif ($tokenJob !== '') {
+                $estado = $this->liquidacionJobService->estado($empresaId, $userId, $tokenJob);
+                if ($estado === null) {
+                    $reporte = ['ok' => false, 'error' => 'El resultado de este reporte expiró o no existe. Vuelva a consultar.'];
+                } elseif ($estado['estado'] === 'error') {
+                    $reporte = ['ok' => false, 'error' => $estado['error'] ?? 'No se pudo generar el reporte.'];
+                } elseif ($estado['estado'] === 'listo') {
+                    $reporte = $this->liquidacionJobService->resultado($empresaId, $userId, $tokenJob)
+                        ?? ['ok' => false, 'error' => 'El resultado de este reporte expiró o no existe. Vuelva a consultar.'];
+                } else {
+                    $trabajo = ['token' => $tokenJob] + $estado;
+                }
+            }
+        }
+
+        $moduleService = new ModuleService();
+        $breadcrumb = $moduleService->buildBreadcrumbForRuta('sihos/liquidacion');
+
+        $view = BASE_PATH . '/app/views/sihos/liquidacion.php';
+        require BASE_PATH . '/app/views/layouts/main.php';
+    }
+
+    /** Avance del cálculo en segundo plano de liquidacion (la pantalla lo consulta cada pocos segundos). */
+    public function liquidacionEstado(): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+
+        $scope = $this->connectionService->buildScope($_GET);
+        $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : null;
+        $estado = $empresaId === null ? null : $this->liquidacionJobService->estado($empresaId, (int)($_SESSION['user_id'] ?? 0), trim((string)($_GET['job'] ?? '')));
+
+        echo json_encode($estado ?? ['estado' => 'inexistente'], JSON_UNESCAPED_UNICODE);
+    }
+
+    /** Descarga del CSV ('detalle' o 'resumen') de un trabajo terminado de liquidacion. */
+    public function liquidacionDescargar(): void
+    {
+        $scope = $this->connectionService->buildScope($_GET);
+        $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : null;
+        $userId = (int)($_SESSION['user_id'] ?? 0);
+        $token = trim((string)($_GET['job'] ?? ''));
+        $parte = (string)($_GET['archivo'] ?? '');
+
+        $estado = $empresaId === null ? null : $this->liquidacionJobService->estado($empresaId, $userId, $token);
+        $ruta = $estado === null ? null : $this->liquidacionJobService->rutaArchivo($empresaId, $userId, $token, $parte);
+        if ($ruta === null || !is_file($ruta)) {
+            http_response_code(410);
+            exit('El resultado de este reporte expiró o no existe. Vuelva a consultar.');
+        }
+
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="liquidacion_' . $estado['desde'] . '_' . $estado['hasta'] . '_' . $parte . '.csv"');
+        header('Content-Length: ' . filesize($ruta));
+        readfile($ruta);
     }
 }

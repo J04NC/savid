@@ -257,6 +257,9 @@ class Router
         /* Misma razón: sihos/cartera2193Estado (avance JSON del cálculo en segundo plano) y sihos/cartera2193Detalle (modal de facturas de una celda) — su pantalla es sihos/cartera2193. */
         $sihosCartera2193AccionMethods = ['cartera2193Estado', 'cartera2193Detalle'];
 
+        /* Misma razón: sihos/liquidacionEstado (avance JSON del cálculo en segundo plano) y sihos/liquidacionDescargar (CSV) — su pantalla es sihos/liquidacion. */
+        $sihosLiquidacionAccionMethods = ['liquidacionEstado', 'liquidacionDescargar'];
+
         /*
          * Misma razón: sihos/auditoriaGlosaBuscarAdministradora (autocompletado
          * AJAX del filtro de administradora) no tiene ítem de menú propio — su
@@ -365,6 +368,9 @@ class Router
             && !($controllerName === 'SihosController'
                 && in_array($method, $sihosCartera2193AccionMethods, true)
                 && PermisoService::can('sihos/cartera2193', 'ver'))
+            && !($controllerName === 'SihosController'
+                && in_array($method, $sihosLiquidacionAccionMethods, true)
+                && PermisoService::can('sihos/liquidacion', 'ver'))
             && !($controllerName === 'SihosController'
                 && in_array($method, $sihosAuditoriaGlosaAccionMethods, true)
                 && PermisoService::can('sihos/auditoriaGlosa', 'ver'))
