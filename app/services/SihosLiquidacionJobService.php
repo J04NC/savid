@@ -61,6 +61,66 @@ class SihosLiquidacionJobService
         return ['ok' => true, 'token' => $token];
     }
 
+    /** Lo llama el script CLI: genera los CSV y deja agregados y archivos en el storage. */
+    public function ejecutar(int $empresaId, string $token): void
+    {
+        $token = $this->tokenSeguro($token);
+        $estado = $token !== '' ? $this->leerEstado($empresaId, $token) : null;
+        if ($estado === null || $estado['estado'] !== 'pendiente') {
+            return;
+        }
+        $estado['estado'] = 'ejecutando';
+        $this->guardarEstado($empresaId, $token, $estado);
+
+        $tmp = ['detalle' => tempnam(sys_get_temp_dir(), 'liqd'), 'resumen' => tempnam(sys_get_temp_dir(), 'liqr')];
+        try {
+            $fh = [];
+            foreach ($tmp as $parte => $ruta) {
+                $fh[$parte] = fopen($ruta, 'w');
+                // BOM + "sep=;": ver la explicación en SihosController::auditoriaGlosaExportar().
+                fwrite($fh[$parte], "\xEF\xBB\xBF" . "sep=;\r\n");
+            }
+
+            $ultimoLatido = 0;
+            $reporte = (new SihosLiquidacionService())->generar(
+                $empresaId, (string)$estado['desde'], (string)$estado['hasta'], $fh['detalle'], $fh['resumen'],
+                function (int $lineas) use (&$estado, $empresaId, $token, &$ultimoLatido): void {
+                    if (time() - $ultimoLatido >= 2) {
+                        $ultimoLatido = time();
+                        $estado['lineas'] = $lineas;
+                        $estado['actualizado'] = $ultimoLatido;
+                        $this->guardarEstado($empresaId, $token, $estado);
+                    }
+                }
+            );
+            foreach ($fh as $h) {
+                fclose($h);
+            }
+
+            if (!$reporte['ok']) {
+                $this->terminar($empresaId, $token, $estado, 'error', (string)$reporte['error']);
+
+                return;
+            }
+
+            foreach (self::ARCHIVOS as $parte) {
+                if ($this->storage()->putLocalFile(StorageService::ZONE_SIHOS_REPORTES, self::PREFIJO . '_' . $token . '_' . $parte . '.csv', $tmp[$parte], true, $empresaId) === null) {
+                    throw new RuntimeException('No se pudo guardar el archivo ' . $parte . '.');
+                }
+            }
+            $this->storage()->putContents($this->key($empresaId, $token, 'resultado'), json_encode($reporte, JSON_UNESCAPED_UNICODE) ?: '{}');
+            $estado['lineas'] = (int)$reporte['lineas'];
+            $this->terminar($empresaId, $token, $estado, 'listo');
+        } catch (Throwable $e) {
+            error_log('SihosLiquidacionJobService: ' . $e->getMessage());
+            $this->terminar($empresaId, $token, $estado, 'error', 'No se pudo generar el reporte. Intente de nuevo.');
+        } finally {
+            foreach ($tmp as $ruta) {
+                @unlink($ruta);
+            }
+        }
+    }
+
     /**
      * Estado visible para el usuario dueño del trabajo (null si no existe o no es suyo).
      *
