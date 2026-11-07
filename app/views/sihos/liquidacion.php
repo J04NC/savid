@@ -166,4 +166,53 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 });
 
+<?php if (!empty($trabajo)): ?>
+document.addEventListener('DOMContentLoaded', function () {
+    var url = '?url=sihos/liquidacionEstado&empresa_id=<?= (int)$empresaId ?>&job=<?= htmlspecialchars($trabajo['token'], ENT_QUOTES) ?>';
+    var inicio = Date.now() - <?= (int)$trabajo['segundos'] ?> * 1000;
+    var lineas = <?= (int)$trabajo['lineas'] ?>;
+    var terminado = false;
+
+    function mmss(seg) {
+        var m = Math.floor(seg / 60), s = seg % 60;
+        return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+    }
+    function pintar() {
+        // app.js cierra el overlay en el "pageshow" de toda carga de página (savidOcultarCargandoForzado):
+        // si se cerró, se vuelve a abrir; el trabajo sigue en curso y la pantalla debe seguir bloqueada.
+        var overlay = document.getElementById('savidCargandoOverlay');
+        if (!overlay || !overlay.classList.contains('activo')) {
+            savidMostrarCargando('Generando liquidación…', true);
+        }
+        var texto = document.querySelector('#savidCargandoOverlay .savid-cargando-texto');
+        if (texto) {
+            texto.textContent = 'Generando liquidación… ' + mmss(Math.floor((Date.now() - inicio) / 1000))
+                + ' · ' + lineas.toLocaleString('es-CO') + ' líneas procesadas';
+        }
+    }
+    function consultar() {
+        fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.json(); })
+            .then(function (e) {
+                if (e.estado === 'pendiente' || e.estado === 'ejecutando') {
+                    lineas = e.lineas;
+                    inicio = Date.now() - e.segundos * 1000;
+                    setTimeout(consultar, 3000);
+                } else {
+                    terminado = true;
+                    window.location.reload();
+                }
+            })
+            .catch(function () { setTimeout(consultar, 5000); });
+    }
+
+    // Bloquea la pantalla (sin botón de cerrar) y cuenta los segundos en el navegador cada 1 s.
+    if (typeof savidMostrarCargando === 'function') {
+        pintar();
+        window.addEventListener('pageshow', function () { setTimeout(pintar, 0); });
+        setInterval(function () { if (!terminado) { pintar(); } }, 1000);
+    }
+    setTimeout(consultar, 2000);
+});
+<?php endif; ?>
 </script>
