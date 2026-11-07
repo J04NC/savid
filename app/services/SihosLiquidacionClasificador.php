@@ -5,7 +5,7 @@
  *
  * La actividad sale del catálogo TipoServ de SIHOS (TipoConc = concepto RIPS:
  * 01 consulta, 02 apoyo diagnóstico, 03 terapéutico, 04 quirúrgico, 05 PyP,
- * 06 estancia, 14 transporte) y NO de códigos fijos de TipoServ, porque
+ * 06 estancia, 08 sala, 14 transporte) y NO de códigos fijos de TipoServ, porque
  * entre instalaciones SIHOS los códigos altos (48+) significan cosas distintas.
  * Lo único fijo son los componentes de cirugía 20–25, estándar de SIHOS.
  */
@@ -71,6 +71,7 @@ class SihosLiquidacionClasificador
             '03', '05' => 'Procedimiento',
             '04' => 'Cirugía',
             '06' => 'Estancia',
+            '08' => self::COMPONENTE_SALA,
             '14' => 'Transporte',
             default => 'Otros',
         };
