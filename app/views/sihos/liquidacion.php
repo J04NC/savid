@@ -173,8 +173,9 @@ $urlDescarga = static fn (string $archivo): string => '?url=sihos/liquidacionDes
                 </tbody>
             </table>
 
+            <?php $mesesRango = $reporte['mesesRango'] ?? []; ?>
             <h3 class="auditoria-title" style="font-size:1.1em; margin-top:28px;">Especialistas (<?= count($reporte['especialistas']) ?>)</h3>
-            <p class="field-note">Todos los profesionales con líneas en el rango. "Producción médica" es su trabajo en consulta, interconsulta, procedimiento y cirugía; "otras actividades" es el resto (laboratorio, imágenes, estancia…). El CSV trae además cantidad y valor por cada actividad. Haga clic en un profesional para ver sus líneas.</p>
+            <p class="field-note">Todos los profesionales con líneas en el rango. "Producción médica" es su trabajo en consulta, interconsulta, procedimiento y cirugía; "otras actividades" es el resto (laboratorio, imágenes, estancia…). El CSV trae además cantidad y valor por cada actividad. Las columnas con el mes (AAAA-MM) son el valor de producción médica de cada mes. Haga clic en un profesional para ver sus líneas.</p>
             <table class="savid-datatable seguridad-table savid-dt-fit" id="sihosLiquidacionEspecialistas"
                    data-dt-order="[[9,&quot;desc&quot;]]"
                    data-dt-scroll-wrap-class="sihos-auditoria-glosa-scroll">
@@ -183,6 +184,7 @@ $urlDescarga = static fn (string $archivo): string => '?url=sihos/liquidacionDes
                         <th>Tipo doc.</th><th>Cédula</th><th>Profesional</th><th>Registro prof.</th><th>Especialidad</th><th>Activo SIHOS</th>
                         <th>Líneas</th><th>Valor producción médica</th><th>Valor otras actividades</th><th>Valor total</th><th>Valor institucional</th>
                         <th>Meses activos</th><th>Días activos</th><th>Primera fecha</th><th>Última fecha</th><th>Prom. mensual</th><th>Valor por día</th>
+                        <?php foreach ($mesesRango as $m): ?><th title="Valor de producción médica del mes"><?= htmlspecialchars($m) ?></th><?php endforeach; ?>
                     </tr>
                 </thead>
                 <tbody>
@@ -205,6 +207,9 @@ $urlDescarga = static fn (string $archivo): string => '?url=sihos/liquidacionDes
                             <td><?= htmlspecialchars($e['ultima']) ?></td>
                             <td style="text-align:right;" data-order="<?= (float)$e['promMensual'] ?>"><?= $fmt((float)$e['promMensual']) ?></td>
                             <td style="text-align:right;" data-order="<?= (float)$e['valorPorDia'] ?>"><?= $fmt((float)$e['valorPorDia']) ?></td>
+                            <?php foreach ($mesesRango as $m): ?>
+                                <td style="text-align:right;" data-order="<?= (float)($e['meses'][$m][0] ?? 0) ?>"><?= $fmt((float)($e['meses'][$m][0] ?? 0)) ?></td>
+                            <?php endforeach; ?>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>

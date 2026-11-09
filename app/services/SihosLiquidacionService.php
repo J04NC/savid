@@ -75,7 +75,8 @@ class SihosLiquidacionService
 
         self::escribirFila($detalle, self::COLUMNAS_DETALLE);
         $agregado = [];
-        $porEspecialista = new SihosLiquidacionEspecialistas();
+        $mesesRango = array_map(static fn (array $t): string => substr($t[0], 0, 7), $this->meses($desde, $hasta));
+        $porEspecialista = new SihosLiquidacionEspecialistas($mesesRango);
         $res = ['ok' => true, 'desde' => $desde, 'lineas' => 0, 'hasta' => $hasta, 'totales' => $this->vacio(),
             'sinEspecialidad' => 0, 'sinProfesional' => 0, 'tiposOtros' => [], 'porActividad' => [], 'porMesEspecialidad' => [], 'inferencia' => []];
 
@@ -132,7 +133,8 @@ class SihosLiquidacionService
             self::escribirFila($resumen, [...explode("\x1f", $clave), $v[0], self::num($v[1]), self::num($v[2]), self::num($v[3]), self::num($v[4])]);
         }
         $res['especialistas'] = $porEspecialista->filas();
-        SihosLiquidacionEspecialistas::escribirCsv($especialistas, $res['especialistas']);
+        $porEspecialista->escribirCsv($especialistas, $res['especialistas']);
+        $res['mesesRango'] = $mesesRango;
         ksort($res['porMesEspecialidad']);
         ksort($res['porActividad']);
         arsort($res['tiposOtros']);
