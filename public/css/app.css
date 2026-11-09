@@ -8635,3 +8635,12 @@ td.cartera2193-detalle:hover{
     text-decoration:underline;
     background:rgba(29,209,161,.12);
 }
+
+/* SIHOS LIQUIDACIÓN: celdas de valor con detalle por clic (mismo efecto que 2193). */
+td[data-liq-extra]{
+    cursor:pointer;
+}
+td[data-liq-extra]:hover{
+    text-decoration:underline;
+    background:rgba(29,209,161,.12);
+}

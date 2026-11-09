@@ -15,7 +15,7 @@ $urlDescarga = static fn (string $archivo): string => '?url=sihos/liquidacionDes
 // La fila (si tiene data-liq-filtro) aporta el filtro de quién; la celda, el de qué columna.
 $celdaClic = static fn (array $filtro, string $titulo, float $valor = 1.0): string => abs($valor) < 0.005 ? '' :
     ' data-liq-extra="' . htmlspecialchars($filtro === [] ? '{}' : (string)json_encode($filtro), ENT_QUOTES) . '"'
-    . ' data-liq-titulo="' . htmlspecialchars($titulo, ENT_QUOTES) . '" tabindex="0" title="Clic para ver las líneas" style="text-align:right;cursor:pointer;"';
+    . ' data-liq-titulo="' . htmlspecialchars($titulo, ENT_QUOTES) . '" tabindex="0" title="Clic para ver las líneas" style="text-align:right;"';
 ?>
 
 <div class="module-container auditoria-page">
