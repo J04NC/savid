@@ -19,6 +19,10 @@ class SihosLiquidacionDetalleService
         'mes' => ['Fecha liquidación', 'prefijo'],
         'confianza' => ['Confianza inferencia', 'exacto'],
         'metodo' => ['Método de inferencia', 'exacto'],
+        'actividad' => ['Actividad', 'exacto'],
+        'prod' => ['Producción médica', 'exacto'],
+        // Valor "institucional": líneas de sala y materiales de cirugía (valor '1').
+        'institucional' => ['Componente', 'institucional'],
     ];
 
     /** Columnas que muestra el modal (nombres del CSV de detalle). */
@@ -52,6 +56,9 @@ class SihosLiquidacionDetalleService
                 continue;
             }
             if ($nombre === 'mes' && preg_match('/^\d{4}-\d{2}$/', $valor) !== 1) {
+                continue;
+            }
+            if (($nombre === 'prod' && !in_array($valor, ['Sí', 'No'], true)) || ($nombre === 'institucional' && $valor !== '1')) {
                 continue;
             }
             $filtros[$nombre] = $valor;
@@ -172,15 +179,20 @@ class SihosLiquidacionDetalleService
 
         fwrite($out, (string)$cabeceraRaw);
         while (($reg = self::leerRegistro($h)) !== null) {
-            foreach ($reglas as [, $valor]) {
-                if ($valor !== '' && strpos($reg, $valor) === false) {
+            foreach ($reglas as [, $valor, $modo]) {
+                if ($valor !== '' && $modo !== 'institucional' && strpos($reg, $valor) === false) {
                     continue 2; // prefiltro de texto: evita parsear la mayoría de las líneas
                 }
             }
             $f = str_getcsv($reg, ';');
             foreach ($reglas as [$idx, $valor, $modo]) {
                 $celda = (string)($f[$idx] ?? '');
-                if ($modo === 'prefijo' ? !str_starts_with($celda, $valor) : $celda !== $valor) {
+                $cumple = match ($modo) {
+                    'prefijo' => str_starts_with($celda, $valor),
+                    'institucional' => in_array($celda, SihosLiquidacionClasificador::COMPONENTES_INSTITUCIONALES, true),
+                    default => $celda === $valor,
+                };
+                if (!$cumple) {
                     continue 2;
                 }
             }
