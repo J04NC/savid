@@ -129,14 +129,15 @@ $urlDescarga = static fn (string $archivo): string => '?url=sihos/liquidacionDes
                 <h3 class="auditoria-title" style="font-size:1.1em; margin-top:28px;">Profesional real de las líneas administrativas (Admin)</h3>
                 <p class="auditoria-hint">
                     Líneas médicas liquidadas con un usuario administrativo. El detalle trae el profesional inferido de la atención de la misma admisión
-                    (columnas «Profesional inferido», «Método» y «Confianza»); el profesional original no se modifica.
+                    (columnas «Profesional inferido», «Método» y «Confianza»); el profesional original no se modifica. Haga clic en una fila para ver sus líneas.
                 </p>
                 <table class="seguridad-table savid-dt-fit" id="sihosLiquidacionInferencia">
                     <thead><tr><th>Confianza</th><th>Método</th><th>Líneas</th><th>Valor total</th></tr></thead>
                     <tbody>
                         <?php foreach ($reporte['inferencia'] as $confianza => $porMetodo): ?>
                             <?php foreach ($porMetodo as $metodo => $v): ?>
-                                <tr>
+                                <tr data-liq-filtro="<?= htmlspecialchars((string)json_encode(['confianza' => $confianza, 'metodo' => $metodo]), ENT_QUOTES) ?>"
+                                    data-liq-titulo="<?= htmlspecialchars("Líneas: $confianza — $metodo", ENT_QUOTES) ?>" tabindex="0" style="cursor:pointer;" title="Ver las líneas">
                                     <td><?= htmlspecialchars($confianza) ?></td>
                                     <td><?= htmlspecialchars($metodo) ?></td>
                                     <td style="text-align:right;"><?= $num((float)$v[0]) ?></td>
@@ -173,7 +174,7 @@ $urlDescarga = static fn (string $archivo): string => '?url=sihos/liquidacionDes
             </table>
 
             <h3 class="auditoria-title" style="font-size:1.1em; margin-top:28px;">Especialistas (<?= count($reporte['especialistas']) ?>)</h3>
-            <p class="field-note">Todos los profesionales con líneas en el rango. "Producción médica" es su trabajo en consulta, interconsulta, procedimiento y cirugía; "otras actividades" es el resto (laboratorio, imágenes, estancia…). El CSV trae además cantidad y valor por cada actividad.</p>
+            <p class="field-note">Todos los profesionales con líneas en el rango. "Producción médica" es su trabajo en consulta, interconsulta, procedimiento y cirugía; "otras actividades" es el resto (laboratorio, imágenes, estancia…). El CSV trae además cantidad y valor por cada actividad. Haga clic en un profesional para ver sus líneas.</p>
             <table class="savid-datatable seguridad-table savid-dt-fit" id="sihosLiquidacionEspecialistas"
                    data-dt-order="[[9,&quot;desc&quot;]]"
                    data-dt-scroll-wrap-class="sihos-auditoria-glosa-scroll">
@@ -186,7 +187,8 @@ $urlDescarga = static fn (string $archivo): string => '?url=sihos/liquidacionDes
                 </thead>
                 <tbody>
                     <?php foreach ($reporte['especialistas'] as $e): ?>
-                        <tr>
+                        <tr data-liq-filtro="<?= htmlspecialchars((string)json_encode(['cedula' => $e['cedula']]), ENT_QUOTES) ?>"
+                            data-liq-titulo="<?= htmlspecialchars('Líneas de ' . $e['nombre'], ENT_QUOTES) ?>" tabindex="0" style="cursor:pointer;" title="Ver las líneas">
                             <td><?= htmlspecialchars($e['tipoDoc']) ?></td>
                             <td><?= htmlspecialchars($e['cedula']) ?></td>
                             <td class="savid-dt-fit-text" title="<?= htmlspecialchars($e['nombre']) ?>"><?= htmlspecialchars($e['nombre']) ?></td>
@@ -207,6 +209,33 @@ $urlDescarga = static fn (string $archivo): string => '?url=sihos/liquidacionDes
                     <?php endforeach; ?>
                 </tbody>
             </table>
+
+            <div id="sihosLiquidacionDetalleModal" class="modal hidden" data-empresa="<?= (int)$empresaId ?>" data-job="<?= htmlspecialchars((string)$tokenJob, ENT_QUOTES) ?>">
+                <div class="modal-content" style="max-width:min(1500px, 96vw);">
+                    <div class="modal-header-bar">
+                        <span id="sihosLiquidacionDetalleTitulo">Detalle</span>
+                        <span class="close-modal" id="sihosLiquidacionDetalleCerrar" role="button" tabindex="0" aria-label="Cerrar">&times;</span>
+                    </div>
+                    <div style="padding:12px 16px; overflow:auto;">
+                        <p class="field-note">
+                            Líneas del reporte generado (no se consulta SIHOS de nuevo).
+                            <a id="sihosLiquidacionDetalleDescargar" href="#" class="auditoria-btn-primary" style="margin-left:8px;">📥 Descargar CSV de esta selección</a>
+                        </p>
+                        <p id="sihosLiquidacionDetalleEstado" class="modal-form-alert" aria-live="polite"></p>
+                        <table id="sihosLiquidacionDetalleTabla" class="seguridad-table" style="width:100%;">
+                            <thead>
+                                <tr>
+                                    <?php foreach (SihosLiquidacionDetalleService::COLUMNAS_MODAL as $col): ?>
+                                        <th><?= htmlspecialchars($col) ?></th>
+                                    <?php endforeach; ?>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <script src="/js/sihos-liquidacion-detalle.js?v=<?= (int)@filemtime(BASE_PATH . '/public/js/sihos-liquidacion-detalle.js') ?>"></script>
 
         <?php endif; ?>
 
