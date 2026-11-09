@@ -93,6 +93,60 @@ class SihosLiquidacionDetalleService
     }
 
     /**
+     * Una página de la selección con el protocolo server-side de DataTables.
+     *
+     * @param array<string,mixed> $p draw, start, length, search[value], order[0][column|dir]
+     * @return array<string,mixed>
+     */
+    public function pagina(string $ruta, array $p): array
+    {
+        $h = fopen($ruta, 'rb');
+        $cabecera = $h ? str_getcsv((string)self::leerRegistro($h), ';') : [];
+        $registros = [];
+        while ($h && ($reg = self::leerRegistro($h)) !== null) {
+            $registros[] = $reg;
+        }
+        if ($h) {
+            fclose($h);
+        }
+        $total = count($registros);
+
+        $buscar = trim((string)($p['search']['value'] ?? ''));
+        if ($buscar !== '') {
+            $registros = array_values(array_filter($registros, static fn (string $r): bool => stripos($r, $buscar) !== false));
+        }
+        $indices = array_map(static fn (string $c): int => (int)array_search($c, $cabecera, true), self::COLUMNAS_MODAL);
+
+        $orden = (int)($p['order'][0]['column'] ?? -1);
+        if (isset(self::COLUMNAS_MODAL[$orden]) && count($registros) > 1) {
+            $numerica = in_array(self::COLUMNAS_MODAL[$orden], self::NUMERICAS, true);
+            $claves = array_map(static function (string $r) use ($indices, $orden, $numerica) {
+                $v = str_getcsv($r, ';')[$indices[$orden]] ?? '';
+
+                return $numerica ? (float)str_replace(',', '.', $v) : mb_strtolower($v);
+            }, $registros);
+            array_multisort($claves, ($p['order'][0]['dir'] ?? 'asc') === 'desc' ? SORT_DESC : SORT_ASC, $numerica ? SORT_NUMERIC : SORT_STRING, $registros);
+        }
+
+        $inicio = max(0, (int)($p['start'] ?? 0));
+        $largo = min(self::MAX_PAGINA, max(1, (int)($p['length'] ?? 50)));
+        $filas = [];
+        foreach (array_slice($registros, $inicio, $largo) as $reg) {
+            $f = str_getcsv($reg, ';');
+            $fila = [];
+            foreach ($indices as $i => $col) {
+                $v = (string)($f[$col] ?? '');
+                $fila[] = in_array(self::COLUMNAS_MODAL[$i], self::NUMERICAS, true) && $v !== ''
+                    ? number_format((float)str_replace(',', '.', $v), 0, ',', '.')
+                    : htmlspecialchars($v, ENT_QUOTES);
+            }
+            $filas[] = $fila;
+        }
+
+        return ['draw' => (int)($p['draw'] ?? 0), 'recordsTotal' => $total, 'recordsFiltered' => count($registros), 'data' => $filas];
+    }
+
+    /**
      * Copia a $destino la cabecera y las líneas del detalle que cumplen todos los filtros.
      *
      * @param array<string,string> $filtros
