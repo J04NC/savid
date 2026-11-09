@@ -125,6 +125,29 @@ $urlDescarga = static fn (string $archivo): string => '?url=sihos/liquidacionDes
                 </tfoot>
             </table>
 
+            <?php if (!empty($reporte['inferencia'])): ?>
+                <h3 class="auditoria-title" style="font-size:1.1em; margin-top:28px;">Profesional real de las líneas administrativas (Admin)</h3>
+                <p class="auditoria-hint">
+                    Líneas médicas liquidadas con un usuario administrativo. El detalle trae el profesional inferido de la atención de la misma admisión
+                    (columnas «Profesional inferido», «Método» y «Confianza»); el profesional original no se modifica.
+                </p>
+                <table class="seguridad-table savid-dt-fit" id="sihosLiquidacionInferencia">
+                    <thead><tr><th>Confianza</th><th>Método</th><th>Líneas</th><th>Valor total</th></tr></thead>
+                    <tbody>
+                        <?php foreach ($reporte['inferencia'] as $confianza => $porMetodo): ?>
+                            <?php foreach ($porMetodo as $metodo => $v): ?>
+                                <tr>
+                                    <td><?= htmlspecialchars($confianza) ?></td>
+                                    <td><?= htmlspecialchars($metodo) ?></td>
+                                    <td style="text-align:right;"><?= $num((float)$v[0]) ?></td>
+                                    <td style="text-align:right;"><?= $fmt($v[4]) ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
+
             <h3 class="auditoria-title" style="font-size:1.1em; margin-top:28px;">Valor total de producción médica por especialidad y mes</h3>
             <table class="savid-datatable seguridad-table savid-dt-fit" id="sihosLiquidacionEspecialidad"
                    data-dt-order="[[<?= count($meses) + 1 ?>,&quot;desc&quot;]]"
