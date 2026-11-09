@@ -53,7 +53,7 @@ class SihosLiquidacionRepository
         $sql = "SELECT e.FechFact, e.CodiDocu, e.NumeFact,
                        e.CodiAdmi, a.NombAdmi, e.TipoCont, tc.NombTipo AS NombTipoCont, e.NumeCont, c.DescCont,
                        e.CodiServ AS ServOrig, so.NombServ AS NombServOrig, e.ServEgre, se.NombServ AS NombServEgre,
-                       d.TipoDeta, d.TipoServ, cp.TipoServ AS TipoServCups, cp.CodiCups, cp.NombProc,
+                       d.TipoDeta, d.TipoServ, d.ConsAdmi, d.CodiServ AS CodiProcLinea, cp.TipoServ AS TipoServCups, cp.CodiCups, cp.NombProc,
                        d.CodiMedi, u.TipoDocu AS TipoDocuProf, u.CC AS CedulaProf, u.Nombre AS NombreProf, u.RegiProf, u.Activo AS ActivoProf, ce.NombEspe,
                        d.CantServ, d.ValoEAPB, d.ValoUsua, d.ValoTota
                 FROM EncaFact e
@@ -83,5 +83,31 @@ class SihosLiquidacionRepository
         } finally {
             $this->pdo->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, $buffered);
         }
+    }
+
+    /**
+     * Atenciones de una admisión que sirven para inferir al profesional real de
+     * una línea liquidada con un usuario administrativo: consultas (RipsCons) y
+     * hojas de procedimiento (HojaProc), cada una con el profesional que atendió.
+     * Usar una conexión distinta a la del generador de fetchLineas().
+     *
+     * @return array{consultas:list<array<string,mixed>>,hojas:list<array<string,mixed>>}
+     */
+    public function fetchAtencionesAdmision(int $consAdmi): array
+    {
+        $consultas = $this->pdo->prepare(
+            'SELECT r.UsuaAsis AS Login, DATE(r.FechCons) AS Fecha, u.CC AS Cedula, u.Nombre
+             FROM RipsCons r LEFT JOIN Usuarios u ON u.Login = r.UsuaAsis
+             WHERE r.CodiInst = ? AND r.ConsAdmi = ?'
+        );
+        $consultas->execute([$this->codiInst, $consAdmi]);
+        $hojas = $this->pdo->prepare(
+            'SELECT h.UsuaAsis AS Login, DATE(h.FechProc) AS Fecha, h.CodiProc, u.CC AS Cedula, u.Nombre
+             FROM HojaProc h LEFT JOIN Usuarios u ON u.Login = h.UsuaAsis
+             WHERE h.CodiInst = ? AND h.ConsAdmi = ?'
+        );
+        $hojas->execute([$this->codiInst, $consAdmi]);
+
+        return ['consultas' => $consultas->fetchAll(), 'hojas' => $hojas->fetchAll()];
     }
 }
