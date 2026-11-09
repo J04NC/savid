@@ -225,6 +225,7 @@ $urlDescarga = static fn (string $archivo): string => '?url=sihos/liquidacionDes
                         <p class="field-note">
                             Líneas del reporte generado (no se consulta SIHOS de nuevo).
                             <a id="sihosLiquidacionDetalleDescargar" href="#" class="auditoria-btn-primary" style="margin-left:8px;">📥 Descargar CSV de esta selección</a>
+                            <a class="auditoria-btn-primary" style="margin-left:8px;" href="<?= htmlspecialchars($urlDescarga('detalle')) ?>">⬇ Descargar detalle completo (CSV)</a>
                         </p>
                         <p id="sihosLiquidacionDetalleEstado" class="modal-form-alert" aria-live="polite"></p>
                         <table id="sihosLiquidacionDetalleTabla" class="seguridad-table" style="width:100%;">
