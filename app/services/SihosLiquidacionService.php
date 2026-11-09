@@ -16,6 +16,7 @@ class SihosLiquidacionService
         'Tipo contrato', 'Contrato', 'Nombre contrato', 'Servicio origen', 'Servicio egreso/actual',
         'Tipo servicio (SIHOS)', 'Tipo servicio (CUPS)', 'Componente', 'Actividad', 'Producción médica',
         'CUPS', 'Procedimiento', 'Especialidad', 'Cédula profesional', 'Profesional',
+        'Cédula profesional inferido', 'Profesional inferido', 'Método de inferencia', 'Confianza inferencia',
         'Cantidad', 'Valor EAPB', 'Valor usuario', 'Valor total',
     ];
     public const COLUMNAS_RESUMEN = [
@@ -67,19 +68,16 @@ class SihosLiquidacionService
             return ['ok' => false, 'error' => 'Esta empresa no tiene conexión a SIHOS configurada (o falta el CodiInst).'];
         }
 
-        $pdo = (new SihosExternalRepository([
-            'host' => $cfg['host'], 'port' => (string)$cfg['puerto'], 'database' => $cfg['base_datos'],
-            'username' => $cfg['usuario'], 'codiInst' => $codiInst,
-            'password' => SihosCredentialCipher::decrypt($cfg['password_cifrado'] ?? null), 'charset' => $cfg['charset'],
-        ]))->connect();
-        $repo = new SihosLiquidacionRepository($pdo, $codiInst);
+        $repo = new SihosLiquidacionRepository($this->conectar($cfg, $codiInst), $codiInst);
+        // Conexión aparte: mientras se recorre el generador de líneas (sin buffer) la principal no admite otra consulta.
+        $inferencia = new SihosLiquidacionInferencia(new SihosLiquidacionRepository($this->conectar($cfg, $codiInst), $codiInst));
         $clasif = new SihosLiquidacionClasificador($repo->fetchTiposServicio());
 
         self::escribirFila($detalle, self::COLUMNAS_DETALLE);
         $agregado = [];
         $porEspecialista = new SihosLiquidacionEspecialistas();
         $res = ['ok' => true, 'desde' => $desde, 'lineas' => 0, 'hasta' => $hasta, 'totales' => $this->vacio(),
-            'sinEspecialidad' => 0, 'sinProfesional' => 0, 'tiposOtros' => [], 'porActividad' => [], 'porMesEspecialidad' => []];
+            'sinEspecialidad' => 0, 'sinProfesional' => 0, 'tiposOtros' => [], 'porActividad' => [], 'porMesEspecialidad' => [], 'inferencia' => []];
 
         foreach ($this->meses($desde, $hasta) as [$ini, $fin]) {
             foreach ($repo->fetchLineas($ini, $fin) as $f) {
@@ -91,11 +89,17 @@ class SihosLiquidacionService
                 $esp = trim((string)$f['NombEspe']) !== '' ? trim((string)$f['NombEspe']) : 'SIN ESPECIALIDAD';
                 $valores = [1, (float)$f['CantServ'], (float)$f['ValoEAPB'], (float)$f['ValoUsua'], (float)$f['ValoTota']];
 
+                $inf = SihosLiquidacionInferencia::esAdministrativo($f['CodiMedi']) ? $inferencia->inferir($f, $actividad) : null;
+                if ($inf !== null) {
+                    $this->sumar($res['inferencia'][$inf['confianza']][$inf['metodo']], $valores);
+                }
+
                 self::escribirFila($detalle, [
                     $f['FechFact'], $f['CodiDocu'], $f['NumeFact'], $f['CodiAdmi'], $f['NombAdmi'],
                     $f['NombTipoCont'], $f['NumeCont'], $f['DescCont'], $f['NombServOrig'], $f['NombServEgre'],
                     $clasif->nombreTipoServicio($tipoLinea), $clasif->nombreTipoServicio($tipoCups), $componente, $actividad, $prod,
                     $f['CodiCups'], $f['NombProc'], $esp, $f['CedulaProf'], $f['NombreProf'],
+                    $inf['cedula'] ?? '', $inf['nombre'] ?? '', $inf['metodo'] ?? '', $inf['confianza'] ?? '',
                     self::num($valores[1]), self::num($valores[2]), self::num($valores[3]), self::num($valores[4]),
                 ]);
 
@@ -131,8 +135,19 @@ class SihosLiquidacionService
         ksort($res['porMesEspecialidad']);
         ksort($res['porActividad']);
         arsort($res['tiposOtros']);
+        ksort($res['inferencia']);
 
         return $res;
+    }
+
+    /** @param array<string,mixed> $cfg */
+    private function conectar(array $cfg, string $codiInst): PDO
+    {
+        return (new SihosExternalRepository([
+            'host' => $cfg['host'], 'port' => (string)$cfg['puerto'], 'database' => $cfg['base_datos'],
+            'username' => $cfg['usuario'], 'codiInst' => $codiInst,
+            'password' => SihosCredentialCipher::decrypt($cfg['password_cifrado'] ?? null), 'charset' => $cfg['charset'],
+        ]))->connect();
     }
 
     /** @return list<array{0:string,1:string}> tramos mensuales [inicio, fin] que cubren el rango */
