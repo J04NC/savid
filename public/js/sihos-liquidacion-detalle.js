@@ -67,17 +67,27 @@
             modal.classList.add('hidden');
         }
 
+        // Clic en una celda con data-liq-extra: filtro de la fila (si la tiene) + el de la celda (columna).
+        // Clic en otra parte de una fila con data-liq-filtro: solo el de la fila.
         function filaDesde(el) {
-            var tr = el.closest ? el.closest('tr[data-liq-filtro]') : null;
-            if (!tr) return;
+            if (!el.closest) return;
+            var td = el.closest('td[data-liq-extra]');
+            var tr = el.closest('tr[data-liq-filtro]');
+            if (!tr && !td) return;
             try {
-                abrir(JSON.parse(tr.getAttribute('data-liq-filtro')), tr.getAttribute('data-liq-titulo') || 'Detalle');
+                var f = tr ? JSON.parse(tr.getAttribute('data-liq-filtro')) : {};
+                var titulo = tr ? tr.getAttribute('data-liq-titulo') : '';
+                if (td) {
+                    f = $.extend(f, JSON.parse(td.getAttribute('data-liq-extra')));
+                    titulo = (titulo ? titulo + ' · ' : '') + td.getAttribute('data-liq-titulo');
+                }
+                abrir(f, titulo || 'Detalle');
             } catch (e) { /* atributo mal formado: no se abre */ }
         }
 
         document.addEventListener('click', function (e) { filaDesde(e.target); });
         document.addEventListener('keydown', function (e) {
-            if (e.key === 'Enter' && e.target.matches && e.target.matches('tr[data-liq-filtro]')) filaDesde(e.target);
+            if (e.key === 'Enter' && e.target.matches && e.target.matches('tr[data-liq-filtro], td[data-liq-extra]')) filaDesde(e.target);
             if (e.key === 'Escape') cerrar();
         });
         document.getElementById('sihosLiquidacionDetalleCerrar').addEventListener('click', cerrar);

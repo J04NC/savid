@@ -11,6 +11,11 @@ $fmt = static fn (float $v): string => SihosCartera2193Service::formatoMoneda($v
 $num = static fn (float $v): string => number_format($v, 0, ',', '.');
 $urlDescarga = static fn (string $archivo): string => '?url=sihos/liquidacionDescargar&empresa_id=' . (int)($scope['empresaId'] ?? 0)
     . '&job=' . rawurlencode($tokenJob) . '&archivo=' . $archivo;
+// Atributos de una celda numérica clicable (como en cartera 2193): abre el modal con las líneas que forman ese valor.
+// La fila (si tiene data-liq-filtro) aporta el filtro de quién; la celda, el de qué columna.
+$celdaClic = static fn (array $filtro, string $titulo, float $valor = 1.0): string => abs($valor) < 0.005 ? '' :
+    ' data-liq-extra="' . htmlspecialchars($filtro === [] ? '{}' : (string)json_encode($filtro), ENT_QUOTES) . '"'
+    . ' data-liq-titulo="' . htmlspecialchars($titulo, ENT_QUOTES) . '" tabindex="0" title="Clic para ver las líneas" style="text-align:right;cursor:pointer;"';
 ?>
 
 <div class="module-container auditoria-page">
@@ -101,7 +106,8 @@ $urlDescarga = static fn (string $archivo): string => '?url=sihos/liquidacionDes
                 <tbody>
                     <?php foreach ($reporte['porActividad'] as $actividad => $porProd): ?>
                         <?php foreach ($porProd as $prod => $v): ?>
-                            <tr>
+                            <tr data-liq-filtro="<?= htmlspecialchars((string)json_encode(['actividad' => $actividad, 'prod' => $prod]), ENT_QUOTES) ?>"
+                                data-liq-titulo="<?= htmlspecialchars("Líneas de $actividad (producción médica: $prod)", ENT_QUOTES) ?>" tabindex="0" style="cursor:pointer;" title="Ver las líneas">
                                 <td><?= htmlspecialchars($actividad) ?></td>
                                 <td><?= htmlspecialchars($prod) ?></td>
                                 <td style="text-align:right;"><?= $num((float)$v[0]) ?></td>
@@ -165,9 +171,9 @@ $urlDescarga = static fn (string $archivo): string => '?url=sihos/liquidacionDes
                         <tr>
                             <td class="savid-dt-fit-text"><?= htmlspecialchars($esp) ?></td>
                             <?php foreach ($meses as $mes): ?>
-                                <td style="text-align:right;" data-order="<?= (float)($porMes[$mes] ?? 0) ?>"><?= $fmt((float)($porMes[$mes] ?? 0)) ?></td>
+                                <td<?= $celdaClic(['especialidad' => $esp, 'mes' => $mes, 'prod' => 'Sí'], "$esp · $mes · producción médica", (float)($porMes[$mes] ?? 0)) ?> data-order="<?= (float)($porMes[$mes] ?? 0) ?>"><?= $fmt((float)($porMes[$mes] ?? 0)) ?></td>
                             <?php endforeach; ?>
-                            <td style="text-align:right;" data-order="<?= array_sum($porMes) ?>"><strong><?= $fmt((float)array_sum($porMes)) ?></strong></td>
+                            <td<?= $celdaClic(['especialidad' => $esp, 'prod' => 'Sí'], "$esp · producción médica", (float)array_sum($porMes)) ?> data-order="<?= array_sum($porMes) ?>"><strong><?= $fmt((float)array_sum($porMes)) ?></strong></td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
@@ -175,7 +181,7 @@ $urlDescarga = static fn (string $archivo): string => '?url=sihos/liquidacionDes
 
             <?php $mesesRango = $reporte['mesesRango'] ?? []; ?>
             <h3 class="auditoria-title" style="font-size:1.1em; margin-top:28px;">Especialistas (<?= count($reporte['especialistas']) ?>)</h3>
-            <p class="field-note">Todos los profesionales con líneas en el rango. "Producción médica" es su trabajo en consulta, interconsulta, procedimiento y cirugía; "otras actividades" es el resto (laboratorio, imágenes, estancia…). El CSV trae además cantidad y valor por cada actividad. Las columnas con el mes (AAAA-MM) son el valor de producción médica de cada mes. Haga clic en un profesional para ver sus líneas.</p>
+            <p class="field-note">Todos los profesionales con líneas en el rango. "Producción médica" es su trabajo en consulta, interconsulta, procedimiento y cirugía; "otras actividades" es el resto (laboratorio, imágenes, estancia…). El CSV trae además cantidad y valor por cada actividad. Las columnas con el mes (AAAA-MM) son el valor de producción médica de cada mes. Haga clic en un profesional para ver todas sus líneas, o en un valor para ver solo las que lo forman.</p>
             <table class="savid-datatable seguridad-table savid-dt-fit" id="sihosLiquidacionEspecialistas"
                    data-dt-order="[[9,&quot;desc&quot;]]"
                    data-dt-scroll-wrap-class="sihos-auditoria-glosa-scroll">
@@ -197,9 +203,10 @@ $urlDescarga = static fn (string $archivo): string => '?url=sihos/liquidacionDes
                             <td><?= htmlspecialchars($e['registro']) ?></td>
                             <td class="savid-dt-fit-text"><?= htmlspecialchars($e['especialidad']) ?></td>
                             <td><?= htmlspecialchars($e['activo']) ?></td>
-                            <td style="text-align:right;"><?= $num((float)$e['lineas']) ?></td>
-                            <?php foreach (['prodMedica', 'otras', 'total', 'institucional'] as $campo): ?>
-                                <td style="text-align:right;" data-order="<?= (float)$e[$campo] ?>"><?= $fmt((float)$e[$campo]) ?></td>
+                            <td<?= $celdaClic([], 'todas las líneas') ?>><?= $num((float)$e['lineas']) ?></td>
+                            <?php foreach (['prodMedica' => [['prod' => 'Sí'], 'producción médica'], 'otras' => [['prod' => 'No'], 'otras actividades'],
+                                'total' => [[], 'todas las líneas'], 'institucional' => [['institucional' => '1'], 'sala y materiales']] as $campo => [$filtroCelda, $tituloCelda]): ?>
+                                <td<?= $celdaClic($filtroCelda, $tituloCelda, (float)$e[$campo]) ?> data-order="<?= (float)$e[$campo] ?>"><?= $fmt((float)$e[$campo]) ?></td>
                             <?php endforeach; ?>
                             <td style="text-align:right;"><?= (int)$e['mesesActivos'] ?></td>
                             <td style="text-align:right;"><?= (int)$e['diasActivos'] ?></td>
@@ -208,7 +215,7 @@ $urlDescarga = static fn (string $archivo): string => '?url=sihos/liquidacionDes
                             <td style="text-align:right;" data-order="<?= (float)$e['promMensual'] ?>"><?= $fmt((float)$e['promMensual']) ?></td>
                             <td style="text-align:right;" data-order="<?= (float)$e['valorPorDia'] ?>"><?= $fmt((float)$e['valorPorDia']) ?></td>
                             <?php foreach ($mesesRango as $m): ?>
-                                <td style="text-align:right;" data-order="<?= (float)($e['meses'][$m][0] ?? 0) ?>"><?= $fmt((float)($e['meses'][$m][0] ?? 0)) ?></td>
+                                <td<?= $celdaClic(['mes' => $m, 'prod' => 'Sí'], "$m · producción médica", (float)($e['meses'][$m][0] ?? 0)) ?> data-order="<?= (float)($e['meses'][$m][0] ?? 0) ?>"><?= $fmt((float)($e['meses'][$m][0] ?? 0)) ?></td>
                             <?php endforeach; ?>
                         </tr>
                     <?php endforeach; ?>
