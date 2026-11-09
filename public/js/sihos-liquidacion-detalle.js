@@ -19,9 +19,34 @@
             return { empresa_id: modal.getAttribute('data-empresa'), job: modal.getAttribute('data-job') };
         }
 
+        var filtrosColumna = {};
+
+        // Segunda fila de la cabecera con un cuadro de texto por columna (filtra del lado del servidor).
+        function agregarFiltrosColumna() {
+            var $cab = $('#sihosLiquidacionDetalleTabla thead');
+            var $fila = $('<tr class="liq-filtros-columna"></tr>');
+            $cab.find('tr:first th').each(function (i) {
+                var $in = $('<input type="text" class="form-control" style="width:100%;min-width:60px;font-weight:normal;" autocomplete="off">')
+                    .attr('aria-label', 'Filtrar ' + $(this).text()).attr('placeholder', 'Filtrar')
+                    .attr('data-col', i);
+                $fila.append($('<th></th>').append($in));
+            });
+            $cab.append($fila);
+            var temporizador = null;
+            $fila.on('input', 'input', function () {
+                var i = $(this).attr('data-col'), v = $.trim($(this).val());
+                if (v === '') { delete filtrosColumna[i]; } else { filtrosColumna[i] = v; }
+                clearTimeout(temporizador);
+                temporizador = setTimeout(function () { tabla.draw(); }, 350);
+            });
+            $fila.on('click', 'input', function (e) { e.stopPropagation(); });
+        }
+
         function crearTabla() {
+            agregarFiltrosColumna();
             tabla = $('#sihosLiquidacionDetalleTabla').DataTable({
                 serverSide: true,
+                orderCellsTop: true,
                 processing: true,
                 autoWidth: false,
                 pageLength: 50,
@@ -34,7 +59,7 @@
                     data: function (d) {
                         return $.extend(parametros(), {
                             draw: d.draw, start: d.start, length: d.length,
-                            search: { value: d.search.value }, order: d.order.slice(0, 1), f: filtros
+                            search: { value: d.search.value }, order: d.order.slice(0, 1), f: filtros, fc: filtrosColumna
                         });
                     },
                     error: function (xhr) {
@@ -56,6 +81,8 @@
             estado.textContent = '';
             descargar.setAttribute('href', url + '&' + $.param($.extend(parametros(), { descargar: 1, f: f })));
             modal.classList.remove('hidden');
+            filtrosColumna = {};
+            $('#sihosLiquidacionDetalleTabla .liq-filtros-columna input').val('');
             if (tabla) {
                 tabla.search('').order([[0, 'asc']]).draw();
             } else {

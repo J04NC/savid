@@ -102,7 +102,7 @@ class SihosLiquidacionDetalleService
     /**
      * Una página de la selección con el protocolo server-side de DataTables.
      *
-     * @param array<string,mixed> $p draw, start, length, search[value], order[0][column|dir]
+     * @param array<string,mixed> $p draw, start, length, search[value], order[0][column|dir], fc[columna] (filtro de texto por columna)
      * @return array<string,mixed>
      */
     public function pagina(string $ruta, array $p): array
@@ -122,7 +122,31 @@ class SihosLiquidacionDetalleService
         if ($buscar !== '') {
             $registros = array_values(array_filter($registros, static fn (string $r): bool => stripos($r, $buscar) !== false));
         }
+        $porColumna = [];
+        foreach ((array)($p['fc'] ?? []) as $i => $texto) {
+            $texto = is_string($texto) ? trim($texto) : '';
+            if ($texto !== '' && isset(self::COLUMNAS_MODAL[(int)$i])) {
+                $porColumna[(int)$i] = mb_strtolower($texto);
+            }
+        }
         $indices = array_map(static fn (string $c): int => (int)array_search($c, $cabecera, true), self::COLUMNAS_MODAL);
+        if ($porColumna !== []) {
+            $registros = array_values(array_filter($registros, static function (string $r) use ($porColumna, $indices): bool {
+                foreach ($porColumna as $i => $texto) {
+                    if (stripos($r, $texto) === false) {
+                        return false; // prefiltro barato: el texto debe estar en algún lugar del registro
+                    }
+                }
+                $f = str_getcsv($r, ';');
+                foreach ($porColumna as $i => $texto) {
+                    if (mb_stripos((string)($f[$indices[$i]] ?? ''), $texto) === false) {
+                        return false;
+                    }
+                }
+
+                return true;
+            }));
+        }
 
         $orden = (int)($p['order'][0]['column'] ?? -1);
         if (isset(self::COLUMNAS_MODAL[$orden]) && count($registros) > 1) {
