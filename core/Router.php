@@ -258,7 +258,7 @@ class Router
         $sihosCartera2193AccionMethods = ['cartera2193Estado', 'cartera2193Detalle'];
 
         /* Misma razón: sihos/liquidacionEstado (avance JSON del cálculo en segundo plano) y sihos/liquidacionDescargar (CSV) — su pantalla es sihos/liquidacion. */
-        $sihosLiquidacionAccionMethods = ['liquidacionEstado', 'liquidacionDescargar'];
+        $sihosLiquidacionAccionMethods = ['liquidacionEstado', 'liquidacionDescargar', 'liquidacionDetalle'];
 
         /*
          * Misma razón: sihos/auditoriaGlosaBuscarAdministradora (autocompletado

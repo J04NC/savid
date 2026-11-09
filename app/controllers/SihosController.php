@@ -19,6 +19,7 @@ class SihosController
     private SihosCartera2193Service $cartera2193Service;
     private SihosCartera2193JobService $cartera2193JobService;
     private SihosLiquidacionJobService $liquidacionJobService;
+    private SihosLiquidacionDetalleService $liquidacionDetalleService;
 
     public function __construct()
     {
@@ -39,6 +40,7 @@ class SihosController
         $this->cartera2193Service = new SihosCartera2193Service();
         $this->cartera2193JobService = new SihosCartera2193JobService();
         $this->liquidacionJobService = new SihosLiquidacionJobService();
+        $this->liquidacionDetalleService = new SihosLiquidacionDetalleService($this->liquidacionJobService);
     }
 
     /**
@@ -1673,5 +1675,35 @@ class SihosController
         header('Content-Disposition: attachment; filename="liquidacion_' . $estado['desde'] . '_' . $estado['hasta'] . '_' . $parte . '.csv"');
         header('Content-Length: ' . filesize($ruta));
         readfile($ruta);
+    }
+
+    /**
+     * Detalle (modal) de liquidacion: líneas del CSV ya generado que cumplen un filtro (f[cedula|especialidad|mes|confianza|metodo]).
+     * JSON server-side de DataTables, o el CSV de la selección completa con descargar=1. No consulta SIHOS.
+     */
+    public function liquidacionDetalle(): void
+    {
+        $scope = $this->connectionService->buildScope($_GET);
+        $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : null;
+        $filtros = $this->liquidacionDetalleService->normalizarFiltros(is_array($_GET['f'] ?? null) ? $_GET['f'] : []);
+        $ruta = $empresaId === null || $filtros === null
+            ? null
+            : $this->liquidacionDetalleService->seleccion($empresaId, (int)($_SESSION['user_id'] ?? 0), trim((string)($_GET['job'] ?? '')), $filtros);
+        if ($ruta === null) {
+            http_response_code(410);
+            header('Content-Type: application/json; charset=utf-8');
+            exit(json_encode(['error' => 'El resultado de este reporte expiró o no existe. Vuelva a consultar.'], JSON_UNESCAPED_UNICODE));
+        }
+
+        if (!empty($_GET['descargar'])) {
+            header('Content-Type: text/csv; charset=utf-8');
+            header('Content-Disposition: attachment; filename="liquidacion_detalle_seleccion.csv"');
+            echo "\xEF\xBB\xBFsep=;\n";
+            readfile($ruta);
+
+            return;
+        }
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode($this->liquidacionDetalleService->pagina($ruta, $_GET), JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
     }
 }
