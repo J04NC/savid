@@ -218,6 +218,10 @@ class SihosLiquidacionJobService
                 foreach (self::ARCHIVOS as $parte) {
                     $storage->delete(str_replace('_estado.json', '_' . $parte . '.csv', $key));
                 }
+                // Selecciones del modal de detalle (SihosLiquidacionDetalleService).
+                foreach ($storage->glob(StorageService::ZONE_SIHOS_REPORTES, str_replace('_estado.json', '_sel_*.csv', basename($key)), $empresaId) as $sel) {
+                    $storage->delete($sel);
+                }
             }
         }
     }
