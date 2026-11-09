@@ -80,6 +80,7 @@ class SihosLiquidacionService
             'sinEspecialidad' => 0, 'sinProfesional' => 0, 'tiposOtros' => [], 'porActividad' => [], 'porMesEspecialidad' => [], 'inferencia' => []];
 
         foreach ($this->meses($desde, $hasta) as [$ini, $fin]) {
+            $inferencia->precargar($ini, $fin);
             foreach ($repo->fetchLineas($ini, $fin) as $f) {
                 $tipoLinea = (int)$f['TipoServ'];
                 $tipoCups = $f['TipoServCups'] !== null ? (int)$f['TipoServCups'] : null;

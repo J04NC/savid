@@ -29,6 +29,13 @@ class SihosLiquidacionInferencia
     {
     }
 
+    /** Precarga en lote las atenciones de las admisiones administrativas del rango (reemplaza la caché anterior). */
+    public function precargar(string $desde, string $hasta): void
+    {
+        $ids = $this->repo->fetchAdmisionesAdministrativas($desde, $hasta, self::LOGINS_ADMINISTRATIVOS);
+        $this->cache = $ids === [] ? [] : $this->repo->fetchAtencionesAdmisiones($ids);
+    }
+
     public static function esAdministrativo(?string $login): bool
     {
         $login = strtolower(trim((string)$login));
@@ -52,7 +59,7 @@ class SihosLiquidacionInferencia
         if ($actividad === 'Cirugía') {
             return $this->resultado(null, 'Cirugía: no inferible', self::SIN_DATO);
         }
-        $this->cache[$consAdmi] ??= $this->repo->fetchAtencionesAdmision($consAdmi);
+        $this->cache[$consAdmi] ??= $this->repo->fetchAtencionesAdmisiones([$consAdmi])[$consAdmi];
         $atenciones = $this->cache[$consAdmi];
         $fecha = (string)$f['FechFact'];
 

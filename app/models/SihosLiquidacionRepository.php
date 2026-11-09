@@ -86,28 +86,66 @@ class SihosLiquidacionRepository
     }
 
     /**
-     * Atenciones de una admisión que sirven para inferir al profesional real de
-     * una línea liquidada con un usuario administrativo: consultas (RipsCons) y
-     * hojas de procedimiento (HojaProc), cada una con el profesional que atendió.
-     * Usar una conexión distinta a la del generador de fetchLineas().
+     * Admisiones de las líneas liquidadas con un usuario administrativo (o sin
+     * profesional) en el rango, para precargar sus atenciones.
      *
-     * @return array{consultas:list<array<string,mixed>>,hojas:list<array<string,mixed>>}
+     * @param list<string> $loginsAdministrativos en minúsculas
+     * @return list<int>
      */
-    public function fetchAtencionesAdmision(int $consAdmi): array
+    public function fetchAdmisionesAdministrativas(string $desde, string $hasta, array $loginsAdministrativos): array
     {
-        $consultas = $this->pdo->prepare(
-            'SELECT r.UsuaAsis AS Login, DATE(r.FechCons) AS Fecha, u.CC AS Cedula, u.Nombre
-             FROM RipsCons r LEFT JOIN Usuarios u ON u.Login = r.UsuaAsis
-             WHERE r.CodiInst = ? AND r.ConsAdmi = ?'
+        $in = implode(',', array_fill(0, count($loginsAdministrativos), '?'));
+        $stmt = $this->pdo->prepare(
+            "SELECT DISTINCT d.ConsAdmi
+             FROM EncaFact e
+             INNER JOIN DetaFact d ON (e.CodiInst = d.CodiInst AND e.CodiAno = d.CodiAno AND e.CodiDocu = d.CodiDocu AND e.NumeFact = d.NumeFact)
+             WHERE e.CodiInst = ? AND e.Causado = 1 AND e.Anulado <> 1 AND e.FechFact BETWEEN ? AND ?
+               AND d.TipoDeta IN (1, 3, 4) AND d.ConsAdmi > 0
+               AND (d.CodiMedi IS NULL OR TRIM(d.CodiMedi) = '' OR LOWER(TRIM(d.CodiMedi)) IN ($in))"
         );
-        $consultas->execute([$this->codiInst, $consAdmi]);
-        $hojas = $this->pdo->prepare(
-            'SELECT h.UsuaAsis AS Login, DATE(h.FechProc) AS Fecha, h.CodiProc, u.CC AS Cedula, u.Nombre
-             FROM HojaProc h LEFT JOIN Usuarios u ON u.Login = h.UsuaAsis
-             WHERE h.CodiInst = ? AND h.ConsAdmi = ?'
-        );
-        $hojas->execute([$this->codiInst, $consAdmi]);
+        $stmt->execute([$this->codiInst, $desde, $hasta, ...$loginsAdministrativos]);
 
-        return ['consultas' => $consultas->fetchAll(), 'hojas' => $hojas->fetchAll()];
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /**
+     * Atenciones de varias admisiones, para inferir al profesional real de una
+     * línea liquidada con un usuario administrativo: consultas (RipsCons) y
+     * hojas de procedimiento (HojaProc), cada una con el profesional que atendió.
+     * Se consultan en lotes (una consulta por admisión es lenta por la latencia
+     * de red). Usar una conexión distinta a la del generador de fetchLineas().
+     *
+     * @param list<int> $consAdmis
+     * @return array<int,array{consultas:list<array<string,mixed>>,hojas:list<array<string,mixed>>}> ConsAdmi => atenciones
+     */
+    public function fetchAtencionesAdmisiones(array $consAdmis): array
+    {
+        $out = [];
+        foreach (array_chunk($consAdmis, 500) as $lote) {
+            $in = implode(',', array_fill(0, count($lote), '?'));
+            $consultas = $this->pdo->prepare(
+                "SELECT r.ConsAdmi, r.UsuaAsis AS Login, DATE(r.FechCons) AS Fecha, u.CC AS Cedula, u.Nombre
+                 FROM RipsCons r LEFT JOIN Usuarios u ON u.Login = r.UsuaAsis
+                 WHERE r.CodiInst = ? AND r.ConsAdmi IN ($in)"
+            );
+            $consultas->execute([$this->codiInst, ...$lote]);
+            $hojas = $this->pdo->prepare(
+                "SELECT h.ConsAdmi, h.UsuaAsis AS Login, DATE(h.FechProc) AS Fecha, h.CodiProc, u.CC AS Cedula, u.Nombre
+                 FROM HojaProc h LEFT JOIN Usuarios u ON u.Login = h.UsuaAsis
+                 WHERE h.CodiInst = ? AND h.ConsAdmi IN ($in)"
+            );
+            $hojas->execute([$this->codiInst, ...$lote]);
+            foreach ($lote as $id) {
+                $out[$id] = ['consultas' => [], 'hojas' => []];
+            }
+            foreach ($consultas->fetchAll() as $fila) {
+                $out[(int)$fila['ConsAdmi']]['consultas'][] = $fila;
+            }
+            foreach ($hojas->fetchAll() as $fila) {
+                $out[(int)$fila['ConsAdmi']]['hojas'][] = $fila;
+            }
+        }
+
+        return $out;
     }
 }
