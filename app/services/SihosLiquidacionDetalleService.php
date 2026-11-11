@@ -21,6 +21,7 @@ class SihosLiquidacionDetalleService
         'metodo' => ['Método de inferencia', 'exacto'],
         'actividad' => ['Actividad', 'exacto'],
         'prod' => ['Producción médica', 'exacto'],
+        'anulada' => ['Factura anulada', 'exacto'],
         // Valor "institucional": líneas de sala y materiales de cirugía (valor '1').
         'institucional' => ['Componente', 'institucional'],
     ];
@@ -60,6 +61,9 @@ class SihosLiquidacionDetalleService
                 continue;
             }
             if ($nombre === 'mes' && preg_match('/^\d{4}-\d{2}$/', $valor) !== 1) {
+                continue;
+            }
+            if ($nombre === 'anulada' && !in_array($valor, [SihosLiquidacionService::ANULADA_COMPLETA, SihosLiquidacionService::ANULADA_PARCIAL], true)) {
                 continue;
             }
             if (($nombre === 'prod' && !in_array($valor, ['Sí', 'No'], true)) || ($nombre === 'institucional' && $valor !== '1')) {
