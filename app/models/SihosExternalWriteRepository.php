@@ -2834,4 +2834,111 @@ class SihosExternalWriteRepository
             throw $e;
         }
     }
+
+    /**
+     * Anula en SIHOS (EncaFact) UNA liquidación viva y confirmada cuyas facturas están TODAS anuladas por
+     * una nota crédito (NCF/NC/NT) que las reversa por completo (diferencia 0 en 1 o 2 líneas de cuentas
+     * 14%): mismo criterio y mismos campos que el proceso manual de anulación por factura anulada
+     * (Anulado = 1, CausAnul = 2, fecha y hora de la nota). Revalida todo con la liquidación bloqueada:
+     * una liquidación con otra factura vigente NO se anula.
+     *
+     * @param list<int> $periodos años contables en que pudo registrarse la nota
+     * @return array{ok:bool,motivo:string,anterior:array<string,mixed>}
+     */
+    public function anularLiquidacionDeFacturaAnulada(string $codiAno, string $codiDocu, string $numeFact, array $periodos): array
+    {
+        return $this->conBloqueo(
+            'liquidacion-anular:' . $codiAno . ':' . $codiDocu . ':' . $numeFact,
+            fn (): array => $this->anularLiquidacionDeFacturaAnuladaBloqueado($codiAno, $codiDocu, $numeFact, $periodos)
+        );
+    }
+
+    /** @see anularLiquidacionDeFacturaAnulada (ya con el bloqueo tomado) */
+    private function anularLiquidacionDeFacturaAnuladaBloqueado(string $codiAno, string $codiDocu, string $numeFact, array $periodos): array
+    {
+        $pdo = $this->connect();
+        $codiInst = $this->codiInst();
+        $falla = static fn (string $motivo, array $anterior = []): array => ['ok' => false, 'motivo' => $motivo, 'anterior' => $anterior];
+
+        $pdo->beginTransaction();
+
+        try {
+            $stmt = $pdo->prepare(
+                'SELECT Causado, Anulado, CausAnul, NotaAnul, FechAnul, HoraAnul FROM EncaFact
+                 WHERE CodiInst = ? AND CodiAno = ? AND CodiDocu = ? AND NumeFact = ? FOR UPDATE'
+            );
+            $stmt->execute([$codiInst, $codiAno, $codiDocu, $numeFact]);
+            $liq = $stmt->fetch();
+            if ($liq === false) {
+                $pdo->rollBack();
+
+                return $falla('La liquidación ya no existe en SIHOS.');
+            }
+            if ((int)$liq['Anulado'] === 1) {
+                $pdo->rollBack();
+
+                return $falla('La liquidación ya está anulada.', $liq);
+            }
+            if ((int)$liq['Causado'] !== 1) {
+                $pdo->rollBack();
+
+                return $falla('La liquidación ya no está confirmada.', $liq);
+            }
+
+            $facturas = $pdo->prepare('SELECT CodiDocu, NumeDocu FROM DetaLiqu WHERE CodiInst = ? AND CodiLiqu = ? AND NumeLiqu = ?');
+            $facturas->execute([$codiInst, $codiDocu, $numeFact]);
+            $facturas = $facturas->fetchAll();
+            if ($facturas === []) {
+                $pdo->rollBack();
+
+                return $falla('La liquidación no tiene facturas asociadas.', $liq);
+            }
+
+            $in = implode(',', array_fill(0, count($periodos), '?'));
+            $nota = $pdo->prepare(
+                "SELECT SUM(d.Valor) + f.ValoTota AS DIF, COUNT(*) AS cont, MAX(e.FechCaus) AS FechCaus, MAX(e.HoraCaus) AS HoraCaus
+                 FROM EncaCont e
+                 INNER JOIN DetaCont d ON (e.CodiInst = d.CodiInst AND e.CodiDocu = d.CodiDocu AND e.NumeDocu = d.NumeDocu)
+                 INNER JOIN EncaCont f ON (d.CodiInst = f.CodiInst AND d.TiDoRefe = f.CodiDocu AND d.NuDoRefe = f.NumeDocu)
+                 WHERE e.CodiInst = ? AND e.Causado = '1' AND e.Anulado <> '1' AND e.CodiDocu IN ('NCF', 'NC', 'NT')
+                   AND d.TiDoRefe = ? AND d.NuDoRefe = ? AND d.TiDoRefe IN ('FV', 'FE') AND d.CodiCont LIKE '14%'
+                   AND d.Periodo IN ($in) AND (f.ValoEAPB > 0 OR d.CodiCont = '140907')
+                 GROUP BY d.Periodo HAVING DIF = 0 AND cont IN (1, 2)
+                 ORDER BY MAX(e.FechCaus) DESC, MAX(e.HoraCaus) DESC LIMIT 1"
+            );
+            $fechaNota = '';
+            $horaNota = '';
+            foreach ($facturas as $factura) {
+                $nota->execute([$codiInst, $factura['CodiDocu'], $factura['NumeDocu'], ...$periodos]);
+                $n = $nota->fetch();
+                if ($n === false) {
+                    $pdo->rollBack();
+
+                    return $falla('La liquidación tiene una factura que no figura anulada por nota crédito; no se anula.', $liq);
+                }
+                if ($fechaNota === '' || [$n['FechCaus'], $n['HoraCaus']] > [$fechaNota, $horaNota]) {
+                    [$fechaNota, $horaNota] = [$n['FechCaus'], $n['HoraCaus']];
+                }
+            }
+
+            $upd = $pdo->prepare(
+                "UPDATE EncaFact SET Anulado = 1, CausAnul = 2, NotaAnul = 'Se anula automaticamente por anulacion de la factura', FechAnul = ?, HoraAnul = ?
+                 WHERE CodiInst = ? AND CodiAno = ? AND CodiDocu = ? AND NumeFact = ? AND Anulado <> 1"
+            );
+            $upd->execute([$fechaNota, $horaNota, $codiInst, $codiAno, $codiDocu, $numeFact]);
+            if ($upd->rowCount() !== 1) {
+                $pdo->rollBack();
+
+                return $falla('La liquidación cambió mientras se procesaba; no se modificó.', $liq);
+            }
+            $pdo->commit();
+
+            return ['ok' => true, 'motivo' => '', 'anterior' => $liq];
+        } catch (PDOException $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
 }
