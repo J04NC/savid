@@ -54,7 +54,7 @@ class SihosLiquidacionRepository
                        e.CodiAdmi, a.NombAdmi, e.TipoCont, tc.NombTipo AS NombTipoCont, e.NumeCont, c.DescCont,
                        e.CodiServ AS ServOrig, so.NombServ AS NombServOrig, e.ServEgre, se.NombServ AS NombServEgre,
                        d.TipoDeta, d.TipoServ, d.ConsAdmi, d.CodiServ AS CodiProcLinea, cp.TipoServ AS TipoServCups, cp.CodiCups, cp.NombProc,
-                       d.CodiMedi, u.TipoDocu AS TipoDocuProf, u.CC AS CedulaProf, u.Nombre AS NombreProf, u.RegiProf, u.Activo AS ActivoProf, ce.NombEspe,
+                       d.CodiMedi, u.TipoDocu AS TipoDocuProf, u.CC AS CedulaProf, u.Nombre AS NombreProf, u.RegiProf, u.Activo AS ActivoProf, u.CodiEspe AS CodiEspeProf, ce.NombEspe,
                        d.CantServ, d.ValoEAPB, d.ValoUsua, d.ValoTota
                 FROM EncaFact e
                 INNER JOIN DetaFact d ON (e.CodiInst = d.CodiInst AND e.CodiAno = d.CodiAno AND e.CodiDocu = d.CodiDocu AND e.NumeFact = d.NumeFact)
@@ -89,21 +89,21 @@ class SihosLiquidacionRepository
      * Admisiones de las líneas liquidadas con un usuario administrativo (o sin
      * profesional) en el rango, para precargar sus atenciones.
      *
-     * @param list<string> $loginsAdministrativos en minúsculas
+     * @param string $codiEspeAdministrativo código de la especialidad ADMINISTRATIVO (CodiEspe)
      * @return list<int>
      */
-    public function fetchAdmisionesAdministrativas(string $desde, string $hasta, array $loginsAdministrativos): array
+    public function fetchAdmisionesAdministrativas(string $desde, string $hasta, string $codiEspeAdministrativo): array
     {
-        $in = implode(',', array_fill(0, count($loginsAdministrativos), '?'));
         $stmt = $this->pdo->prepare(
             "SELECT DISTINCT d.ConsAdmi
              FROM EncaFact e
              INNER JOIN DetaFact d ON (e.CodiInst = d.CodiInst AND e.CodiAno = d.CodiAno AND e.CodiDocu = d.CodiDocu AND e.NumeFact = d.NumeFact)
+             LEFT JOIN Usuarios u ON u.Login = d.CodiMedi
              WHERE e.CodiInst = ? AND e.Causado = 1 AND e.Anulado <> 1 AND e.FechFact BETWEEN ? AND ?
                AND d.TipoDeta IN (1, 3, 4) AND d.ConsAdmi > 0
-               AND (d.CodiMedi IS NULL OR TRIM(d.CodiMedi) = '' OR LOWER(TRIM(d.CodiMedi)) IN ($in))"
+               AND (d.CodiMedi IS NULL OR TRIM(d.CodiMedi) = '' OR u.CodiEspe = ?)"
         );
-        $stmt->execute([$this->codiInst, $desde, $hasta, ...$loginsAdministrativos]);
+        $stmt->execute([$this->codiInst, $desde, $hasta, $codiEspeAdministrativo]);
 
         return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
     }
@@ -124,13 +124,13 @@ class SihosLiquidacionRepository
         foreach (array_chunk($consAdmis, 500) as $lote) {
             $in = implode(',', array_fill(0, count($lote), '?'));
             $consultas = $this->pdo->prepare(
-                "SELECT r.ConsAdmi, r.UsuaAsis AS Login, DATE(r.FechCons) AS Fecha, u.CC AS Cedula, u.Nombre
+                "SELECT r.ConsAdmi, r.UsuaAsis AS Login, DATE(r.FechCons) AS Fecha, u.CC AS Cedula, u.Nombre, u.CodiEspe
                  FROM RipsCons r LEFT JOIN Usuarios u ON u.Login = r.UsuaAsis
                  WHERE r.CodiInst = ? AND r.ConsAdmi IN ($in)"
             );
             $consultas->execute([$this->codiInst, ...$lote]);
             $hojas = $this->pdo->prepare(
-                "SELECT h.ConsAdmi, h.UsuaAsis AS Login, DATE(h.FechProc) AS Fecha, h.CodiProc, u.CC AS Cedula, u.Nombre
+                "SELECT h.ConsAdmi, h.UsuaAsis AS Login, DATE(h.FechProc) AS Fecha, h.CodiProc, u.CC AS Cedula, u.Nombre, u.CodiEspe
                  FROM HojaProc h LEFT JOIN Usuarios u ON u.Login = h.UsuaAsis
                  WHERE h.CodiInst = ? AND h.ConsAdmi IN ($in)"
             );

@@ -91,7 +91,7 @@ class SihosLiquidacionService
                 $esp = trim((string)$f['NombEspe']) !== '' ? trim((string)$f['NombEspe']) : 'SIN ESPECIALIDAD';
                 $valores = [1, (float)$f['CantServ'], (float)$f['ValoEAPB'], (float)$f['ValoUsua'], (float)$f['ValoTota']];
 
-                $inf = SihosLiquidacionInferencia::esAdministrativo($f['CodiMedi']) ? $inferencia->inferir($f, $actividad) : null;
+                $inf = SihosLiquidacionInferencia::esAdministrativo($f['CodiMedi'], $f['CodiEspeProf']) ? $inferencia->inferir($f, $actividad) : null;
                 if ($inf !== null) {
                     $this->sumar($res['inferencia'][$inf['confianza']][$inf['metodo']], $valores);
                 }

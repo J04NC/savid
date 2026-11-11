@@ -2,7 +2,7 @@
 
 /**
  * Infiere el profesional real de las líneas de liquidación cargadas a un
- * usuario administrativo (DetaFact.CodiMedi = 'Admin') o sin profesional, a
+ * usuario de la especialidad ADMINISTRATIVO (p. ej. 'Admin') o sin profesional, a
  * partir de la atención de la misma admisión. NO reemplaza CodiMedi: el
  * resultado se muestra en columnas aparte, con el método y la confianza.
  *
@@ -17,8 +17,8 @@
  */
 class SihosLiquidacionInferencia
 {
-    /** Logins que no son personas atendiendo (comparación sin mayúsculas). */
-    public const LOGINS_ADMINISTRATIVOS = ['admin'];
+    /** CodiEspe de la especialidad ADMINISTRATIVO: sus usuarios (incluido 'admin') no son personas atendiendo. */
+    public const CODI_ESPE_ADMINISTRATIVO = '002';
 
     public const SIN_DATO = 'Sin dato';
 
@@ -32,15 +32,14 @@ class SihosLiquidacionInferencia
     /** Precarga en lote las atenciones de las admisiones administrativas del rango (reemplaza la caché anterior). */
     public function precargar(string $desde, string $hasta): void
     {
-        $ids = $this->repo->fetchAdmisionesAdministrativas($desde, $hasta, self::LOGINS_ADMINISTRATIVOS);
+        $ids = $this->repo->fetchAdmisionesAdministrativas($desde, $hasta, self::CODI_ESPE_ADMINISTRATIVO);
         $this->cache = $ids === [] ? [] : $this->repo->fetchAtencionesAdmisiones($ids);
     }
 
-    public static function esAdministrativo(?string $login): bool
+    /** Administrativo = sin usuario, o con la especialidad ADMINISTRATIVO. */
+    public static function esAdministrativo(?string $login, ?string $codiEspe): bool
     {
-        $login = strtolower(trim((string)$login));
-
-        return $login === '' || in_array($login, self::LOGINS_ADMINISTRATIVOS, true);
+        return trim((string)$login) === '' || trim((string)$codiEspe) === self::CODI_ESPE_ADMINISTRATIVO;
     }
 
     /**
@@ -79,7 +78,7 @@ class SihosLiquidacionInferencia
         if ($delDia !== null) {
             return $this->resultado($delDia, 'Consulta de la admisión (mismo día)', 'Alta');
         }
-        $hayDelDia = array_filter($atenciones['consultas'], static fn (array $c): bool => $c['Fecha'] === $fecha && !self::esAdministrativo($c['Login'])) !== [];
+        $hayDelDia = array_filter($atenciones['consultas'], static fn (array $c): bool => $c['Fecha'] === $fecha && !self::esAdministrativo($c['Login'], $c['CodiEspe'])) !== [];
         $unico = $hayDelDia ? null : $this->unico($atenciones['consultas']);
 
         return $unico !== null
@@ -97,7 +96,7 @@ class SihosLiquidacionInferencia
     {
         $porLogin = [];
         foreach ($atenciones as $a) {
-            if (!self::esAdministrativo($a['Login'])) {
+            if (!self::esAdministrativo($a['Login'], $a['CodiEspe'])) {
                 $porLogin[strtolower(trim((string)$a['Login']))] = $a;
             }
         }
