@@ -155,6 +155,42 @@ $celdaClic = static fn (array $filtro, string $titulo, float $valor = 1.0): stri
                 </table>
             <?php endif; ?>
 
+            <?php if (!empty($reporte['facturaAnulada'])): ?>
+                <?php
+                $anuladasTot = [];
+                foreach ($reporte['facturaAnulada'] as $a) {
+                    $t = &$anuladasTot[$a['estado']];
+                    $t ??= ['mes' => '', 'estado' => $a['estado'], 'liquidaciones' => 0, 'lineas' => 0, 'prod' => 0.0, 'total' => 0.0];
+                    foreach (['liquidaciones', 'lineas', 'prod', 'total'] as $k) {
+                        $t[$k] += $a[$k];
+                    }
+                    unset($t);
+                }
+                ?>
+                <h3 class="auditoria-title" style="font-size:1.1em; margin-top:28px;">Liquidaciones con factura anulada</h3>
+                <p class="auditoria-hint">
+                    Liquidaciones vivas y confirmadas cuya factura fue anulada por una nota crédito (NCF, NC o NT) que la reversa por completo. Siguen sumando en este reporte mientras no se anulen en SIHOS.
+                    "Liquidación completa": todas sus facturas están anuladas. "Con otra factura viva": además tiene otra factura vigente (de valor distinto), así que anularla borraría facturación vigente; revísela antes.
+                    Haga clic en una fila para ver sus líneas.
+                </p>
+                <table class="seguridad-table savid-dt-fit" id="sihosLiquidacionFacturaAnulada">
+                    <thead><tr><th>Mes de la liquidación</th><th>Estado</th><th>Liquidaciones</th><th>Líneas</th><th>Valor producción médica</th><th>Valor total</th></tr></thead>
+                    <tbody>
+                        <?php foreach ([...array_values($anuladasTot), ...$reporte['facturaAnulada']] as $a): ?>
+                            <tr data-liq-filtro="<?= htmlspecialchars((string)json_encode(array_filter(['anulada' => $a['estado'], 'mes' => $a['mes']])), ENT_QUOTES) ?>"
+                                data-liq-titulo="<?= htmlspecialchars('Líneas · ' . $a['estado'] . ($a['mes'] !== '' ? ' · ' . $a['mes'] : ''), ENT_QUOTES) ?>" tabindex="0" style="cursor:pointer;" title="Ver las líneas">
+                                <td><?= $a['mes'] !== '' ? htmlspecialchars($a['mes']) : '<strong>Todo el rango</strong>' ?></td>
+                                <td><?= htmlspecialchars($a['estado']) ?></td>
+                                <td style="text-align:right;"><?= $num((float)$a['liquidaciones']) ?></td>
+                                <td style="text-align:right;"><?= $num((float)$a['lineas']) ?></td>
+                                <td style="text-align:right;"><?= $fmt((float)$a['prod']) ?></td>
+                                <td style="text-align:right;"><?= $fmt((float)$a['total']) ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
+
             <h3 class="auditoria-title" style="font-size:1.1em; margin-top:28px;">Valor total de producción médica por especialidad y mes</h3>
             <table class="savid-datatable seguridad-table savid-dt-fit" id="sihosLiquidacionEspecialidad"
                    data-dt-order="[[<?= count($meses) + 1 ?>,&quot;desc&quot;]]"
