@@ -18,6 +18,8 @@ class SihosLiquidacionService
         'CUPS', 'Procedimiento', 'Especialidad', 'Cédula profesional', 'Profesional',
         'Cédula profesional inferido', 'Profesional inferido', 'Método de inferencia', 'Confianza inferencia',
         'Cantidad', 'Valor EAPB', 'Valor usuario', 'Valor total',
+        // Llave de la línea en DetaFact (con Documento y Número liquidación) y usuarios: para corregir el profesional desde el modal.
+        'Año liquidación', 'Consecutivo línea', 'Usuario SIHOS (CodiMedi)', 'Usuario profesional inferido',
     ];
     public const COLUMNAS_RESUMEN = [
         'Mes', 'Especialidad', 'Cédula profesional', 'Profesional', 'Actividad', 'Componente', 'Producción médica',
@@ -103,6 +105,7 @@ class SihosLiquidacionService
                     $f['CodiCups'], $f['NombProc'], $esp, $f['CedulaProf'], $f['NombreProf'],
                     $inf['cedula'] ?? '', $inf['nombre'] ?? '', $inf['metodo'] ?? '', $inf['confianza'] ?? '',
                     self::num($valores[1]), self::num($valores[2]), self::num($valores[3]), self::num($valores[4]),
+                    $f['CodiAno'], $f['ConsDeFa'], trim((string)$f['CodiMedi']), $inf['login'] ?? '',
                 ]);
 
                 $mes = substr((string)$f['FechFact'], 0, 7);

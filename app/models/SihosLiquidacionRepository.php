@@ -50,7 +50,7 @@ class SihosLiquidacionRepository
      */
     public function fetchLineas(string $desde, string $hasta): Generator
     {
-        $sql = "SELECT e.FechFact, e.CodiDocu, e.NumeFact,
+        $sql = "SELECT e.FechFact, e.CodiAno, e.CodiDocu, e.NumeFact, d.ConsDeFa,
                        e.CodiAdmi, a.NombAdmi, e.TipoCont, tc.NombTipo AS NombTipoCont, e.NumeCont, c.DescCont,
                        e.CodiServ AS ServOrig, so.NombServ AS NombServOrig, e.ServEgre, se.NombServ AS NombServEgre,
                        d.TipoDeta, d.TipoServ, d.ConsAdmi, d.CodiServ AS CodiProcLinea, cp.TipoServ AS TipoServCups, cp.CodiCups, cp.NombProc,

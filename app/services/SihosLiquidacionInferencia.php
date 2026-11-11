@@ -44,7 +44,7 @@ class SihosLiquidacionInferencia
 
     /**
      * @param array<string,mixed> $f línea del repository
-     * @return array{cedula:string,nombre:string,metodo:string,confianza:string}|null null si la actividad no es médica
+     * @return array{cedula:string,nombre:string,login:string,metodo:string,confianza:string}|null null si la actividad no es médica
      */
     public function inferir(array $f, string $actividad): ?array
     {
@@ -104,11 +104,11 @@ class SihosLiquidacionInferencia
         return count($porLogin) === 1 ? reset($porLogin) : null;
     }
 
-    /** @param array<string,mixed>|null $prof @return array{cedula:string,nombre:string,metodo:string,confianza:string} */
+    /** @param array<string,mixed>|null $prof @return array{cedula:string,nombre:string,login:string,metodo:string,confianza:string} */
     private function resultado(?array $prof, string $metodo, string $confianza): array
     {
         return [
-            'cedula' => (string)($prof['Cedula'] ?? ''), 'nombre' => (string)($prof['Nombre'] ?? ''),
+            'cedula' => (string)($prof['Cedula'] ?? ''), 'nombre' => (string)($prof['Nombre'] ?? ''), 'login' => trim((string)($prof['Login'] ?? '')),
             'metodo' => $metodo, 'confianza' => $confianza,
         ];
     }
