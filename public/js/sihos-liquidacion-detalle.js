@@ -16,9 +16,12 @@
         var tabla = null;
         // Con permiso de corrección, la columna 0 es el check (llave de la línea); las demás se corren una posición.
         var corregir = modal.getAttribute('data-corregir') === '1';
-        var desfase = corregir ? 1 : 0;
-        var marcadas = {}; // llave de la línea => confianza ('Alta'/'Media'); se conserva entre páginas
+        var anular = modal.getAttribute('data-anular') === '1';
+        var desfase = (corregir || anular) ? 1 : 0;
+        var modoAnular = false; // true cuando el modal se abrió con el filtro de factura anulada
+        var marcadas = {}; // llave (línea a corregir, o liquidación a anular) => confianza; se conserva entre páginas
         var btnCorregir = document.getElementById('sihosLiquidacionCorregirBtn');
+        var btnAnular = document.getElementById('sihosLiquidacionAnularBtn');
         var resultado = document.getElementById('sihosLiquidacionCorregirResultado');
 
         function parametros() {
@@ -60,12 +63,12 @@
                 pageLength: 50,
                 lengthMenu: [25, 50, 100, 200],
                 order: [[desfase, 'asc']],
-                columnDefs: [{ targets: [12 + desfase, 13 + desfase], className: 'dt-right' }].concat(corregir ? [{
+                columnDefs: [{ targets: [12 + desfase, 13 + desfase], className: 'dt-right' }].concat(desfase ? [{
                     targets: 0, orderable: false, searchable: false, className: 'dt-center',
                     render: function (clave, tipo, fila) {
-                        if (tipo !== 'display' || !clave) { return ''; }
+                        if (tipo !== 'display' || !clave || (modoAnular ? !anular : !corregir)) { return ''; }
                         var esc = String(clave).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
-                        return '<input type="checkbox" class="liq-corregir" data-clave="' + esc + '" data-confianza="' + fila[12] + '"'
+                        return '<input type="checkbox" class="liq-corregir" data-clave="' + esc + '" data-confianza="' + (modoAnular ? '' : fila[12]) + '"'
                             + (marcadas[clave] ? ' checked' : '') + ' aria-label="Marcar para corregir">';
                     }
                 }] : []),
@@ -81,7 +84,7 @@
                     },
                     // El servidor manda la llave de la línea al final de la fila; con checks pasa a la columna 0.
                     dataSrc: function (json) {
-                        return corregir ? json.data.map(function (r) { return [r[14]].concat(r.slice(0, 14)); }) : json.data;
+                        return desfase ? json.data.map(function (r) { return [r[14]].concat(r.slice(0, 14)); }) : json.data;
                     },
                     error: function (xhr) {
                         estado.textContent = (xhr.responseJSON && xhr.responseJSON.error) || 'No se pudo cargar el detalle.';
@@ -104,6 +107,11 @@
             modal.classList.remove('hidden');
             filtrosColumna = {};
             marcadas = {};
+            modoAnular = f.anulada !== undefined;
+            var bloqueC = document.getElementById('sihosLiquidacionBloqueCorregir');
+            var bloqueA = document.getElementById('sihosLiquidacionBloqueAnular');
+            if (bloqueC) { bloqueC.classList.toggle('hidden', modoAnular); }
+            if (bloqueA) { bloqueA.classList.toggle('hidden', !modoAnular); }
             actualizarBoton();
             if (resultado) { resultado.textContent = ''; }
             $('#sihosLiquidacionDetalleTabla .liq-filtros-columna input').val('');
@@ -115,10 +123,38 @@
         }
 
         function actualizarBoton() {
-            if (!btnCorregir) { return; }
             var n = Object.keys(marcadas).length;
-            document.getElementById('sihosLiquidacionCorregirN').textContent = n;
-            btnCorregir.disabled = n === 0;
+            if (btnCorregir) {
+                document.getElementById('sihosLiquidacionCorregirN').textContent = n;
+                btnCorregir.disabled = n === 0;
+            }
+            if (btnAnular) {
+                document.getElementById('sihosLiquidacionAnularN').textContent = n;
+                btnAnular.disabled = n === 0;
+            }
+        }
+
+        function anularMarcadas() {
+            var claves = Object.keys(marcadas);
+            if (!claves.length || !window.confirm('Se van a ANULAR ' + claves.length + ' liquidación(es) en SIHOS, cuyas facturas están anuladas por nota crédito. '
+                + 'Esta acción modifica la facturación; el estado anterior queda en la auditoría. ¿Continuar?')) { return; }
+            btnAnular.disabled = true;
+            resultado.textContent = 'Anulando en SIHOS…';
+            $.ajax({
+                url: '?url=sihos/liquidacionAnular', type: 'POST', dataType: 'json',
+                data: $.extend(parametros(), { f: filtros, claves: claves })
+            }).done(function (r) {
+                var omitidas = (r.resultados || []).filter(function (x) { return !x.ok; });
+                (r.resultados || []).forEach(function (x, i) { if (x.ok) { delete marcadas[claves[i]]; } });
+                resultado.textContent = r.anuladas + ' liquidación(es) anulada(s), ' + r.omitidas + ' omitida(s).'
+                    + (omitidas.length ? ' ' + omitidas.slice(0, 10).map(function (x) { return x.liquidacion + ': ' + x.motivo; }).join(' · ') : '')
+                    + ' El reporte conserva los datos del momento de la consulta; vuelva a generarlo para ver el cambio.';
+            }).fail(function (xhr) {
+                resultado.textContent = (xhr.responseJSON && xhr.responseJSON.error) || 'No se pudo anular.';
+            }).always(function () {
+                actualizarBoton();
+                if (tabla) { tabla.draw(false); }
+            });
         }
 
         function corregirMarcadas() {
@@ -172,13 +208,23 @@
             if (e.key === 'Enter' && e.target.matches && e.target.matches('tr[data-liq-filtro], td[data-liq-extra]')) filaDesde(e.target);
             if (e.key === 'Escape') cerrar();
         });
-        if (corregir) {
+        if (corregir || anular) {
             $(document).on('change', '#sihosLiquidacionDetalleTabla input.liq-corregir', function () {
                 var clave = this.getAttribute('data-clave');
                 if (this.checked) { marcadas[clave] = this.getAttribute('data-confianza'); } else { delete marcadas[clave]; }
                 actualizarBoton();
             });
-            btnCorregir.addEventListener('click', corregirMarcadas);
+            if (btnCorregir) { btnCorregir.addEventListener('click', corregirMarcadas); }
+            if (btnAnular) {
+                btnAnular.addEventListener('click', anularMarcadas);
+                document.getElementById('sihosLiquidacionMarcarVisibles').addEventListener('click', function () {
+                    $('#sihosLiquidacionDetalleTabla input.liq-corregir').each(function () {
+                        this.checked = true;
+                        marcadas[this.getAttribute('data-clave')] = '';
+                    });
+                    actualizarBoton();
+                });
+            }
         }
         document.getElementById('sihosLiquidacionDetalleCerrar').addEventListener('click', cerrar);
         modal.addEventListener('click', function (e) { if (e.target === modal) cerrar(); });

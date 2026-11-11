@@ -258,7 +258,7 @@ $celdaClic = static fn (array $filtro, string $titulo, float $valor = 1.0): stri
                 </tbody>
             </table>
 
-            <div id="sihosLiquidacionDetalleModal" class="modal hidden" data-empresa="<?= (int)$empresaId ?>" data-job="<?= htmlspecialchars((string)$tokenJob, ENT_QUOTES) ?>" data-corregir="<?= !empty($puedeCorregirProfesional) ? '1' : '0' ?>">
+            <div id="sihosLiquidacionDetalleModal" class="modal hidden" data-empresa="<?= (int)$empresaId ?>" data-job="<?= htmlspecialchars((string)$tokenJob, ENT_QUOTES) ?>" data-corregir="<?= !empty($puedeCorregirProfesional) ? '1' : '0' ?>" data-anular="<?= !empty($puedeAnularLiquidacion) ? '1' : '0' ?>">
                 <div class="modal-content" style="max-width:min(1500px, 96vw);">
                     <div class="modal-header-bar">
                         <span id="sihosLiquidacionDetalleTitulo">Detalle</span>
@@ -271,18 +271,32 @@ $celdaClic = static fn (array $filtro, string $titulo, float $valor = 1.0): stri
                             <a class="auditoria-btn-primary" style="margin-left:8px;" href="<?= htmlspecialchars($urlDescarga('detalle')) ?>">⬇ Descargar detalle completo (CSV)</a>
                         </p>
                         <p id="sihosLiquidacionDetalleEstado" class="modal-form-alert" aria-live="polite"></p>
+                        <?php if (!empty($puedeAnularLiquidacion)): ?>
+                            <div id="sihosLiquidacionBloqueAnular" class="hidden">
+                                <p class="field-note">
+                                    Solo se pueden marcar las liquidaciones <strong>completas</strong>: todas sus facturas están anuladas por una nota crédito. Al anular se marca la liquidación como anulada en SIHOS
+                                    (causa 2, con la fecha y hora de la nota); el estado anterior queda en la auditoría. Las que tienen otra factura vigente no se pueden marcar.
+                                    <button type="button" id="sihosLiquidacionMarcarVisibles" class="auditoria-btn-primary" style="margin-left:8px;">Marcar las visibles</button>
+                                    <button type="button" id="sihosLiquidacionAnularBtn" class="auditoria-btn-primary" style="margin-left:8px;" disabled>🚫 Anular liquidaciones en SIHOS (<span id="sihosLiquidacionAnularN">0</span>)</button>
+                                </p>
+                            </div>
+                        <?php endif; ?>
                         <?php if (!empty($puedeCorregirProfesional)): ?>
+                            <div id="sihosLiquidacionBloqueCorregir">
                             <p class="field-note">
                                 Marque las líneas con profesional inferido (confianza Alta o Media) y use el botón para corregir el profesional (<code>CodiMedi</code>) en SIHOS.
                                 Solo cambia líneas de liquidaciones confirmadas que hoy no tienen profesional o lo tienen un usuario administrativo; el valor anterior queda en la auditoría.
                                 <button type="button" id="sihosLiquidacionCorregirBtn" class="auditoria-btn-primary" style="margin-left:8px;" disabled>✔ Actualizar profesional en SIHOS (<span id="sihosLiquidacionCorregirN">0</span>)</button>
                             </p>
+                            </div>
+                        <?php endif; ?>
+                        <?php if (!empty($puedeCorregirProfesional) || !empty($puedeAnularLiquidacion)): ?>
                             <div id="sihosLiquidacionCorregirResultado" class="field-note" aria-live="polite"></div>
                         <?php endif; ?>
                         <table id="sihosLiquidacionDetalleTabla" class="seguridad-table" style="width:100%;">
                             <thead>
                                 <tr>
-                                    <?php if (!empty($puedeCorregirProfesional)): ?><th title="Corregir profesional en SIHOS"></th><?php endif; ?>
+                                    <?php if (!empty($puedeCorregirProfesional) || !empty($puedeAnularLiquidacion)): ?><th title="Marcar para corregir o anular en SIHOS"></th><?php endif; ?>
                                     <?php foreach (SihosLiquidacionDetalleService::COLUMNAS_MODAL as $col): ?>
                                         <th><?= htmlspecialchars($col) ?></th>
                                     <?php endforeach; ?>
