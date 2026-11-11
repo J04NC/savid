@@ -31,6 +31,10 @@ class SihosLiquidacionDetalleService
         'CUPS', 'Procedimiento', 'Profesional', 'Profesional inferido', 'Confianza inferencia', 'Cantidad', 'Valor total',
     ];
     private const NUMERICAS = ['Cantidad', 'Valor total'];
+    /** Columnas del CSV que identifican una línea de DetaFact y su corrección (reportes anteriores no las traen). */
+    private const COLUMNAS_LLAVE = ['Año liquidación', 'Documento', 'Número liquidación', 'Consecutivo línea'];
+    private const COLUMNA_LOGIN_INFERIDO = 'Usuario profesional inferido';
+    public const CONFIANZAS_CORREGIBLES = ['Alta', 'Media'];
     private const MAX_PAGINA = 200;
 
     public function __construct(private readonly SihosLiquidacionJobService $job)
@@ -159,6 +163,7 @@ class SihosLiquidacionDetalleService
             array_multisort($claves, ($p['order'][0]['dir'] ?? 'asc') === 'desc' ? SORT_DESC : SORT_ASC, $numerica ? SORT_NUMERIC : SORT_STRING, $registros);
         }
 
+        $llave = self::indicesCorreccion($cabecera);
         $inicio = max(0, (int)($p['start'] ?? 0));
         $largo = min(self::MAX_PAGINA, max(1, (int)($p['length'] ?? 50)));
         $filas = [];
@@ -171,10 +176,79 @@ class SihosLiquidacionDetalleService
                     ? number_format((float)str_replace(',', '.', $v), 0, ',', '.')
                     : htmlspecialchars($v, ENT_QUOTES);
             }
+            $fila[] = $llave !== null ? (self::lineaCorregible($f, $llave)['clave'] ?? '') : ''; // marca de selección del modal; vacía si no se puede corregir
             $filas[] = $fila;
         }
 
         return ['draw' => (int)($p['draw'] ?? 0), 'recordsTotal' => $total, 'recordsFiltered' => count($registros), 'data' => $filas];
+    }
+
+    /**
+     * Índices de las columnas necesarias para corregir; null si el CSV es de un reporte anterior a esas columnas.
+     *
+     * @param list<string> $cabecera
+     * @return array<string,int>|null
+     */
+    private static function indicesCorreccion(array $cabecera): ?array
+    {
+        $ix = [];
+        foreach ([...self::COLUMNAS_LLAVE, self::COLUMNA_LOGIN_INFERIDO, 'Confianza inferencia'] as $nombre) {
+            $i = array_search($nombre, $cabecera, true);
+            if ($i === false) {
+                return null;
+            }
+            $ix[$nombre] = (int)$i;
+        }
+
+        return $ix;
+    }
+
+    /**
+     * Datos de corrección de una línea, o null si no tiene profesional inferido con confianza suficiente.
+     *
+     * @param list<string|null> $f
+     * @param array<string,int> $ix
+     * @return array{clave:string,ano:string,docu:string,nume:string,cons:string,login:string,confianza:string}|null
+     */
+    private static function lineaCorregible(array $f, array $ix): ?array
+    {
+        $login = trim((string)($f[$ix[self::COLUMNA_LOGIN_INFERIDO]] ?? ''));
+        $confianza = (string)($f[$ix['Confianza inferencia']] ?? '');
+        $v = array_map(static fn (string $c): string => trim((string)($f[$ix[$c]] ?? '')), self::COLUMNAS_LLAVE);
+        if ($login === '' || !in_array($confianza, self::CONFIANZAS_CORREGIBLES, true) || in_array('', $v, true)) {
+            return null;
+        }
+
+        return ['clave' => implode('|', $v), 'ano' => $v[0], 'docu' => $v[1], 'nume' => $v[2], 'cons' => $v[3], 'login' => $login, 'confianza' => $confianza];
+    }
+
+    /**
+     * Líneas de la selección con esas llaves ('año|documento|número|consecutivo') que tienen profesional
+     * inferido corregible. Los datos salen del CSV del reporte, nunca de lo que envía el navegador.
+     *
+     * @param list<string> $claves
+     * @return array<string,array{clave:string,ano:string,docu:string,nume:string,cons:string,login:string,confianza:string}>|null null si el reporte no trae las columnas
+     */
+    public function lineasCorregibles(string $ruta, array $claves): ?array
+    {
+        $h = fopen($ruta, 'rb');
+        if (!$h) {
+            return null;
+        }
+        $cabecera = str_getcsv((string)self::leerRegistro($h), ';');
+        $ix = self::indicesCorreccion($cabecera);
+        $pendientes = array_flip($claves);
+        $out = [];
+        while ($ix !== null && $pendientes !== [] && ($reg = self::leerRegistro($h)) !== null) {
+            $linea = self::lineaCorregible(str_getcsv($reg, ';'), $ix);
+            if ($linea !== null && isset($pendientes[$linea['clave']])) {
+                $out[$linea['clave']] = $linea;
+                unset($pendientes[$linea['clave']]);
+            }
+        }
+        fclose($h);
+
+        return $ix === null ? null : $out;
     }
 
     /**
