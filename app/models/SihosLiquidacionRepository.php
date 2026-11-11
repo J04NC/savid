@@ -148,4 +148,44 @@ class SihosLiquidacionRepository
 
         return $out;
     }
+
+    /**
+     * Liquidaciones vivas y confirmadas del rango cuya factura fue anulada por una nota crédito
+     * (NCF/NC/NT que reversa la factura completa: diferencia 0 en 1 o 2 líneas de cuentas 14%).
+     * 'completa' = todas las facturas de la liquidación están anuladas; 'parcial' = tiene además otra
+     * factura que no lo está. Es el mismo criterio con que se anulan en SIHOS las liquidaciones
+     * de facturas anuladas (ver SihosExternalWriteRepository::anularLiquidacionDeFacturaAnulada).
+     *
+     * @param list<int> $periodos años contables de las notas
+     * @return array<string,string> 'CodiDocu|NumeFact' => 'completa'|'parcial'
+     */
+    public function fetchLiquidacionesFacturaAnulada(string $desde, string $hasta, array $periodos): array
+    {
+        $in = implode(',', array_fill(0, count($periodos), '?'));
+        $stmt = $this->pdo->prepare(
+            "SELECT l.CodiDocu, l.NumeFact, COUNT(DISTINCT n.TiDoRefe, n.NuDoRefe) AS anuladas,
+                    (SELECT COUNT(*) FROM DetaLiqu x WHERE x.CodiInst = l.CodiInst AND x.CodiLiqu = l.CodiDocu AND x.NumeLiqu = l.NumeFact) AS facturas
+             FROM EncaFact l
+             INNER JOIN DetaLiqu dl ON (dl.CodiInst = l.CodiInst AND dl.CodiLiqu = l.CodiDocu AND dl.NumeLiqu = l.NumeFact)
+             INNER JOIN (
+                 SELECT d.TiDoRefe, d.NuDoRefe, SUM(d.Valor) + f.ValoTota AS DIF, COUNT(*) AS cont
+                 FROM EncaCont e
+                 INNER JOIN DetaCont d ON (e.CodiInst = d.CodiInst AND e.CodiDocu = d.CodiDocu AND e.NumeDocu = d.NumeDocu)
+                 INNER JOIN EncaCont f ON (d.CodiInst = f.CodiInst AND d.TiDoRefe = f.CodiDocu AND d.NuDoRefe = f.NumeDocu)
+                 WHERE e.CodiInst = ? AND e.Causado = '1' AND e.Anulado <> '1' AND e.CodiDocu IN ('NCF', 'NC', 'NT')
+                   AND d.TiDoRefe IN ('FV', 'FE') AND d.CodiCont LIKE '14%' AND d.Periodo IN ($in)
+                   AND (f.ValoEAPB > 0 OR d.CodiCont = '140907')
+                 GROUP BY d.TiDoRefe, d.NuDoRefe, d.Periodo HAVING DIF = 0 AND cont IN (1, 2)
+             ) n ON (n.TiDoRefe = dl.CodiDocu AND n.NuDoRefe = dl.NumeDocu)
+             WHERE l.CodiInst = ? AND l.Causado = 1 AND l.Anulado <> 1 AND l.FechFact BETWEEN ? AND ?
+             GROUP BY l.CodiInst, l.CodiDocu, l.NumeFact"
+        );
+        $stmt->execute([$this->codiInst, ...$periodos, $this->codiInst, $desde, $hasta]);
+        $out = [];
+        foreach ($stmt->fetchAll() as $f) {
+            $out[$f['CodiDocu'] . '|' . $f['NumeFact']] = (int)$f['anuladas'] >= (int)$f['facturas'] ? 'completa' : 'parcial';
+        }
+
+        return $out;
+    }
 }
