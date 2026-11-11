@@ -150,41 +150,113 @@ class SihosLiquidacionRepository
     }
 
     /**
-     * Liquidaciones vivas y confirmadas del rango cuya factura fue anulada por una nota crédito
-     * (NCF/NC/NT que reversa la factura completa: diferencia 0 en 1 o 2 líneas de cuentas 14%).
-     * 'completa' = todas las facturas de la liquidación están anuladas; 'parcial' = tiene además otra
-     * factura que no lo está. Es el mismo criterio con que se anulan en SIHOS las liquidaciones
-     * de facturas anuladas (ver SihosExternalWriteRepository::anularLiquidacionDeFacturaAnulada).
+     * Liquidaciones vivas y confirmadas del rango con al menos una factura anulada por una nota crédito
+     * (NCF/NC/NT que la reversa por completo: diferencia 0 en 1 o 2 líneas de cuentas 14%). Clases:
+     *  - 'completa': todas sus facturas están anuladas.
+     *  - 'entidad': anulada la factura de la entidad (con valor EAPB); lo que queda vivo es solo la factura
+     *    del paciente (copago/cuota), sin valor EAPB.
+     *  - 'revisar': cualquier otro caso (p. ej. anulada la del paciente y viva la de la entidad).
+     * 'otra' indica si existe otra liquidación viva y confirmada del mismo paciente y admisión que no esté
+     * en la misma situación ('Sí'/'No'): es la que reemplazaría a la que se anule.
      *
      * @param list<int> $periodos años contables de las notas
-     * @return array<string,string> 'CodiDocu|NumeFact' => 'completa'|'parcial'
+     * @return array<string,array{clase:string,otra:string}> 'CodiDocu|NumeFact' => datos
      */
     public function fetchLiquidacionesFacturaAnulada(string $desde, string $hasta, array $periodos): array
     {
         $in = implode(',', array_fill(0, count($periodos), '?'));
+        $nota = "SELECT DISTINCT x.TiDoRefe, x.NuDoRefe FROM (
+                     SELECT d.TiDoRefe, d.NuDoRefe, SUM(d.Valor) + f.ValoTota AS DIF, COUNT(*) AS cont
+                     FROM EncaCont e
+                     INNER JOIN DetaCont d ON (e.CodiInst = d.CodiInst AND e.CodiDocu = d.CodiDocu AND e.NumeDocu = d.NumeDocu)
+                     INNER JOIN EncaCont f ON (d.CodiInst = f.CodiInst AND d.TiDoRefe = f.CodiDocu AND d.NuDoRefe = f.NumeDocu)
+                     WHERE e.CodiInst = ? AND e.Causado = '1' AND e.Anulado <> '1' AND e.CodiDocu IN ('NCF', 'NC', 'NT')
+                       AND d.TiDoRefe IN ('FV', 'FE') AND d.CodiCont LIKE '14%' AND d.Periodo IN ($in)
+                       AND (f.ValoEAPB > 0 OR d.CodiCont = '140907')
+                     GROUP BY d.TiDoRefe, d.NuDoRefe, d.Periodo HAVING DIF = 0 AND cont IN (1, 2)
+                 ) x";
         $stmt = $this->pdo->prepare(
-            "SELECT l.CodiDocu, l.NumeFact, COUNT(DISTINCT n.TiDoRefe, n.NuDoRefe) AS anuladas,
-                    (SELECT COUNT(*) FROM DetaLiqu x WHERE x.CodiInst = l.CodiInst AND x.CodiLiqu = l.CodiDocu AND x.NumeLiqu = l.NumeFact) AS facturas
+            "SELECT DISTINCT l.CodiDocu, l.NumeFact
              FROM EncaFact l
              INNER JOIN DetaLiqu dl ON (dl.CodiInst = l.CodiInst AND dl.CodiLiqu = l.CodiDocu AND dl.NumeLiqu = l.NumeFact)
-             INNER JOIN (
-                 SELECT d.TiDoRefe, d.NuDoRefe, SUM(d.Valor) + f.ValoTota AS DIF, COUNT(*) AS cont
-                 FROM EncaCont e
-                 INNER JOIN DetaCont d ON (e.CodiInst = d.CodiInst AND e.CodiDocu = d.CodiDocu AND e.NumeDocu = d.NumeDocu)
-                 INNER JOIN EncaCont f ON (d.CodiInst = f.CodiInst AND d.TiDoRefe = f.CodiDocu AND d.NuDoRefe = f.NumeDocu)
-                 WHERE e.CodiInst = ? AND e.Causado = '1' AND e.Anulado <> '1' AND e.CodiDocu IN ('NCF', 'NC', 'NT')
-                   AND d.TiDoRefe IN ('FV', 'FE') AND d.CodiCont LIKE '14%' AND d.Periodo IN ($in)
-                   AND (f.ValoEAPB > 0 OR d.CodiCont = '140907')
-                 GROUP BY d.TiDoRefe, d.NuDoRefe, d.Periodo HAVING DIF = 0 AND cont IN (1, 2)
-             ) n ON (n.TiDoRefe = dl.CodiDocu AND n.NuDoRefe = dl.NumeDocu)
-             WHERE l.CodiInst = ? AND l.Causado = 1 AND l.Anulado <> 1 AND l.FechFact BETWEEN ? AND ?
-             GROUP BY l.CodiInst, l.CodiDocu, l.NumeFact"
+             INNER JOIN ($nota) n ON (n.TiDoRefe = dl.CodiDocu AND n.NuDoRefe = dl.NumeDocu)
+             WHERE l.CodiInst = ? AND l.Causado = 1 AND l.Anulado <> 1 AND l.FechFact BETWEEN ? AND ?"
         );
         $stmt->execute([$this->codiInst, ...$periodos, $this->codiInst, $desde, $hasta]);
-        $out = [];
-        foreach ($stmt->fetchAll() as $f) {
-            $out[$f['CodiDocu'] . '|' . $f['NumeFact']] = (int)$f['anuladas'] >= (int)$f['facturas'] ? 'completa' : 'parcial';
+        $liqs = $stmt->fetchAll();
+        if ($liqs === []) {
+            return [];
         }
+
+        $anuladas = $this->pdo->prepare($nota);
+        $anuladas->execute([$this->codiInst, ...$periodos]);
+        $facturasAnuladas = [];
+        foreach ($anuladas->fetchAll() as $f) {
+            $facturasAnuladas[$f['TiDoRefe'] . '|' . $f['NuDoRefe']] = true;
+        }
+
+        $out = [];
+        $info = [];
+        foreach (array_chunk(array_column($liqs, 'NumeFact'), 300) as $lote) {
+            $ph = implode(',', array_fill(0, count($lote), '?'));
+            $det = $this->pdo->prepare(
+                "SELECT l.CodiDocu, l.NumeFact, l.TipoDocu, l.NumeUsua, l.ConsAdmi, dl.CodiDocu AS FacDocu, dl.NumeDocu AS FacNume, dl.ValoEAPB, c.TiDoTerc, c.NuDoTerc
+                 FROM EncaFact l
+                 INNER JOIN DetaLiqu dl ON (dl.CodiInst = l.CodiInst AND dl.CodiLiqu = l.CodiDocu AND dl.NumeLiqu = l.NumeFact)
+                 LEFT JOIN EncaCont c ON (c.CodiInst = dl.CodiInst AND c.CodiDocu = dl.CodiDocu AND c.NumeDocu = dl.NumeDocu)
+                 WHERE l.CodiInst = ? AND l.Causado = 1 AND l.Anulado <> 1 AND l.NumeFact IN ($ph)"
+            );
+            $det->execute([$this->codiInst, ...$lote]);
+            foreach ($det->fetchAll() as $r) {
+                $k = $r['CodiDocu'] . '|' . $r['NumeFact'];
+                $i = &$info[$k];
+                $i ??= ['TipoDocu' => $r['TipoDocu'], 'NumeUsua' => $r['NumeUsua'], 'ConsAdmi' => (int)$r['ConsAdmi'], 'vivas' => 0, 'vivasPaciente' => 0, 'anuladasEapb' => 0];
+                if (isset($facturasAnuladas[$r['FacDocu'] . '|' . $r['FacNume']])) {
+                    $i['anuladasEapb'] += (float)$r['ValoEAPB'] > 0 ? 1 : 0;
+                } else {
+                    $i['vivas']++;
+                    $i['vivasPaciente'] += ((float)$r['ValoEAPB'] === 0.0 && $r['TiDoTerc'] === $r['TipoDocu'] && $r['NuDoTerc'] === $r['NumeUsua']) ? 1 : 0;
+                }
+                unset($i);
+            }
+        }
+        foreach ($liqs as $l) {
+            $k = $l['CodiDocu'] . '|' . $l['NumeFact'];
+            $i = $info[$k] ?? null;
+            if ($i === null) {
+                continue;
+            }
+            $clase = $i['vivas'] === 0 ? 'completa' : ($i['vivasPaciente'] === $i['vivas'] && $i['anuladasEapb'] > 0 ? 'entidad' : 'revisar');
+            $out[$k] = ['clase' => $clase, 'otra' => 'No'];
+        }
+
+        // ¿Hay otra liquidación viva del mismo paciente y admisión que no sea de las que se anularían?
+        $pacientes = [];
+        foreach ($out as $k => $_) {
+            $pacientes[$info[$k]['TipoDocu'] . '|' . $info[$k]['NumeUsua']][] = $k;
+        }
+        $vivas = [];
+        foreach (array_chunk(array_keys($pacientes), 100) as $lote) {
+            $cond = implode(' OR ', array_fill(0, count($lote), '(TipoDocu = ? AND NumeUsua = ?)'));
+            $params = [];
+            foreach ($lote as $p) {
+                array_push($params, ...explode('|', $p, 2));
+            }
+            $stmt = $this->pdo->prepare("SELECT CodiDocu, NumeFact, TipoDocu, NumeUsua, ConsAdmi FROM EncaFact WHERE CodiInst = ? AND Causado = 1 AND Anulado <> 1 AND ($cond)");
+            $stmt->execute([$this->codiInst, ...$params]);
+            foreach ($stmt->fetchAll() as $o) {
+                $vivas[$o['TipoDocu'] . '|' . $o['NumeUsua']][] = [$o['CodiDocu'] . '|' . $o['NumeFact'], (int)$o['ConsAdmi']];
+            }
+        }
+        foreach ($out as $k => &$o) {
+            foreach ($vivas[$info[$k]['TipoDocu'] . '|' . $info[$k]['NumeUsua']] ?? [] as [$otra, $consAdmi]) {
+                if ($otra !== $k && $consAdmi === $info[$k]['ConsAdmi'] && !in_array($out[$otra]['clase'] ?? '', ['completa', 'entidad'], true)) {
+                    $o['otra'] = 'Sí';
+                    break;
+                }
+            }
+        }
+        unset($o);
 
         return $out;
     }
