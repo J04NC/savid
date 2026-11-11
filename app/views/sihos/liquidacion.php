@@ -160,8 +160,8 @@ $celdaClic = static fn (array $filtro, string $titulo, float $valor = 1.0): stri
                 $anuladasTot = [];
                 foreach ($reporte['facturaAnulada'] as $a) {
                     $t = &$anuladasTot[$a['estado']];
-                    $t ??= ['mes' => '', 'estado' => $a['estado'], 'liquidaciones' => 0, 'lineas' => 0, 'prod' => 0.0, 'total' => 0.0];
-                    foreach (['liquidaciones', 'lineas', 'prod', 'total'] as $k) {
+                    $t ??= ['mes' => '', 'estado' => $a['estado'], 'liquidaciones' => 0, 'sinReemplazo' => 0, 'lineas' => 0, 'prod' => 0.0, 'total' => 0.0];
+                    foreach (['liquidaciones', 'sinReemplazo', 'lineas', 'prod', 'total'] as $k) {
                         $t[$k] += $a[$k];
                     }
                     unset($t);
@@ -170,11 +170,12 @@ $celdaClic = static fn (array $filtro, string $titulo, float $valor = 1.0): stri
                 <h3 class="auditoria-title" style="font-size:1.1em; margin-top:28px;">Liquidaciones con factura anulada</h3>
                 <p class="auditoria-hint">
                     Liquidaciones vivas y confirmadas cuya factura fue anulada por una nota crédito (NCF, NC o NT) que la reversa por completo. Siguen sumando en este reporte mientras no se anulen en SIHOS.
-                    "Liquidación completa": todas sus facturas están anuladas. "Con otra factura viva": además tiene otra factura vigente (de valor distinto), así que anularla borraría facturación vigente; revísela antes.
-                    Haga clic en una fila para ver sus líneas.
+                    "Liquidación completa": todas sus facturas están anuladas. "Factura de la entidad anulada": lo vivo es solo la factura del paciente (copago o cuota), sin valor de la entidad; se puede anular.
+                    "Con otra factura viva (revisar)": sigue vigente una factura con valor de la entidad (p. ej. una DAC); anularla dejaría esa facturación sin liquidación, revísela antes.
+                    "Sin reemplazo" son las liquidaciones que no tienen otra liquidación viva del mismo paciente y admisión: al anularlas esa producción desaparece. Haga clic en una fila para ver sus líneas.
                 </p>
                 <table class="seguridad-table savid-dt-fit" id="sihosLiquidacionFacturaAnulada">
-                    <thead><tr><th>Mes de la liquidación</th><th>Estado</th><th>Liquidaciones</th><th>Líneas</th><th>Valor producción médica</th><th>Valor total</th></tr></thead>
+                    <thead><tr><th>Mes de la liquidación</th><th>Estado</th><th>Liquidaciones</th><th title="Sin otra liquidación viva del mismo paciente y admisión">Sin reemplazo</th><th>Líneas</th><th>Valor producción médica</th><th>Valor total</th></tr></thead>
                     <tbody>
                         <?php foreach ([...array_values($anuladasTot), ...$reporte['facturaAnulada']] as $a): ?>
                             <tr data-liq-filtro="<?= htmlspecialchars((string)json_encode(array_filter(['anulada' => $a['estado'], 'mes' => $a['mes']])), ENT_QUOTES) ?>"
@@ -182,6 +183,7 @@ $celdaClic = static fn (array $filtro, string $titulo, float $valor = 1.0): stri
                                 <td><?= $a['mes'] !== '' ? htmlspecialchars($a['mes']) : '<strong>Todo el rango</strong>' ?></td>
                                 <td><?= htmlspecialchars($a['estado']) ?></td>
                                 <td style="text-align:right;"><?= $num((float)$a['liquidaciones']) ?></td>
+                                <td style="text-align:right;"><?= $num((float)$a['sinReemplazo']) ?></td>
                                 <td style="text-align:right;"><?= $num((float)$a['lineas']) ?></td>
                                 <td style="text-align:right;"><?= $fmt((float)$a['prod']) ?></td>
                                 <td style="text-align:right;"><?= $fmt((float)$a['total']) ?></td>
@@ -274,8 +276,8 @@ $celdaClic = static fn (array $filtro, string $titulo, float $valor = 1.0): stri
                         <?php if (!empty($puedeAnularLiquidacion)): ?>
                             <div id="sihosLiquidacionBloqueAnular" class="hidden">
                                 <p class="field-note">
-                                    Solo se pueden marcar las liquidaciones <strong>completas</strong>: todas sus facturas están anuladas por una nota crédito. Al anular se marca la liquidación como anulada en SIHOS
-                                    (causa 2, con la fecha y hora de la nota); el estado anterior queda en la auditoría. Las que tienen otra factura vigente no se pueden marcar.
+                                    Solo se pueden marcar las liquidaciones <strong>completas</strong> (todas sus facturas anuladas) y las de <strong>factura de la entidad anulada</strong> (queda viva solo la del paciente). Al anular se marca la liquidación como anulada en SIHOS
+                                    (causa 2, con la fecha y hora de la nota); el estado anterior queda en la auditoría. Las demás, con otra factura vigente, no se pueden marcar. La columna «Otra liquidación viva» indica si queda una liquidación que reemplace a la que se anula.
                                     <button type="button" id="sihosLiquidacionMarcarVisibles" class="auditoria-btn-primary" style="margin-left:8px;">Marcar las visibles</button>
                                     <button type="button" id="sihosLiquidacionAnularBtn" class="auditoria-btn-primary" style="margin-left:8px;" disabled>🚫 Anular liquidaciones en SIHOS (<span id="sihosLiquidacionAnularN">0</span>)</button>
                                 </p>

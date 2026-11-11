@@ -30,6 +30,7 @@ class SihosLiquidacionDetalleService
     public const COLUMNAS_MODAL = [
         'Fecha liquidación', 'Documento', 'Número liquidación', 'Administradora', 'Servicio origen', 'Actividad', 'Componente',
         'CUPS', 'Procedimiento', 'Profesional', 'Profesional inferido', 'Confianza inferencia', 'Cantidad', 'Valor total',
+        'Factura anulada', 'Otra liquidación viva (misma admisión)',
     ];
     private const NUMERICAS = ['Cantidad', 'Valor total'];
     /** Columnas del CSV que identifican una línea de DetaFact y su corrección (reportes anteriores no las traen). */
@@ -63,7 +64,7 @@ class SihosLiquidacionDetalleService
             if ($nombre === 'mes' && preg_match('/^\d{4}-\d{2}$/', $valor) !== 1) {
                 continue;
             }
-            if ($nombre === 'anulada' && !in_array($valor, [SihosLiquidacionService::ANULADA_COMPLETA, SihosLiquidacionService::ANULADA_PARCIAL], true)) {
+            if ($nombre === 'anulada' && !in_array($valor, [SihosLiquidacionService::ANULADA_COMPLETA, SihosLiquidacionService::ANULADA_ENTIDAD, SihosLiquidacionService::ANULADA_REVISAR], true)) {
                 continue;
             }
             if (($nombre === 'prod' && !in_array($valor, ['Sí', 'No'], true)) || ($nombre === 'institucional' && $valor !== '1')) {
@@ -137,7 +138,8 @@ class SihosLiquidacionDetalleService
                 $porColumna[(int)$i] = mb_strtolower($texto);
             }
         }
-        $indices = array_map(static fn (string $c): int => (int)array_search($c, $cabecera, true), self::COLUMNAS_MODAL);
+        // Un reporte generado antes de agregar una columna del modal no la trae: se muestra vacía.
+        $indices = array_map(static fn (string $c): int => ($i = array_search($c, $cabecera, true)) === false ? -1 : (int)$i, self::COLUMNAS_MODAL);
         if ($porColumna !== []) {
             $registros = array_values(array_filter($registros, static function (string $r) use ($porColumna, $indices): bool {
                 foreach ($porColumna as $i => $texto) {
@@ -223,10 +225,10 @@ class SihosLiquidacionDetalleService
         return $ix;
     }
 
-    /** 'año|documento|número' de la liquidación si su factura está anulada y TODAS sus facturas lo están; '' si no. */
+    /** 'año|documento|número' de la liquidación si se puede anular (completa, o anulada la factura de la entidad); '' si no. */
     private static function claveAnulable(array $f, array $ix): string
     {
-        if (($f[$ix['Factura anulada']] ?? '') !== SihosLiquidacionService::ANULADA_COMPLETA) {
+        if (!in_array($f[$ix['Factura anulada']] ?? '', [SihosLiquidacionService::ANULADA_COMPLETA, SihosLiquidacionService::ANULADA_ENTIDAD], true)) {
             return '';
         }
         $v = [trim((string)$f[$ix['Año liquidación']]), trim((string)$f[$ix['Documento']]), trim((string)$f[$ix['Número liquidación']])];

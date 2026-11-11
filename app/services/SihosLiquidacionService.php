@@ -13,7 +13,8 @@ class SihosLiquidacionService
 
     /** Valores de la columna 'Factura anulada' (y del filtro del modal). */
     public const ANULADA_COMPLETA = 'Anulada: liquidación completa';
-    public const ANULADA_PARCIAL = 'Anulada: con otra factura viva (revisar)';
+    public const ANULADA_ENTIDAD = 'Anulada la factura de la entidad (queda la del paciente)';
+    public const ANULADA_REVISAR = 'Anulada: con otra factura viva (revisar)';
 
     public const COLUMNAS_DETALLE = [
         'Fecha liquidación', 'Documento', 'Número liquidación', 'Cód. administradora', 'Administradora',
@@ -23,7 +24,7 @@ class SihosLiquidacionService
         'Cédula profesional inferido', 'Profesional inferido', 'Método de inferencia', 'Confianza inferencia',
         'Cantidad', 'Valor EAPB', 'Valor usuario', 'Valor total',
         // Llave de la línea en DetaFact (con Documento y Número liquidación) y usuarios: para corregir el profesional desde el modal.
-        'Año liquidación', 'Consecutivo línea', 'Usuario SIHOS (CodiMedi)', 'Usuario profesional inferido', 'Factura anulada',
+        'Año liquidación', 'Consecutivo línea', 'Usuario SIHOS (CodiMedi)', 'Usuario profesional inferido', 'Factura anulada', 'Otra liquidación viva (misma admisión)',
     ];
     public const COLUMNAS_RESUMEN = [
         'Mes', 'Especialidad', 'Cédula profesional', 'Profesional', 'Actividad', 'Componente', 'Producción médica',
@@ -100,9 +101,11 @@ class SihosLiquidacionService
                 $esp = trim((string)$f['NombEspe']) !== '' ? trim((string)$f['NombEspe']) : 'SIN ESPECIALIDAD';
                 $valores = [1, (float)$f['CantServ'], (float)$f['ValoEAPB'], (float)$f['ValoUsua'], (float)$f['ValoTota']];
 
-                $estadoAnulada = match ($anuladas[$f['CodiDocu'] . '|' . $f['NumeFact']] ?? '') {
-                    'completa' => self::ANULADA_COMPLETA, 'parcial' => self::ANULADA_PARCIAL, default => '',
+                $datosAnulada = $anuladas[$f['CodiDocu'] . '|' . $f['NumeFact']] ?? null;
+                $estadoAnulada = match ($datosAnulada['clase'] ?? '') {
+                    'completa' => self::ANULADA_COMPLETA, 'entidad' => self::ANULADA_ENTIDAD, 'revisar' => self::ANULADA_REVISAR, default => '',
                 };
+                $otraViva = $datosAnulada['otra'] ?? '';
                 $inf = SihosLiquidacionInferencia::esAdministrativo($f['CodiMedi'], $f['CodiEspeProf']) ? $inferencia->inferir($f, $actividad) : null;
                 if ($inf !== null) {
                     $this->sumar($res['inferencia'][$inf['confianza']][$inf['metodo']], $valores);
@@ -115,14 +118,17 @@ class SihosLiquidacionService
                     $f['CodiCups'], $f['NombProc'], $esp, $f['CedulaProf'], $f['NombreProf'],
                     $inf['cedula'] ?? '', $inf['nombre'] ?? '', $inf['metodo'] ?? '', $inf['confianza'] ?? '',
                     self::num($valores[1]), self::num($valores[2]), self::num($valores[3]), self::num($valores[4]),
-                    $f['CodiAno'], $f['ConsDeFa'], trim((string)$f['CodiMedi']), $inf['login'] ?? '', $estadoAnulada,
+                    $f['CodiAno'], $f['ConsDeFa'], trim((string)$f['CodiMedi']), $inf['login'] ?? '', $estadoAnulada, $otraViva,
                 ]);
 
                 $mes = substr((string)$f['FechFact'], 0, 7);
                 if ($estadoAnulada !== '') {
                     $a = &$anuladasAcum[$mes][$estadoAnulada];
-                    $a ??= ['liqs' => [], 'lineas' => 0, 'prod' => 0.0, 'total' => 0.0];
+                    $a ??= ['liqs' => [], 'sinReemplazo' => [], 'lineas' => 0, 'prod' => 0.0, 'total' => 0.0];
                     $a['liqs'][$f['CodiDocu'] . '|' . $f['NumeFact']] = 1;
+                    if ($otraViva === 'No') {
+                        $a['sinReemplazo'][$f['CodiDocu'] . '|' . $f['NumeFact']] = 1;
+                    }
                     $a['lineas']++;
                     $a['prod'] += $prod === 'Sí' ? $valores[4] : 0.0;
                     $a['total'] += $valores[4];
@@ -161,7 +167,7 @@ class SihosLiquidacionService
         $res['facturaAnulada'] = [];
         foreach ($anuladasAcum as $mes => $porEstado) {
             foreach ($porEstado as $estado => $a) {
-                $res['facturaAnulada'][] = ['mes' => $mes, 'estado' => $estado, 'liquidaciones' => count($a['liqs']), 'lineas' => $a['lineas'], 'prod' => $a['prod'], 'total' => $a['total']];
+                $res['facturaAnulada'][] = ['mes' => $mes, 'estado' => $estado, 'liquidaciones' => count($a['liqs']), 'sinReemplazo' => count($a['sinReemplazo']), 'lineas' => $a['lineas'], 'prod' => $a['prod'], 'total' => $a['total']];
             }
         }
         ksort($res['porMesEspecialidad']);

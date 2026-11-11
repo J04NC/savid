@@ -2836,11 +2836,13 @@ class SihosExternalWriteRepository
     }
 
     /**
-     * Anula en SIHOS (EncaFact) UNA liquidación viva y confirmada cuyas facturas están TODAS anuladas por
-     * una nota crédito (NCF/NC/NT) que las reversa por completo (diferencia 0 en 1 o 2 líneas de cuentas
-     * 14%): mismo criterio y mismos campos que el proceso manual de anulación por factura anulada
-     * (Anulado = 1, CausAnul = 2, fecha y hora de la nota). Revalida todo con la liquidación bloqueada:
-     * una liquidación con otra factura vigente NO se anula.
+     * Anula en SIHOS (EncaFact) UNA liquidación viva y confirmada cuya factura fue anulada por una nota
+     * crédito (NCF/NC/NT que la reversa por completo: diferencia 0 en 1 o 2 líneas de cuentas 14%): mismos
+     * campos que el proceso manual de anulación por factura anulada (Anulado = 1, CausAnul = 2, fecha y hora
+     * de la nota). Se anula si TODAS sus facturas están anuladas, o si lo anulado es la factura de la entidad
+     * (con valor EAPB) y lo que queda vivo es solo la factura del paciente, sin valor EAPB (copago o cuota
+     * que ya se recaudó). Cualquier otra factura vigente (p. ej. la de la entidad) impide anular. Todo se
+     * revalida con la liquidación bloqueada.
      *
      * @param list<int> $periodos años contables en que pudo registrarse la nota
      * @return array{ok:bool,motivo:string,anterior:array<string,mixed>}
@@ -2864,7 +2866,7 @@ class SihosExternalWriteRepository
 
         try {
             $stmt = $pdo->prepare(
-                'SELECT Causado, Anulado, CausAnul, NotaAnul, FechAnul, HoraAnul FROM EncaFact
+                'SELECT Causado, Anulado, CausAnul, NotaAnul, FechAnul, HoraAnul, TipoDocu, NumeUsua FROM EncaFact
                  WHERE CodiInst = ? AND CodiAno = ? AND CodiDocu = ? AND NumeFact = ? FOR UPDATE'
             );
             $stmt->execute([$codiInst, $codiAno, $codiDocu, $numeFact]);
@@ -2874,24 +2876,30 @@ class SihosExternalWriteRepository
 
                 return $falla('La liquidación ya no existe en SIHOS.');
             }
+            // Solo el estado de anulación va a la auditoría (nunca la identificación del paciente).
+            $anterior = array_intersect_key($liq, array_flip(['Causado', 'Anulado', 'CausAnul', 'NotaAnul', 'FechAnul', 'HoraAnul']));
             if ((int)$liq['Anulado'] === 1) {
                 $pdo->rollBack();
 
-                return $falla('La liquidación ya está anulada.', $liq);
+                return $falla('La liquidación ya está anulada.', $anterior);
             }
             if ((int)$liq['Causado'] !== 1) {
                 $pdo->rollBack();
 
-                return $falla('La liquidación ya no está confirmada.', $liq);
+                return $falla('La liquidación ya no está confirmada.', $anterior);
             }
 
-            $facturas = $pdo->prepare('SELECT CodiDocu, NumeDocu FROM DetaLiqu WHERE CodiInst = ? AND CodiLiqu = ? AND NumeLiqu = ?');
+            $facturas = $pdo->prepare(
+                'SELECT dl.CodiDocu, dl.NumeDocu, dl.ValoEAPB, c.TiDoTerc, c.NuDoTerc FROM DetaLiqu dl
+                 LEFT JOIN EncaCont c ON (c.CodiInst = dl.CodiInst AND c.CodiDocu = dl.CodiDocu AND c.NumeDocu = dl.NumeDocu)
+                 WHERE dl.CodiInst = ? AND dl.CodiLiqu = ? AND dl.NumeLiqu = ?'
+            );
             $facturas->execute([$codiInst, $codiDocu, $numeFact]);
             $facturas = $facturas->fetchAll();
             if ($facturas === []) {
                 $pdo->rollBack();
 
-                return $falla('La liquidación no tiene facturas asociadas.', $liq);
+                return $falla('La liquidación no tiene facturas asociadas.', $anterior);
             }
 
             $in = implode(',', array_fill(0, count($periodos), '?'));
@@ -2908,17 +2916,30 @@ class SihosExternalWriteRepository
             );
             $fechaNota = '';
             $horaNota = '';
+            $anuladasEntidad = 0;
+            $vivas = 0;
             foreach ($facturas as $factura) {
                 $nota->execute([$codiInst, $factura['CodiDocu'], $factura['NumeDocu'], ...$periodos]);
                 $n = $nota->fetch();
                 if ($n === false) {
-                    $pdo->rollBack();
+                    // Factura vigente: solo se tolera la del paciente (su tercero) y sin valor EAPB.
+                    if ((float)$factura['ValoEAPB'] !== 0.0 || $factura['TiDoTerc'] !== $liq['TipoDocu'] || $factura['NuDoTerc'] !== $liq['NumeUsua']) {
+                        $pdo->rollBack();
 
-                    return $falla('La liquidación tiene una factura que no figura anulada por nota crédito; no se anula.', $liq);
+                        return $falla('La liquidación tiene una factura vigente que no es solo del paciente; no se anula.', $anterior);
+                    }
+                    $vivas++;
+                    continue;
                 }
+                $anuladasEntidad += (float)$factura['ValoEAPB'] > 0 ? 1 : 0;
                 if ($fechaNota === '' || [$n['FechCaus'], $n['HoraCaus']] > [$fechaNota, $horaNota]) {
                     [$fechaNota, $horaNota] = [$n['FechCaus'], $n['HoraCaus']];
                 }
+            }
+            if ($fechaNota === '' || ($vivas > 0 && $anuladasEntidad === 0)) {
+                $pdo->rollBack();
+
+                return $falla('La factura anulada no es la de la entidad; no se anula.', $anterior);
             }
 
             $upd = $pdo->prepare(
@@ -2929,11 +2950,11 @@ class SihosExternalWriteRepository
             if ($upd->rowCount() !== 1) {
                 $pdo->rollBack();
 
-                return $falla('La liquidación cambió mientras se procesaba; no se modificó.', $liq);
+                return $falla('La liquidación cambió mientras se procesaba; no se modificó.', $anterior);
             }
             $pdo->commit();
 
-            return ['ok' => true, 'motivo' => '', 'anterior' => $liq];
+            return ['ok' => true, 'motivo' => '', 'anterior' => $anterior];
         } catch (PDOException $e) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();

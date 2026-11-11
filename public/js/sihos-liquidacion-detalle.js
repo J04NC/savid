@@ -82,9 +82,9 @@
                             search: { value: d.search.value }, order: orden, f: filtros, fc: filtrosColumna
                         });
                     },
-                    // El servidor manda la llave de la línea al final de la fila; con checks pasa a la columna 0.
+                    // El servidor manda la llave de la fila al final; con checks pasa a la columna 0.
                     dataSrc: function (json) {
-                        return desfase ? json.data.map(function (r) { return [r[14]].concat(r.slice(0, 14)); }) : json.data;
+                        return desfase ? json.data.map(function (r) { return [r[r.length - 1]].concat(r.slice(0, r.length - 1)); }) : json.data;
                     },
                     error: function (xhr) {
                         estado.textContent = (xhr.responseJSON && xhr.responseJSON.error) || 'No se pudo cargar el detalle.';
