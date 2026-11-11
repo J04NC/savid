@@ -2729,4 +2729,109 @@ class SihosExternalWriteRepository
             'detalle' => $detalle,
         ];
     }
+
+    /**
+     * Cambia el profesional (DetaFact.CodiMedi) de UNA línea de una liquidación
+     * confirmada, solo si hoy la línea no tiene profesional o lo tiene un
+     * usuario de la especialidad ADMINISTRATIVO, y el nuevo es un usuario
+     * existente que no es administrativo. Solo toca CodiMedi (y la marca de
+     * modificación). Devuelve ['ok'=>bool, 'motivo'=>string, 'anterior'=>string].
+     *
+     * @return array{ok:bool,motivo:string,anterior:string}
+     */
+    public function corregirProfesionalLinea(
+        string $codiAno,
+        string $codiDocu,
+        string $numeFact,
+        int $consDeFa,
+        string $loginNuevo,
+        string $codiEspeAdministrativo,
+        string $usuaModi
+    ): array {
+        return $this->conBloqueo(
+            'detafact-medi:' . $codiAno . ':' . $codiDocu . ':' . $numeFact,
+            function () use ($codiAno, $codiDocu, $numeFact, $consDeFa, $loginNuevo, $codiEspeAdministrativo, $usuaModi): array {
+                return $this->corregirProfesionalLineaBloqueado(
+                    $codiAno, $codiDocu, $numeFact, $consDeFa, $loginNuevo, $codiEspeAdministrativo, $usuaModi
+                );
+            }
+        );
+    }
+
+    /** @see corregirProfesionalLinea (ya con el bloqueo tomado) */
+    private function corregirProfesionalLineaBloqueado(
+        string $codiAno,
+        string $codiDocu,
+        string $numeFact,
+        int $consDeFa,
+        string $loginNuevo,
+        string $codiEspeAdministrativo,
+        string $usuaModi
+    ): array {
+        $pdo = $this->connect();
+        $codiInst = $this->codiInst();
+        $falla = static fn (string $motivo, string $anterior = ''): array => ['ok' => false, 'motivo' => $motivo, 'anterior' => $anterior];
+
+        $pdo->beginTransaction();
+
+        try {
+            $stmt = $pdo->prepare(
+                'SELECT d.CodiMedi, e.Causado, e.Anulado
+                 FROM EncaFact e
+                 INNER JOIN DetaFact d ON (e.CodiInst = d.CodiInst AND e.CodiAno = d.CodiAno AND e.CodiDocu = d.CodiDocu AND e.NumeFact = d.NumeFact)
+                 WHERE d.CodiInst = ? AND d.CodiAno = ? AND d.CodiDocu = ? AND d.NumeFact = ? AND d.ConsDeFa = ?
+                 FOR UPDATE'
+            );
+            $stmt->execute([$codiInst, $codiAno, $codiDocu, $numeFact, $consDeFa]);
+            $linea = $stmt->fetch();
+            if ($linea === false) {
+                $pdo->rollBack();
+
+                return $falla('La línea ya no existe en SIHOS.');
+            }
+            $anterior = trim((string)$linea['CodiMedi']);
+            if ((int)$linea['Causado'] !== 1 || (int)$linea['Anulado'] === 1) {
+                $pdo->rollBack();
+
+                return $falla('La liquidación ya no está confirmada (o fue anulada).', $anterior);
+            }
+
+            $esp = $pdo->prepare('SELECT CodiEspe FROM Usuarios WHERE Login = ?');
+            if ($anterior !== '') {
+                $esp->execute([$anterior]);
+                $espAnterior = $esp->fetchColumn();
+                if ($espAnterior === false || trim((string)$espAnterior) !== $codiEspeAdministrativo) {
+                    $pdo->rollBack();
+
+                    return $falla('La línea ya tiene un profesional asignado en SIHOS.', $anterior);
+                }
+            }
+            $esp->execute([$loginNuevo]);
+            $espNuevo = $esp->fetchColumn();
+            if ($espNuevo === false || trim((string)$espNuevo) === $codiEspeAdministrativo) {
+                $pdo->rollBack();
+
+                return $falla('El profesional inferido no existe o es administrativo.', $anterior);
+            }
+
+            $upd = $pdo->prepare(
+                'UPDATE DetaFact SET CodiMedi = ?, FechModi = CURDATE(), HoraModi = CURTIME(), UsuaModi = ?
+                 WHERE CodiInst = ? AND CodiAno = ? AND CodiDocu = ? AND NumeFact = ? AND ConsDeFa = ? AND CodiMedi <=> ?'
+            );
+            $upd->execute([$loginNuevo, $usuaModi, $codiInst, $codiAno, $codiDocu, $numeFact, $consDeFa, $linea['CodiMedi']]);
+            if ($upd->rowCount() !== 1) {
+                $pdo->rollBack();
+
+                return $falla('La línea cambió mientras se procesaba; no se modificó.', $anterior);
+            }
+            $pdo->commit();
+
+            return ['ok' => true, 'motivo' => '', 'anterior' => $anterior];
+        } catch (PDOException $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
 }
