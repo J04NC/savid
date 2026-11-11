@@ -113,7 +113,7 @@ class SihosLiquidacionDetalleService
      * @param array<string,mixed> $p draw, start, length, search[value], order[0][column|dir], fc[columna] (filtro de texto por columna)
      * @return array<string,mixed>
      */
-    public function pagina(string $ruta, array $p): array
+    public function pagina(string $ruta, array $p, string $modo = 'profesional'): array
     {
         $h = fopen($ruta, 'rb');
         $cabecera = $h ? str_getcsv((string)self::leerRegistro($h), ';') : [];
@@ -167,7 +167,7 @@ class SihosLiquidacionDetalleService
             array_multisort($claves, ($p['order'][0]['dir'] ?? 'asc') === 'desc' ? SORT_DESC : SORT_ASC, $numerica ? SORT_NUMERIC : SORT_STRING, $registros);
         }
 
-        $llave = self::indicesCorreccion($cabecera);
+        $llave = $modo === 'anular' ? self::indicesAnulacion($cabecera) : self::indicesCorreccion($cabecera);
         $inicio = max(0, (int)($p['start'] ?? 0));
         $largo = min(self::MAX_PAGINA, max(1, (int)($p['length'] ?? 50)));
         $filas = [];
@@ -180,7 +180,8 @@ class SihosLiquidacionDetalleService
                     ? number_format((float)str_replace(',', '.', $v), 0, ',', '.')
                     : htmlspecialchars($v, ENT_QUOTES);
             }
-            $fila[] = $llave !== null ? (self::lineaCorregible($f, $llave)['clave'] ?? '') : ''; // marca de selección del modal; vacía si no se puede corregir
+            // Marca de selección del modal (profesional a corregir, o liquidación a anular); vacía si no se puede.
+            $fila[] = $llave === null ? '' : ($modo === 'anular' ? self::claveAnulable($f, $llave) : (self::lineaCorregible($f, $llave)['clave'] ?? ''));
             $filas[] = $fila;
         }
 
@@ -205,6 +206,61 @@ class SihosLiquidacionDetalleService
         }
 
         return $ix;
+    }
+
+    /** @param list<string> $cabecera @return array<string,int>|null null si el CSV es de un reporte anterior a la columna 'Factura anulada' */
+    private static function indicesAnulacion(array $cabecera): ?array
+    {
+        $ix = [];
+        foreach (['Año liquidación', 'Documento', 'Número liquidación', 'Factura anulada'] as $nombre) {
+            $i = array_search($nombre, $cabecera, true);
+            if ($i === false) {
+                return null;
+            }
+            $ix[$nombre] = (int)$i;
+        }
+
+        return $ix;
+    }
+
+    /** 'año|documento|número' de la liquidación si su factura está anulada y TODAS sus facturas lo están; '' si no. */
+    private static function claveAnulable(array $f, array $ix): string
+    {
+        if (($f[$ix['Factura anulada']] ?? '') !== SihosLiquidacionService::ANULADA_COMPLETA) {
+            return '';
+        }
+        $v = [trim((string)$f[$ix['Año liquidación']]), trim((string)$f[$ix['Documento']]), trim((string)$f[$ix['Número liquidación']])];
+
+        return in_array('', $v, true) ? '' : implode('|', $v);
+    }
+
+    /**
+     * Liquidaciones de la selección con esas llaves ('año|documento|número') que se pueden anular
+     * (factura anulada, liquidación completa). Los datos salen del CSV, nunca del navegador.
+     *
+     * @param list<string> $claves
+     * @return array<string,array{ano:string,docu:string,nume:string}>|null null si el reporte no trae la columna
+     */
+    public function liquidacionesAnulables(string $ruta, array $claves): ?array
+    {
+        $h = fopen($ruta, 'rb');
+        if (!$h) {
+            return null;
+        }
+        $ix = self::indicesAnulacion(str_getcsv((string)self::leerRegistro($h), ';'));
+        $pendientes = array_flip($claves);
+        $out = [];
+        while ($ix !== null && $pendientes !== [] && ($reg = self::leerRegistro($h)) !== null) {
+            $clave = self::claveAnulable(str_getcsv($reg, ';'), $ix);
+            if ($clave !== '' && isset($pendientes[$clave])) {
+                [$ano, $docu, $nume] = explode('|', $clave);
+                $out[$clave] = ['ano' => $ano, 'docu' => $docu, 'nume' => $nume];
+                unset($pendientes[$clave]);
+            }
+        }
+        fclose($h);
+
+        return $ix === null ? null : $out;
     }
 
     /**
