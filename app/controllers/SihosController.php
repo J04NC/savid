@@ -20,6 +20,7 @@ class SihosController
     private SihosCartera2193JobService $cartera2193JobService;
     private SihosLiquidacionJobService $liquidacionJobService;
     private SihosLiquidacionDetalleService $liquidacionDetalleService;
+    private SihosLiquidacionCorreccionService $liquidacionCorreccionService;
 
     public function __construct()
     {
@@ -41,6 +42,7 @@ class SihosController
         $this->cartera2193JobService = new SihosCartera2193JobService();
         $this->liquidacionJobService = new SihosLiquidacionJobService();
         $this->liquidacionDetalleService = new SihosLiquidacionDetalleService($this->liquidacionJobService);
+        $this->liquidacionCorreccionService = new SihosLiquidacionCorreccionService($this->liquidacionDetalleService);
     }
 
     /**
@@ -1638,6 +1640,7 @@ class SihosController
 
         $moduleService = new ModuleService();
         $breadcrumb = $moduleService->buildBreadcrumbForRuta('sihos/liquidacion');
+        $puedeCorregirProfesional = PermisoService::can('sihos/liquidacion', 'corregir_profesional');
 
         $view = BASE_PATH . '/app/views/sihos/liquidacion.php';
         require BASE_PATH . '/app/views/layouts/main.php';
@@ -1675,6 +1678,36 @@ class SihosController
         header('Content-Disposition: attachment; filename="liquidacion_' . $estado['desde'] . '_' . $estado['hasta'] . '_' . $parte . '.csv"');
         header('Content-Length: ' . filesize($ruta));
         readfile($ruta);
+    }
+
+    /**
+     * POST ?url=sihos/liquidacionCorregir — corrige en SIHOS (DetaFact.CodiMedi) el profesional de las líneas marcadas en el
+     * modal con el profesional inferido del reporte. Además del 'ver' del Router exige 'corregir_profesional' sobre sihos/liquidacion.
+     */
+    public function liquidacionCorregir(): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !PermisoService::can('sihos/liquidacion', 'corregir_profesional')) {
+            http_response_code(403);
+            echo json_encode(['ok' => false, 'error' => 'Sin permiso.'], JSON_UNESCAPED_UNICODE);
+
+            return;
+        }
+        $scope = $this->connectionService->buildScope($_POST);
+        $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : 0;
+        $filtros = $this->liquidacionDetalleService->normalizarFiltros(is_array($_POST['f'] ?? null) ? $_POST['f'] : []);
+        $claves = is_array($_POST['claves'] ?? null) ? array_values($_POST['claves']) : [];
+        if ($empresaId <= 0 || $filtros === null || $claves === []) {
+            http_response_code(400);
+            echo json_encode(['ok' => false, 'error' => 'Faltan datos de la selección.'], JSON_UNESCAPED_UNICODE);
+
+            return;
+        }
+        $resultado = $this->liquidacionCorreccionService->aplicar($empresaId, (int)($_SESSION['user_id'] ?? 0), trim((string)($_POST['job'] ?? '')), $filtros, $claves);
+        if (!$resultado['ok']) {
+            http_response_code(400);
+        }
+        echo json_encode($resultado, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
     }
 
     /**
