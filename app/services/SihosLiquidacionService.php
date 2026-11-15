@@ -14,7 +14,7 @@ class SihosLiquidacionService
     /** Valores de la columna 'Factura anulada' (y del filtro del modal). */
     public const ANULADA_COMPLETA = 'Anulada: liquidación completa';
     public const ANULADA_ENTIDAD = 'Anulada la factura de la entidad (queda la del paciente)';
-    public const ANULADA_REVISAR = 'Anulada: con otra factura viva (revisar)';
+    public const ANULADA_REVISAR = 'Anulada: otro caso (revisar)';
 
     public const COLUMNAS_DETALLE = [
         'Fecha liquidación', 'Documento', 'Número liquidación', 'Cód. administradora', 'Administradora',

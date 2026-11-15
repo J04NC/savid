@@ -13,6 +13,9 @@
  */
 class SihosLiquidacionRepository
 {
+    /** EncaFact.TipoCont de las liquidaciones de facturación no individual (la entidad se factura después, en un documento consolidado). */
+    public const TIPO_CONT_NO_INDIVIDUAL = 2;
+
     public function __construct(private readonly PDO $pdo, private readonly string $codiInst)
     {
     }
@@ -151,11 +154,13 @@ class SihosLiquidacionRepository
 
     /**
      * Liquidaciones vivas y confirmadas del rango con al menos una factura anulada por una nota crédito
-     * (NCF/NC/NT que la reversa por completo: diferencia 0 en 1 o 2 líneas de cuentas 14%). Clases:
+     * (nota que la reversa por completo: diferencia 0 en 1 o 2 líneas de cuentas 14%; los documentos se
+     * resuelven por DocuApli). Clases:
      *  - 'completa': todas sus facturas están anuladas.
      *  - 'entidad': anulada la factura de la entidad (con valor EAPB); lo que queda vivo es solo la factura
      *    del paciente (copago/cuota), sin valor EAPB.
-     *  - 'revisar': cualquier otro caso (p. ej. anulada la del paciente y viva la de la entidad).
+     *  - 'revisar': cualquier otro caso (p. ej. anulada la del paciente y viva la de la entidad) o contrato
+     *    con facturación no individual (la parte de la entidad se cobra después en un documento consolidado).
      * 'otra' indica si existe otra liquidación viva y confirmada del mismo paciente y admisión que no esté
      * en la misma situación ('Sí'/'No'): es la que reemplazaría a la que se anule.
      *
@@ -164,14 +169,21 @@ class SihosLiquidacionRepository
      */
     public function fetchLiquidacionesFacturaAnulada(string $desde, string $hasta, array $periodos): array
     {
+        $codNota = SihosDocuApli::codigos($this->pdo, $this->codiInst, SihosDocuApli::NOTA);
+        $codFact = SihosDocuApli::codigos($this->pdo, $this->codiInst, SihosDocuApli::FACTURA);
+        if ($codNota === [] || $codFact === []) {
+            return [];
+        }
         $in = implode(',', array_fill(0, count($periodos), '?'));
+        $inNota = implode(',', array_fill(0, count($codNota), '?'));
+        $inFact = implode(',', array_fill(0, count($codFact), '?'));
         $nota = "SELECT DISTINCT x.TiDoRefe, x.NuDoRefe FROM (
                      SELECT d.TiDoRefe, d.NuDoRefe, SUM(d.Valor) + f.ValoTota AS DIF, COUNT(*) AS cont
                      FROM EncaCont e
                      INNER JOIN DetaCont d ON (e.CodiInst = d.CodiInst AND e.CodiDocu = d.CodiDocu AND e.NumeDocu = d.NumeDocu)
                      INNER JOIN EncaCont f ON (d.CodiInst = f.CodiInst AND d.TiDoRefe = f.CodiDocu AND d.NuDoRefe = f.NumeDocu)
-                     WHERE e.CodiInst = ? AND e.Causado = '1' AND e.Anulado <> '1' AND e.CodiDocu IN ('NCF', 'NC', 'NT')
-                       AND d.TiDoRefe IN ('FV', 'FE') AND d.CodiCont LIKE '14%' AND d.Periodo IN ($in)
+                     WHERE e.CodiInst = ? AND e.Causado = '1' AND e.Anulado <> '1' AND e.CodiDocu IN ($inNota)
+                       AND d.TiDoRefe IN ($inFact) AND d.CodiCont LIKE '14%' AND d.Periodo IN ($in)
                        AND (f.ValoEAPB > 0 OR d.CodiCont = '140907')
                      GROUP BY d.TiDoRefe, d.NuDoRefe, d.Periodo HAVING DIF = 0 AND cont IN (1, 2)
                  ) x";
@@ -182,14 +194,14 @@ class SihosLiquidacionRepository
              INNER JOIN ($nota) n ON (n.TiDoRefe = dl.CodiDocu AND n.NuDoRefe = dl.NumeDocu)
              WHERE l.CodiInst = ? AND l.Causado = 1 AND l.Anulado <> 1 AND l.FechFact BETWEEN ? AND ?"
         );
-        $stmt->execute([$this->codiInst, ...$periodos, $this->codiInst, $desde, $hasta]);
+        $stmt->execute([$this->codiInst, ...$codNota, ...$codFact, ...$periodos, $this->codiInst, $desde, $hasta]);
         $liqs = $stmt->fetchAll();
         if ($liqs === []) {
             return [];
         }
 
         $anuladas = $this->pdo->prepare($nota);
-        $anuladas->execute([$this->codiInst, ...$periodos]);
+        $anuladas->execute([$this->codiInst, ...$codNota, ...$codFact, ...$periodos]);
         $facturasAnuladas = [];
         foreach ($anuladas->fetchAll() as $f) {
             $facturasAnuladas[$f['TiDoRefe'] . '|' . $f['NuDoRefe']] = true;
@@ -200,7 +212,7 @@ class SihosLiquidacionRepository
         foreach (array_chunk(array_column($liqs, 'NumeFact'), 300) as $lote) {
             $ph = implode(',', array_fill(0, count($lote), '?'));
             $det = $this->pdo->prepare(
-                "SELECT l.CodiDocu, l.NumeFact, l.TipoDocu, l.NumeUsua, l.ConsAdmi, dl.CodiDocu AS FacDocu, dl.NumeDocu AS FacNume, dl.ValoEAPB, c.TiDoTerc, c.NuDoTerc
+                "SELECT l.CodiDocu, l.NumeFact, l.TipoDocu, l.NumeUsua, l.ConsAdmi, l.TipoCont, dl.CodiDocu AS FacDocu, dl.NumeDocu AS FacNume, dl.ValoEAPB, c.TiDoTerc, c.NuDoTerc
                  FROM EncaFact l
                  INNER JOIN DetaLiqu dl ON (dl.CodiInst = l.CodiInst AND dl.CodiLiqu = l.CodiDocu AND dl.NumeLiqu = l.NumeFact)
                  LEFT JOIN EncaCont c ON (c.CodiInst = dl.CodiInst AND c.CodiDocu = dl.CodiDocu AND c.NumeDocu = dl.NumeDocu)
@@ -210,7 +222,7 @@ class SihosLiquidacionRepository
             foreach ($det->fetchAll() as $r) {
                 $k = $r['CodiDocu'] . '|' . $r['NumeFact'];
                 $i = &$info[$k];
-                $i ??= ['TipoDocu' => $r['TipoDocu'], 'NumeUsua' => $r['NumeUsua'], 'ConsAdmi' => (int)$r['ConsAdmi'], 'vivas' => 0, 'vivasPaciente' => 0, 'anuladasEapb' => 0];
+                $i ??= ['TipoDocu' => $r['TipoDocu'], 'NumeUsua' => $r['NumeUsua'], 'ConsAdmi' => (int)$r['ConsAdmi'], 'tipoCont' => (int)$r['TipoCont'], 'vivas' => 0, 'vivasPaciente' => 0, 'anuladasEapb' => 0];
                 if (isset($facturasAnuladas[$r['FacDocu'] . '|' . $r['FacNume']])) {
                     $i['anuladasEapb'] += (float)$r['ValoEAPB'] > 0 ? 1 : 0;
                 } else {
@@ -226,7 +238,7 @@ class SihosLiquidacionRepository
             if ($i === null) {
                 continue;
             }
-            $clase = $i['vivas'] === 0 ? 'completa' : ($i['vivasPaciente'] === $i['vivas'] && $i['anuladasEapb'] > 0 ? 'entidad' : 'revisar');
+            $clase = $i['tipoCont'] === self::TIPO_CONT_NO_INDIVIDUAL ? 'revisar' : ($i['vivas'] === 0 ? 'completa' : ($i['vivasPaciente'] === $i['vivas'] && $i['anuladasEapb'] > 0 ? 'entidad' : 'revisar'));
             $out[$k] = ['clase' => $clase, 'otra' => 'No'];
         }
 

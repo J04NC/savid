@@ -169,9 +169,9 @@ $celdaClic = static fn (array $filtro, string $titulo, float $valor = 1.0): stri
                 ?>
                 <h3 class="auditoria-title" style="font-size:1.1em; margin-top:28px;">Liquidaciones con factura anulada</h3>
                 <p class="auditoria-hint">
-                    Liquidaciones vivas y confirmadas cuya factura fue anulada por una nota crédito (NCF, NC o NT) que la reversa por completo. Siguen sumando en este reporte mientras no se anulen en SIHOS.
+                    Liquidaciones vivas y confirmadas cuya factura fue anulada por una nota crédito que la reversa por completo. Siguen sumando en este reporte mientras no se anulen en SIHOS.
                     "Liquidación completa": todas sus facturas están anuladas. "Factura de la entidad anulada": lo vivo es solo la factura del paciente (copago o cuota), sin valor de la entidad; se puede anular.
-                    "Con otra factura viva (revisar)": sigue vigente una factura con valor de la entidad (p. ej. una DAC); anularla dejaría esa facturación sin liquidación, revísela antes.
+                    "Otro caso (revisar)": sigue vigente una factura con valor de la entidad, o el contrato no factura de forma individual (la entidad se cobra después en un documento consolidado, p. ej. capitación); no se puede anular desde aquí, revísela antes.
                     "Sin reemplazo" son las liquidaciones que no tienen otra liquidación viva del mismo paciente y admisión: al anularlas esa producción desaparece. Haga clic en una fila para ver sus líneas.
                 </p>
                 <table class="seguridad-table savid-dt-fit" id="sihosLiquidacionFacturaAnulada">

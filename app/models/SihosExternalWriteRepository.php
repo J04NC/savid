@@ -2837,7 +2837,7 @@ class SihosExternalWriteRepository
 
     /**
      * Anula en SIHOS (EncaFact) UNA liquidación viva y confirmada cuya factura fue anulada por una nota
-     * crédito (NCF/NC/NT que la reversa por completo: diferencia 0 en 1 o 2 líneas de cuentas 14%): mismos
+     * crédito (que la reversa por completo: diferencia 0 en 1 o 2 líneas de cuentas 14%): mismos
      * campos que el proceso manual de anulación por factura anulada (Anulado = 1, CausAnul = 2, fecha y hora
      * de la nota). Se anula si TODAS sus facturas están anuladas, o si lo anulado es la factura de la entidad
      * (con valor EAPB) y lo que queda vivo es solo la factura del paciente, sin valor EAPB (copago o cuota
@@ -2866,7 +2866,7 @@ class SihosExternalWriteRepository
 
         try {
             $stmt = $pdo->prepare(
-                'SELECT Causado, Anulado, CausAnul, NotaAnul, FechAnul, HoraAnul, TipoDocu, NumeUsua FROM EncaFact
+                'SELECT Causado, Anulado, CausAnul, NotaAnul, FechAnul, HoraAnul, TipoDocu, NumeUsua, TipoCont FROM EncaFact
                  WHERE CodiInst = ? AND CodiAno = ? AND CodiDocu = ? AND NumeFact = ? FOR UPDATE'
             );
             $stmt->execute([$codiInst, $codiAno, $codiDocu, $numeFact]);
@@ -2889,6 +2889,12 @@ class SihosExternalWriteRepository
                 return $falla('La liquidación ya no está confirmada.', $anterior);
             }
 
+            if ((int)$liq['TipoCont'] === SihosLiquidacionRepository::TIPO_CONT_NO_INDIVIDUAL) {
+                $pdo->rollBack();
+
+                return $falla('Contrato con facturación no individual: la entidad se cobra en un documento consolidado; no se anula.', $anterior);
+            }
+
             $facturas = $pdo->prepare(
                 'SELECT dl.CodiDocu, dl.NumeDocu, dl.ValoEAPB, c.TiDoTerc, c.NuDoTerc FROM DetaLiqu dl
                  LEFT JOIN EncaCont c ON (c.CodiInst = dl.CodiInst AND c.CodiDocu = dl.CodiDocu AND c.NumeDocu = dl.NumeDocu)
@@ -2902,14 +2908,23 @@ class SihosExternalWriteRepository
                 return $falla('La liquidación no tiene facturas asociadas.', $anterior);
             }
 
+            $codNota = SihosDocuApli::codigos($pdo, $codiInst, SihosDocuApli::NOTA);
+            $codFact = SihosDocuApli::codigos($pdo, $codiInst, SihosDocuApli::FACTURA);
+            if ($codNota === [] || $codFact === []) {
+                $pdo->rollBack();
+
+                return $falla('No se pudieron resolver los tipos de documento de la institución.', $anterior);
+            }
             $in = implode(',', array_fill(0, count($periodos), '?'));
+            $inNota = implode(',', array_fill(0, count($codNota), '?'));
+            $inFact = implode(',', array_fill(0, count($codFact), '?'));
             $nota = $pdo->prepare(
                 "SELECT SUM(d.Valor) + f.ValoTota AS DIF, COUNT(*) AS cont, MAX(e.FechCaus) AS FechCaus, MAX(e.HoraCaus) AS HoraCaus
                  FROM EncaCont e
                  INNER JOIN DetaCont d ON (e.CodiInst = d.CodiInst AND e.CodiDocu = d.CodiDocu AND e.NumeDocu = d.NumeDocu)
                  INNER JOIN EncaCont f ON (d.CodiInst = f.CodiInst AND d.TiDoRefe = f.CodiDocu AND d.NuDoRefe = f.NumeDocu)
-                 WHERE e.CodiInst = ? AND e.Causado = '1' AND e.Anulado <> '1' AND e.CodiDocu IN ('NCF', 'NC', 'NT')
-                   AND d.TiDoRefe = ? AND d.NuDoRefe = ? AND d.TiDoRefe IN ('FV', 'FE') AND d.CodiCont LIKE '14%'
+                 WHERE e.CodiInst = ? AND e.Causado = '1' AND e.Anulado <> '1' AND e.CodiDocu IN ($inNota)
+                   AND d.TiDoRefe = ? AND d.NuDoRefe = ? AND d.TiDoRefe IN ($inFact) AND d.CodiCont LIKE '14%'
                    AND d.Periodo IN ($in) AND (f.ValoEAPB > 0 OR d.CodiCont = '140907')
                  GROUP BY d.Periodo HAVING DIF = 0 AND cont IN (1, 2)
                  ORDER BY MAX(e.FechCaus) DESC, MAX(e.HoraCaus) DESC LIMIT 1"
@@ -2919,7 +2934,7 @@ class SihosExternalWriteRepository
             $anuladasEntidad = 0;
             $vivas = 0;
             foreach ($facturas as $factura) {
-                $nota->execute([$codiInst, $factura['CodiDocu'], $factura['NumeDocu'], ...$periodos]);
+                $nota->execute([$codiInst, ...$codNota, $factura['CodiDocu'], $factura['NumeDocu'], ...$codFact, ...$periodos]);
                 $n = $nota->fetch();
                 if ($n === false) {
                     // Factura vigente: solo se tolera la del paciente (su tercero) y sin valor EAPB.
