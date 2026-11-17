@@ -12,6 +12,16 @@
 #      archivo completo — el proyecto ya tiene SQL viejo en varios
 #      controllers (deuda anterior a este hook) y no queremos bloquear
 #      trabajo futuro por eso; solo evitamos que se agregue MÁS.
+#   3) Aislamiento por tenant: avisa si una consulta SQL NUEVA en
+#      app/models/*Repository.php toca una tabla que tiene columna
+#      empresa_id en el esquema REAL (scripts/dump_tenant_tables.php contra
+#      la BD; cae a leer database/migrations/*.sql si no hay BD disponible)
+#      sin que 'empresa_id' aparezca en el mismo bloque de líneas agregadas.
+#      Es una señal, no una prueba: puede haber falsos positivos (ej. un
+#      JOIN que ya trae el filtro desde otra tabla) — por eso tiene escape
+#      explícito, a diferencia del chequeo 2. Complementa a
+#      TenantIsolationGuard (app/services/), que hace el mismo chequeo pero
+#      en cada petición real, no solo en el diff de un commit.
 #
 # Ver README.md, sección "Chequeos automáticos antes de cada commit".
 
@@ -63,6 +73,83 @@ if [ -n "$ARCHIVOS_CONTROLLER" ]; then
             FALLO=1
         fi
     done <<< "$ARCHIVOS_CONTROLLER"
+fi
+
+# ---------------------------------------------------------------------------
+# 3) Aislamiento por tenant: SQL nuevo en app/models contra una tabla
+#    multi-tenant (tiene columna empresa_id) sin 'empresa_id' en el mismo
+#    bloque de líneas agregadas.
+# ---------------------------------------------------------------------------
+# Preferimos el esquema REAL (vía scripts/dump_tenant_tables.php, misma
+# fuente que usa TenantIsolationGuard en runtime): algunos ALTER TABLE que
+# agregaron empresa_id se corrieron sin dejar migración rastreable, así que
+# el parseo de archivos de abajo por sí solo se queda corto (confirmado:
+# falta pago, permiso, rol_permiso, sede, sihos_salario_minimo, suscripcion,
+# usuario_empresa — created_at). Si no hay BD disponible (máquina sin
+# config/.env, o php no está en PATH), cae al parseo de archivos.
+TABLAS_MULTITENANT=$(php scripts/dump_tenant_tables.php 2>/dev/null | sort -u)
+
+if [ -z "$TABLAS_MULTITENANT" ]; then
+    echo "ℹ️  No se pudo leer el esquema real (sin BD/config/.env) — usando database/migrations/*.sql como respaldo para el chequeo de aislamiento por tenant (puede faltar alguna tabla cuyo ALTER no esté en una migración)."
+    TABLAS_MULTITENANT=$(for f in database/migrations/*.sql; do
+        awk '
+            /CREATE TABLE/ {
+                tbl = $0
+                gsub(/.*CREATE TABLE( IF NOT EXISTS)?[ \t]*`/, "", tbl)
+                gsub(/`.*/, "", tbl)
+                has_emp = 0
+                next
+            }
+            /`empresa_id`/ { if (tbl != "") has_emp = 1 }
+            /^\);/ || /^\) ENGINE/ {
+                if (tbl != "" && has_emp == 1) print tbl
+                tbl = ""
+            }
+        ' "$f"
+    done | sort -u)
+fi
+
+ARCHIVOS_MODELS=$(git diff --cached --name-only --diff-filter=ACM -- 'app/models/*.php' || true)
+
+if [ -n "$ARCHIVOS_MODELS" ] && [ -n "$TABLAS_MULTITENANT" ]; then
+    PATRON_TABLAS=$(echo "$TABLAS_MULTITENANT" | paste -sd'|')
+    AVISO_TENANT=0
+
+    while IFS= read -r archivo; do
+        [ -z "$archivo" ] && continue
+
+        AVISOS=$(git diff --cached -- "$archivo" | awk -v tablas="$PATRON_TABLAS" '
+            function revisar() {
+                if (bloque != "" \
+                    && bloque ~ ("(FROM|INTO|UPDATE|JOIN)[ \t]+`?(" tablas ")`?") \
+                    && bloque !~ /empresa_id/) {
+                    print bloque
+                }
+                bloque = ""
+            }
+            /^\+\+\+/ { next }
+            /^\+/ { bloque = bloque "\n" substr($0, 2); next }
+            { revisar() }
+            END { revisar() }
+        ')
+
+        if [ -n "$AVISOS" ]; then
+            echo "⚠️  $archivo agrega una consulta contra una tabla multi-tenant (con empresa_id en su esquema) sin filtrar por empresa_id en las líneas agregadas:"
+            echo "$AVISOS" | sed 's/^/     /'
+            AVISO_TENANT=1
+        fi
+    done <<< "$ARCHIVOS_MODELS"
+
+    if [ "$AVISO_TENANT" -eq 1 ]; then
+        if [ "${SAVID_PERMITIR_QUERY_SIN_EMPRESA:-0}" = "1" ]; then
+            echo "⚠️  Aviso de aislamiento por tenant ignorado explícitamente vía SAVID_PERMITIR_QUERY_SIN_EMPRESA=1."
+        else
+            echo ""
+            echo "   Si es legítimo (ej. el filtro ya llega por un JOIN, o es una operación de superadmin intencional), repite el commit con:"
+            echo "     SAVID_PERMITIR_QUERY_SIN_EMPRESA=1 git commit ..."
+            FALLO=1
+        fi
+    fi
 fi
 
 if [ "$FALLO" -eq 1 ]; then

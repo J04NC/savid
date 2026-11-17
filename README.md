@@ -518,8 +518,19 @@ El repo trae un hook de git en `.githooks/pre-commit` (activado con `git config 
 
 1. **Tamaño del commit**: bloquea si el commit cambia más de 200 líneas (sin contar `database/migrations` ni `vendor`), para forzar commits pequeños y revisables en vez de uno gigante al final de una sesión larga. Escape para un caso legítimo de cambio grande e indivisible: `SAVID_PERMITIR_COMMIT_GRANDE=1 git commit ...`.
 2. **Linter de arquitectura**: bloquea si el commit **agrega** (no revisa el archivo completo, solo las líneas nuevas del diff) SQL directo (`->prepare(`, `->query(`, `new PDO(`) o instanciación directa de un `*Repository` dentro de `app/controllers` — esa lógica va en un Service. Nota: varios controllers ya tenían SQL directo *antes* de este hook (`TerceroController`, `EmpresaController`, `ItemController`, `SgdController`) — es deuda técnica previa, el hook no la bloquea retroactivamente, solo evita que se agregue más.
+3. **Aislamiento por tenant**: avisa si el commit agrega una consulta en `app/models/*Repository.php` contra una tabla que tiene columna `empresa_id` en su esquema sin que `empresa_id` aparezca en el mismo bloque de líneas agregadas. MySQL no tiene Row-Level Security nativo (a diferencia de PostgreSQL) — el aislamiento multi-tenant depende por completo de que cada Repository recuerde filtrar por `empresa_id`/`sede_id`, así que este chequeo es la red de seguridad para ese olvido. La lista de tablas se obtiene corriendo `scripts/dump_tenant_tables.php` contra la BD real (el esquema vivo, no los archivos de migración: algunos `ALTER TABLE` que agregaron `empresa_id` no dejaron migración rastreable); si no hay BD disponible al commitear, cae de vuelta a leer `database/migrations/*.sql` como respaldo, menos preciso. Es una señal, no una prueba exacta (puede haber falsos positivos, ej. un `JOIN` que ya trae el filtro desde otra tabla) — escape explícito: `SAVID_PERMITIR_QUERY_SIN_EMPRESA=1 git commit ...`.
 
 Si el hook bloquea un commit, el mensaje explica por qué y qué hacer — no hace falta entender bash para leerlo.
+
+### Guardia de aislamiento por tenant en tiempo de ejecución
+
+El chequeo anterior solo mira el *diff* de un commit — no ve SQL que ya existía antes del hook, que se modificó sin tocar la línea del `FROM`/`JOIN`, ni SQL construido dinámicamente. `TenantIsolationGuard` (`app/services/TenantIsolationGuard.php`) es la misma idea pero corriendo en cada petición real: `AuditingPDOStatement::execute()` (el único punto por el que pasa **toda** consulta PDO de la app, auditoría o no) le pasa el SQL antes de ejecutarlo. Si el SQL toca una tabla con `empresa_id` en el esquema real (mismo origen que `scripts/dump_tenant_tables.php`, cacheado en una propiedad estática — una sola consulta por request, no por commit) y no contiene `empresa_id` en el texto, según `TENANT_GUARD_MODE` (variable de entorno):
+
+- `log` (por defecto): escribe un `error_log` y deja pasar la consulta. Pensado para correr así primero en producción una temporada y confirmar que no hay falsos positivos antes de endurecerlo.
+- `enforce`: lanza una `RuntimeException` y la consulta nunca se ejecuta.
+- `off`: desactiva el chequeo por completo.
+
+Se salta automáticamente en CLI (`scripts/`, cron, migraciones — ahí el acceso cruzado entre empresas suele ser intencional y no hay contexto de tenant en sesión) y en cualquier bloque envuelto en `TenantIsolationGuard::allowCrossTenant(fn)`, para los casos legítimos de consulta cruzada (reportes de superadmin). Sigue sin ser RLS real — es una revisión de texto en la capa de aplicación, no una política del motor — pero a diferencia del hook, corre sobre cada consulta real sin importar cuándo se escribió ese código.
 
 ---
 
