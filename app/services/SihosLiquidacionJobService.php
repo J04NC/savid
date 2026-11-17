@@ -80,9 +80,9 @@ class SihosLiquidacionJobService
             $fh = [];
             foreach ($tmp as $parte => $ruta) {
                 $fh[$parte] = fopen($ruta, 'w');
-                // BOM + "sep=;": ver la explicación en SihosController::auditoriaGlosaExportar(). El CSV por CUPS lleva solo
-                // el BOM: con la línea "sep=;" Excel ignora el BOM y muestra mal los acentos.
-                fwrite($fh[$parte], "\xEF\xBB\xBF" . ($parte === 'cups' ? '' : "sep=;\r\n"));
+                // BOM + "sep=;": ver la explicación en SihosController::auditoriaGlosaExportar(). El CSV por CUPS va sin BOM
+                // y en Windows-1252 (ver más abajo): con "sep=;" Excel ignora el BOM y muestra mal los acentos.
+                fwrite($fh[$parte], ($parte === 'cups' ? '' : "\xEF\xBB\xBF") . "sep=;\r\n");
             }
 
             $ultimoLatido = 0;
@@ -106,6 +106,11 @@ class SihosLiquidacionJobService
                 $this->terminar($empresaId, $token, $estado, 'error', (string)$reporte['error']);
 
                 return;
+            }
+            // CSV por CUPS: Windows-1252, que Excel lee bien (tildes y ñ) junto con la línea "sep=;" que fija el separador.
+            $cupsAnsi = iconv('UTF-8', 'Windows-1252//TRANSLIT//IGNORE', (string)file_get_contents($tmp['cups']));
+            if ($cupsAnsi === false || file_put_contents($tmp['cups'], $cupsAnsi) === false) {
+                throw new RuntimeException('No se pudo convertir el archivo por CUPS.');
             }
 
             foreach (self::ARCHIVOS as $parte) {

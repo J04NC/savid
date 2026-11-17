@@ -1677,7 +1677,7 @@ class SihosController
             exit('El resultado de este reporte expiró o no existe. Vuelva a consultar.');
         }
 
-        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Type: text/csv; charset=' . ($parte === 'cups' ? 'windows-1252' : 'utf-8'));
         header('Content-Disposition: attachment; filename="liquidacion_' . $estado['desde'] . '_' . $estado['hasta'] . '_' . $parte . '.csv"');
         header('Content-Length: ' . filesize($ruta));
         readfile($ruta);
