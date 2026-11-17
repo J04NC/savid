@@ -44,6 +44,8 @@ class AuditingPDOStatement
             $snapshot = AuditService::captureBeforeMutation($this->connection, $sql, $effective);
         }
 
+        TenantIsolationGuard::check($this->connection, $sql);
+
         $ok = $this->inner->execute($effective);
 
         $capturedInsertId = null;
