@@ -80,8 +80,9 @@ class SihosLiquidacionJobService
             $fh = [];
             foreach ($tmp as $parte => $ruta) {
                 $fh[$parte] = fopen($ruta, 'w');
-                // BOM + "sep=;": ver la explicación en SihosController::auditoriaGlosaExportar().
-                fwrite($fh[$parte], "\xEF\xBB\xBF" . "sep=;\r\n");
+                // BOM + "sep=;": ver la explicación en SihosController::auditoriaGlosaExportar(). El CSV por CUPS lleva solo
+                // el BOM: con la línea "sep=;" Excel ignora el BOM y muestra mal los acentos.
+                fwrite($fh[$parte], "\xEF\xBB\xBF" . ($parte === 'cups' ? '' : "sep=;\r\n"));
             }
 
             $ultimoLatido = 0;
