@@ -21,6 +21,8 @@ class SihosLiquidacionDetalleService
         'metodo' => ['Método de inferencia', 'exacto'],
         'actividad' => ['Actividad', 'exacto'],
         'prod' => ['Producción médica', 'exacto'],
+        'cups' => ['CUPS', 'exacto'],
+        'procedimiento' => ['Procedimiento', 'exacto'],
         'anulada' => ['Factura anulada', 'exacto'],
         // Valor "institucional": líneas de sala y materiales de cirugía (valor '1').
         'institucional' => ['Componente', 'institucional'],
@@ -57,8 +59,8 @@ class SihosLiquidacionDetalleService
                 continue;
             }
             $valor = trim($crudo[$nombre]);
-            // Cédula vacía = profesional sin cédula (p. ej. el usuario administrativo); en los demás un valor vacío no filtra nada.
-            if ($valor === '' && $nombre !== 'cedula') {
+            // Cédula, CUPS o procedimiento vacíos = línea sin ese dato (p. ej. el usuario administrativo, o un insumo sin CUPS); en los demás un valor vacío no filtra nada.
+            if ($valor === '' && !in_array($nombre, ['cedula', 'cups', 'procedimiento'], true)) {
                 continue;
             }
             if ($nombre === 'mes' && preg_match('/^\d{4}-\d{2}$/', $valor) !== 1) {
@@ -340,8 +342,8 @@ class SihosLiquidacionDetalleService
         fwrite($out, (string)$cabeceraRaw);
         while (($reg = self::leerRegistro($h)) !== null) {
             foreach ($reglas as [, $valor, $modo]) {
-                if ($valor !== '' && $modo !== 'institucional' && strpos($reg, $valor) === false) {
-                    continue 2; // prefiltro de texto: evita parsear la mayoría de las líneas
+                if ($valor !== '' && $modo !== 'institucional' && strpbrk($valor, "\";\r\n") === false && strpos($reg, $valor) === false) {
+                    continue 2; // prefiltro de texto (solo si el valor no se escapa en el CSV): evita parsear la mayoría de las líneas
                 }
             }
             $f = str_getcsv($reg, ';');

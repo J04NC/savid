@@ -89,6 +89,7 @@ $celdaClic = static fn (array $filtro, string $titulo, float $valor = 1.0): stri
                 <a class="auditoria-btn-primary" href="<?= htmlspecialchars($urlDescarga('detalle')) ?>">⬇ Descargar detalle (CSV)</a>
                 <a class="auditoria-btn-primary" href="<?= htmlspecialchars($urlDescarga('resumen')) ?>">⬇ Descargar resumen mensual (CSV)</a>
                 <a class="auditoria-btn-primary" href="<?= htmlspecialchars($urlDescarga('especialistas')) ?>">⬇ Descargar especialistas (CSV)</a>
+                <a class="auditoria-btn-primary" href="<?= htmlspecialchars($urlDescarga('cups')) ?>">⬇ Descargar por CUPS (CSV)</a>
             </p>
             <?php if ($reporte['sinEspecialidad'] > 0 || $reporte['sinProfesional'] > 0 || $reporte['tiposOtros'] !== []): ?>
                 <p class="modal-form-alert">
@@ -255,6 +256,40 @@ $celdaClic = static fn (array $filtro, string $titulo, float $valor = 1.0): stri
                             <?php foreach ($mesesRango as $m): ?>
                                 <td<?= $celdaClic(['mes' => $m, 'prod' => 'Sí'], "$m · producción médica", (float)($e['meses'][$m][0] ?? 0)) ?> data-order="<?= (float)($e['meses'][$m][0] ?? 0) ?>"><?= $fmt((float)($e['meses'][$m][0] ?? 0)) ?></td>
                             <?php endforeach; ?>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+
+            <h3 class="auditoria-title" style="font-size:1.1em; margin-top:28px;">Por CUPS y actividad (<?= count($reporte['cups'] ?? []) ?>)</h3>
+            <p class="field-note">Una fila por CUPS y nombre de la actividad. La cantidad se separa en producción médica y valor institucional (sala y materiales de cirugía) para que un mismo acto con varios componentes no infle el conteo; "total" suma todas las líneas. Los insumos y servicios sin CUPS se agrupan por su actividad. Haga clic en una fila para ver sus líneas, o en un valor para ver solo las que lo forman.</p>
+            <table class="savid-datatable seguridad-table savid-dt-fit" id="sihosLiquidacionCups"
+                   data-dt-order="[[9,&quot;desc&quot;]]"
+                   data-dt-scroll-wrap-class="sihos-auditoria-glosa-scroll">
+                <thead>
+                    <tr>
+                        <th>CUPS</th><th>Procedimiento</th><th>Actividad</th><th>Líneas</th>
+                        <th>Cant. producción médica</th><th>Valor producción médica</th><th>Cant. institucional</th><th>Valor institucional</th>
+                        <th>Cantidad total</th><th>Valor total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($reporte['cups'] ?? [] as $c):
+                        $baseCups = ['cups' => $c['cups'], 'procedimiento' => $c['procedimiento'], 'actividad' => $c['actividad']];
+                        $tituloCups = ($c['cups'] !== '' ? $c['cups'] . ' · ' : '') . ($c['procedimiento'] !== '' ? $c['procedimiento'] : $c['actividad'] . ' sin CUPS');
+                        ?>
+                        <tr data-liq-filtro="<?= htmlspecialchars((string)json_encode($baseCups), ENT_QUOTES) ?>"
+                            data-liq-titulo="<?= htmlspecialchars($tituloCups, ENT_QUOTES) ?>" tabindex="0" style="cursor:pointer;" title="Ver las líneas">
+                            <td><?= htmlspecialchars($c['cups']) ?></td>
+                            <td class="savid-dt-fit-text" title="<?= htmlspecialchars($c['procedimiento']) ?>"><?= htmlspecialchars($c['procedimiento'] !== '' ? $c['procedimiento'] : '(sin CUPS)') ?></td>
+                            <td><?= htmlspecialchars($c['actividad']) ?></td>
+                            <td<?= $celdaClic([], 'todas las líneas') ?>><?= $num((float)$c['lineas']) ?></td>
+                            <td<?= $celdaClic(['prod' => 'Sí'], 'producción médica', (float)$c['cantMedica']) ?> data-order="<?= (float)$c['cantMedica'] ?>"><?= $num((float)$c['cantMedica']) ?></td>
+                            <td<?= $celdaClic(['prod' => 'Sí'], 'producción médica', (float)$c['valMedica']) ?> data-order="<?= (float)$c['valMedica'] ?>"><?= $fmt((float)$c['valMedica']) ?></td>
+                            <td<?= $celdaClic(['institucional' => '1'], 'sala y materiales', (float)$c['cantInst']) ?> data-order="<?= (float)$c['cantInst'] ?>"><?= $num((float)$c['cantInst']) ?></td>
+                            <td<?= $celdaClic(['institucional' => '1'], 'sala y materiales', (float)$c['valInst']) ?> data-order="<?= (float)$c['valInst'] ?>"><?= $fmt((float)$c['valInst']) ?></td>
+                            <td<?= $celdaClic([], 'todas las líneas', (float)$c['cantidad']) ?> data-order="<?= (float)$c['cantidad'] ?>"><?= $num((float)$c['cantidad']) ?></td>
+                            <td<?= $celdaClic([], 'todas las líneas', (float)$c['total']) ?> data-order="<?= (float)$c['total'] ?>"><?= $fmt((float)$c['total']) ?></td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>

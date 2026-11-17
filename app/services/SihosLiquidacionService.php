@@ -60,10 +60,11 @@ class SihosLiquidacionService
      * @param resource $detalle handle abierto para escribir el CSV de detalle
      * @param resource $resumen handle abierto para escribir el CSV de resumen
      * @param resource $especialistas handle abierto para escribir el CSV de especialistas
+     * @param resource $cups handle abierto para escribir el CSV por CUPS y actividad
      * @param callable(int):void|null $progreso recibe las líneas procesadas
      * @return array<string,mixed>
      */
-    public function generar(int $empresaId, string $desde, string $hasta, $detalle, $resumen, $especialistas, ?callable $progreso = null): array
+    public function generar(int $empresaId, string $desde, string $hasta, $detalle, $resumen, $especialistas, $cups, ?callable $progreso = null): array
     {
         $error = self::validarRango($desde, $hasta);
         if ($error !== null) {
@@ -87,6 +88,7 @@ class SihosLiquidacionService
         $anuladasAcum = [];
         $mesesRango = array_map(static fn (array $t): string => substr($t[0], 0, 7), $this->meses($desde, $hasta));
         $porEspecialista = new SihosLiquidacionEspecialistas($mesesRango);
+        $porCups = new SihosLiquidacionCups();
         $res = ['ok' => true, 'desde' => $desde, 'lineas' => 0, 'hasta' => $hasta, 'totales' => $this->vacio(),
             'sinEspecialidad' => 0, 'sinProfesional' => 0, 'tiposOtros' => [], 'porActividad' => [], 'porMesEspecialidad' => [], 'inferencia' => []];
 
@@ -137,6 +139,7 @@ class SihosLiquidacionService
                 $clave = implode("\x1f", [$mes, $esp, (string)$f['CedulaProf'], (string)$f['NombreProf'], $actividad, $componente, $prod]);
                 $this->sumar($agregado[$clave], $valores);
                 $porEspecialista->agregar($f, $esp, $actividad, $componente, $prod, $valores);
+                $porCups->agregar((string)$f['CodiCups'], (string)$f['NombProc'], $actividad, $componente, $prod, $valores);
                 $this->sumar($res['totales'], $valores);
                 $this->sumar($res['porActividad'][$actividad][$prod], $valores);
                 if ($prod === 'Sí') {
@@ -162,6 +165,8 @@ class SihosLiquidacionService
         }
         $res['especialistas'] = $porEspecialista->filas();
         $porEspecialista->escribirCsv($especialistas, $res['especialistas']);
+        $res['cups'] = $porCups->filas();
+        $porCups->escribirCsv($cups, $res['cups']);
         $res['mesesRango'] = $mesesRango;
         ksort($anuladasAcum);
         $res['facturaAnulada'] = [];

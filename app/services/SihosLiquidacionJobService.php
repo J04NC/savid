@@ -14,7 +14,7 @@ class SihosLiquidacionJobService
     private const TTL_SECONDS = 21600;
     /** Sin latido durante este tiempo el trabajo se da por interrumpido. */
     private const SIN_LATIDO_SEGUNDOS = 300;
-    private const ARCHIVOS = ['detalle', 'resumen', 'especialistas'];
+    private const ARCHIVOS = ['detalle', 'resumen', 'especialistas', 'cups'];
 
     private function storage(): StorageService
     {
@@ -86,7 +86,7 @@ class SihosLiquidacionJobService
 
             $ultimoLatido = 0;
             $reporte = (new SihosLiquidacionService())->generar(
-                $empresaId, (string)$estado['desde'], (string)$estado['hasta'], $fh['detalle'], $fh['resumen'], $fh['especialistas'],
+                $empresaId, (string)$estado['desde'], (string)$estado['hasta'], $fh['detalle'], $fh['resumen'], $fh['especialistas'], $fh['cups'],
                 function (int $lineas) use (&$estado, $empresaId, $token, &$ultimoLatido): void {
                     if (time() - $ultimoLatido >= 2) {
                         $ultimoLatido = time();
