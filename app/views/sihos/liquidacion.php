@@ -52,6 +52,12 @@ $celdaClic = static fn (array $filtro, string $titulo, float $valor = 1.0): stri
                 <label for="sihosLiquidacionHasta">Hasta</label>
                 <input type="date" id="sihosLiquidacionHasta" name="hasta" class="form-input" required value="<?= htmlspecialchars($hasta) ?>">
             </div>
+            <div class="form-group">
+                <label for="sihosLiquidacionEntidades" title="Entidades con más cantidad del rango que tienen columna propia de valor unitario en la tabla por CUPS; el resto va en 'Otras entidades'">Entidades con valor unitario</label>
+                <select id="sihosLiquidacionEntidades" name="entidades" class="form-input">
+                    <?php foreach ([3, 4, 5] as $nEnt): ?><option value="<?= $nEnt ?>"<?= (int)($_GET['entidades'] ?? 3) === $nEnt ? ' selected' : '' ?>><?= $nEnt ?> más usadas</option><?php endforeach; ?>
+                </select>
+            </div>
             <div class="form-group" style="align-self:flex-end;">
                 <button type="submit" name="buscar" value="1" class="auditoria-btn-primary">🔍 Consultar</button>
             </div>
@@ -262,7 +268,7 @@ $celdaClic = static fn (array $filtro, string $titulo, float $valor = 1.0): stri
             </table>
 
             <h3 class="auditoria-title" style="font-size:1.1em; margin-top:28px;">Por CUPS y actividad (<?= count($reporte['cups'] ?? []) ?>)</h3>
-            <p class="field-note">Una fila por CUPS y nombre de la actividad. La cantidad se separa en producción médica y valor institucional (sala y materiales de cirugía) para que un mismo acto con varios componentes no infle el conteo; "total" suma todas las líneas. Los insumos y servicios sin CUPS se agrupan por su actividad. Haga clic en una fila para ver sus líneas, o en un valor para ver solo las que lo forman.</p>
+            <p class="field-note">Una fila por CUPS y nombre de la actividad. La cantidad se separa en producción médica y valor institucional (sala y materiales de cirugía) para que un mismo acto con varios componentes no infle el conteo; "total" suma todas las líneas. Los insumos y servicios sin CUPS se agrupan por su actividad. El valor unitario es valor ÷ cantidad en cada una de las entidades con más cantidad del rango (el resto en "Otras entidades"); en cirugías suma el de cada componente. Un asterisco indica que el valor no es único (pase el puntero para ver el rango); el CSV trae cantidad, mínimo y máximo. Haga clic en una fila para ver sus líneas, o en un valor para ver solo las que lo forman.</p>
             <table class="savid-datatable seguridad-table savid-dt-fit" id="sihosLiquidacionCups"
                    data-dt-order="[[9,&quot;desc&quot;]]"
                    data-dt-scroll-wrap-class="sihos-auditoria-glosa-scroll">
@@ -271,6 +277,7 @@ $celdaClic = static fn (array $filtro, string $titulo, float $valor = 1.0): stri
                         <th>CUPS</th><th>Procedimiento</th><th>Actividad</th><th>Líneas</th>
                         <th>Cant. producción médica</th><th>Valor producción médica</th><th>Cant. institucional</th><th>Valor institucional</th>
                         <th>Cantidad total</th><th>Valor total</th>
+                        <?php foreach ([...($reporte['cupsEntidades'] ?? []), 'Otras entidades'] as $nombreEnt): ?><th title="Valor unitario en <?= htmlspecialchars($nombreEnt, ENT_QUOTES) ?>">V. unit. <?= htmlspecialchars($nombreEnt) ?></th><?php endforeach; ?>
                     </tr>
                 </thead>
                 <tbody>
@@ -290,6 +297,10 @@ $celdaClic = static fn (array $filtro, string $titulo, float $valor = 1.0): stri
                             <td<?= $celdaClic(['institucional' => '1'], 'sala y materiales', (float)$c['valInst']) ?> data-order="<?= (float)$c['valInst'] ?>"><?= $fmt((float)$c['valInst']) ?></td>
                             <td<?= $celdaClic([], 'todas las líneas', (float)$c['cantidad']) ?> data-order="<?= (float)$c['cantidad'] ?>"><?= $num((float)$c['cantidad']) ?></td>
                             <td<?= $celdaClic([], 'todas las líneas', (float)$c['total']) ?> data-order="<?= (float)$c['total'] ?>"><?= $fmt((float)$c['total']) ?></td>
+                            <?php foreach ($c['entidades'] as $e):
+                                $rango = $e['min'] !== null && round($e['min']) !== round($e['max']) ? 'Varía entre ' . $fmt((float)$e['min']) . ' y ' . $fmt((float)$e['max']) : ''; ?>
+                                <td style="text-align:right;" data-order="<?= (float)$e['unitario'] ?>"<?= $rango !== '' ? ' title="' . htmlspecialchars($rango, ENT_QUOTES) . '"' : '' ?>><?= $e['cantidad'] > 0 ? $fmt((float)$e['unitario']) . ($rango !== '' ? '*' : '') : '' ?></td>
+                            <?php endforeach; ?>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>

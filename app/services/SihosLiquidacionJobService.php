@@ -34,7 +34,7 @@ class SihosLiquidacionJobService
     }
 
     /** @return array{ok:bool,token?:string,error?:string} */
-    public function iniciar(int $empresaId, int $userId, string $desde, string $hasta): array
+    public function iniciar(int $empresaId, int $userId, string $desde, string $hasta, int $entidades = 3): array
     {
         $error = SihosLiquidacionService::validarRango($desde, $hasta);
         if ($error !== null) {
@@ -46,7 +46,7 @@ class SihosLiquidacionJobService
         $token = bin2hex(random_bytes(16));
         $this->guardarEstado($empresaId, $token, [
             'estado' => 'pendiente', 'empresa_id' => $empresaId, 'user_id' => $userId,
-            'desde' => $desde, 'hasta' => $hasta, 'creado' => time(), 'actualizado' => time(), 'lineas' => 0,
+            'desde' => $desde, 'hasta' => $hasta, 'entidades' => max(1, min(5, $entidades)), 'creado' => time(), 'actualizado' => time(), 'lineas' => 0,
         ]);
 
         $php = is_executable(PHP_BINDIR . '/php') ? PHP_BINDIR . '/php' : 'php';
@@ -95,7 +95,8 @@ class SihosLiquidacionJobService
                         $estado['actualizado'] = $ultimoLatido;
                         $this->guardarEstado($empresaId, $token, $estado);
                     }
-                }
+                },
+                (int)($estado['entidades'] ?? 3)
             );
             foreach ($fh as $h) {
                 fclose($h);

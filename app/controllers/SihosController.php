@@ -1614,7 +1614,7 @@ class SihosController
             $userId = (int)($_SESSION['user_id'] ?? 0);
 
             if (isset($_GET['buscar'])) {
-                $inicio = $this->liquidacionJobService->iniciar($empresaId, $userId, $desde, $hasta);
+                $inicio = $this->liquidacionJobService->iniciar($empresaId, $userId, $desde, $hasta, (int)($_GET['entidades'] ?? 3));
                 if (!$inicio['ok']) {
                     $reporte = ['ok' => false, 'error' => $inicio['error']];
                 } else {
