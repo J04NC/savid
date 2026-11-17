@@ -22,6 +22,9 @@
 #      explícito, a diferencia del chequeo 2. Complementa a
 #      TenantIsolationGuard (app/services/), que hace el mismo chequeo pero
 #      en cada petición real, no solo en el diff de un commit.
+#   4) CSP: bloquea si el commit agrega un <script> inline nuevo en
+#      app/views sin nonce="<?= CspNonceService::value() ?>" — sin eso el
+#      navegador simplemente no lo ejecuta (ver README.md, sección CSP).
 #
 # Ver README.md, sección "Chequeos automáticos antes de cada commit".
 
@@ -150,6 +153,29 @@ if [ -n "$ARCHIVOS_MODELS" ] && [ -n "$TABLAS_MULTITENANT" ]; then
             FALLO=1
         fi
     fi
+fi
+
+# ---------------------------------------------------------------------------
+# 4) CSP: <script> inline nuevo en app/views sin nonce
+# ---------------------------------------------------------------------------
+ARCHIVOS_VISTAS=$(git diff --cached --name-only --diff-filter=ACM -- 'app/views' | command grep '\.php$' || true)
+
+if [ -n "$ARCHIVOS_VISTAS" ]; then
+    while IFS= read -r archivo; do
+        [ -z "$archivo" ] && continue
+
+        LINEAS_SIN_NONCE=$(git diff --cached -- "$archivo" | awk '
+            /^\+\+\+/ { next }
+            /^\+/ && /<script/ && !/src=/ && !/nonce=/ { print }
+        ')
+
+        if [ -n "$LINEAS_SIN_NONCE" ]; then
+            echo "❌ $archivo agrega un <script> inline sin nonce (rompe la CSP, ver README.md sección CSP):"
+            echo "$LINEAS_SIN_NONCE" | sed 's/^/     /'
+            echo "   Agrega: nonce=\"<?= CspNonceService::value() ?>\""
+            FALLO=1
+        fi
+    done <<< "$ARCHIVOS_VISTAS"
 fi
 
 if [ "$FALLO" -eq 1 ]; then

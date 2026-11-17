@@ -358,7 +358,7 @@ $sihosPlanillaIntegradaJsV = is_readable($assetSihosPlanillaIntegrada) ? (int)fi
 
 <script src="/js/sihos-nomina-planilla-integrada-correccion.js?v=<?= (int)$sihosPlanillaIntegradaJsV ?>"></script>
 
-<script>
+<script nonce="<?= CspNonceService::value() ?>">
 document.addEventListener('DOMContentLoaded', function () {
     // Formulario de navegación completa (submit normal, no fetch): sube el
     // CSV y compara contra SIHOS empleado por empleado — puede tardar

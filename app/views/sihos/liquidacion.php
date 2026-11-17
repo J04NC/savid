@@ -363,7 +363,7 @@ $celdaClic = static fn (array $filtro, string $titulo, float $valor = 1.0): stri
 
 </div>
 
-<script>
+<script nonce="<?= CspNonceService::value() ?>">
 // La vista se inserta en main.php ANTES de cargar app.js y jQuery: sin esperar
 // a DOMContentLoaded, savidMostrarCargando aún no existe cuando corre este script.
 document.addEventListener('DOMContentLoaded', function () {

@@ -659,7 +659,7 @@ $formatOption = static function (string $codigo, string $nombre): string {
             </section>
         </div>
 
-        <script type="application/json" id="sgd-doc-catalogos"><?= $catalogosJson ?></script>
+        <script type="application/json" id="sgd-doc-catalogos" nonce="<?= CspNonceService::value() ?>"><?= $catalogosJson ?></script>
         <script src="/js/sgd-documentos.js?v=<?= (int)$sgdDocJsV ?>"></script>
     <?php endif; ?>
 </div>

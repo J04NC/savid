@@ -130,7 +130,7 @@
 
 </div>
 
-<script>
+<script nonce="<?= CspNonceService::value() ?>">
 document.addEventListener('DOMContentLoaded', function () {
     // "Consultar" es navegación completa (submit normal, no fetch):
     // reconstruye todo el reporte contra SIHOS — se muestra el overlay

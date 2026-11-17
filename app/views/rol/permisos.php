@@ -111,7 +111,7 @@
 
 </form>
 
-<script>
+<script nonce="<?= CspNonceService::value() ?>">
 (function(){
 
 const form = document.getElementById("formRolPermisos");

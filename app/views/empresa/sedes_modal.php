@@ -121,7 +121,7 @@ $esSuperAdmin = !empty($_SESSION['es_super_admin'])
     </footer>
 </div>
 
-<script>
+<script nonce="<?= CspNonceService::value() ?>">
 (function () {
     const root = document.getElementById("empresaSedesModal");
     if (!root) return;

@@ -44,7 +44,7 @@ $endpoint = '?url=empresa/subdominio/' . $empresaId;
     </footer>
 </div>
 
-<script>
+<script nonce="<?= CspNonceService::value() ?>">
 (function () {
     const root = document.querySelector(".empresa-subdominio-modal");
     if (!root) return;

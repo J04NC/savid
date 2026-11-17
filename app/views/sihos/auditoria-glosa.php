@@ -260,7 +260,7 @@ $sihosConcluirGlosaJsV = is_readable($assetSihosConcluirGlosa) ? (int)filemtime(
 
 </div>
 
-<script>
+<script nonce="<?= CspNonceService::value() ?>">
 document.addEventListener('DOMContentLoaded', function () {
     var fechaFin = document.getElementById('sihosGlosaFechaFin');
     var fechaCorte = document.getElementById('sihosGlosaFechaCorte');

@@ -50,7 +50,7 @@ Continuar
 
 </form>
 
-<script>
+<script nonce="<?= CspNonceService::value() ?>">
 
 (function () {
 

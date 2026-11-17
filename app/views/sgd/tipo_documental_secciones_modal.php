@@ -83,7 +83,7 @@ $estadosValidos = [
     </footer>
 </div>
 
-<script>
+<script nonce="<?= CspNonceService::value() ?>">
 (function () {
     var root = document.querySelector('.sgd-tipo-secciones-modal');
     if (!root || root.dataset.canGuardar !== '1') return;

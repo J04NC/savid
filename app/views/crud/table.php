@@ -861,11 +861,11 @@ if ($diasRestantes < 0) {
 
 <?php
 if (!empty($crudContextTable) && $crudContextTable === 'empresa') {
-    echo '<script>window.__CRUD_EMPRESA_FK_LABELS = ' . json_encode($relationMaps, JSON_UNESCAPED_UNICODE) . ';</script>';
+    echo '<script nonce="<?= CspNonceService::value() ?>">window.__CRUD_EMPRESA_FK_LABELS = ' . json_encode($relationMaps, JSON_UNESCAPED_UNICODE) . ';</script>';
 }
 if (!empty($crudContextTable) && $crudContextTable === 'usuario') {
     $meta = $tipodocumentoMetaById ?? [];
-    echo '<script>window.__TIPO_DOC_USUARIO_META = ' . json_encode($meta, JSON_UNESCAPED_UNICODE) . ';</script>';
+    echo '<script nonce="<?= CspNonceService::value() ?>">window.__TIPO_DOC_USUARIO_META = ' . json_encode($meta, JSON_UNESCAPED_UNICODE) . ';</script>';
     $ujsPath = defined('BASE_PATH') ? BASE_PATH . '/public/js/usuario_crud.js' : '';
     $ujsV = ($ujsPath !== '' && is_readable($ujsPath)) ? (int) filemtime($ujsPath) : time();
     echo '<script src="/js/usuario_crud.js?v=' . $ujsV . '"></script>';

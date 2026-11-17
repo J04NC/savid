@@ -45,7 +45,7 @@ $endpoint = '?url=empresa/roles/' . $empresaId;
     </footer>
 </div>
 
-<script>
+<script nonce="<?= CspNonceService::value() ?>">
 (function () {
     const root = document.querySelector(".empresa-roles-modal");
     if (!root) return;

@@ -165,7 +165,7 @@ $edades = ['0 - 60 días', '61 - 90 días', '91 - 180 días', '181 - 360 días',
 
 </div>
 
-<script>
+<script nonce="<?= CspNonceService::value() ?>">
 var SIHOS_CARTERA2193 = { empresaId: <?= (int)($empresaId ?? 0) ?>, fechaCorte: <?= json_encode($fechaCorte) ?> };
 // La vista se inserta en main.php ANTES de cargar app.js y jQuery: sin esperar
 // a DOMContentLoaded, savidMostrarCargando aún no existe cuando corre este script.

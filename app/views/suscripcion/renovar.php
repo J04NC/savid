@@ -29,7 +29,7 @@
     <button type="button" class="btn-cancel" onclick="closeModalGod()">Cancelar</button>
 </div>
 
-<script>
+<script nonce="<?= CspNonceService::value() ?>">
 (function () {
     const SUSCRIPCION_ID = <?= (int)$suscripcionId ?>;
     const btn = document.getElementById('btnConfirmarRenovacion');

@@ -56,7 +56,7 @@ $esSuperAdmin = !empty($_SESSION['es_super_admin']) || (int)($_SESSION['rol_id']
     </footer>
 </div>
 
-<script>
+<script nonce="<?= CspNonceService::value() ?>">
 (function () {
     const root = document.querySelector(".empresa-usuarios-modal");
     if (!root) return;

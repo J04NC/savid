@@ -221,9 +221,9 @@ $sgdChecklistJsV = is_readable($sgdChecklistJs) ? (int)filemtime($sgdChecklistJs
             </section>
         </div>
 
-        <script type="application/json" id="sgd-form-esquema-inicial"><?= $esquemaJson ?></script>
-        <script type="application/json" id="sgd-form-page-meta"><?= $pageMetaJson ?></script>
-        <script type="application/json" id="sgd-form-arquetipos-catalog"><?= $arquetiposSemillaJson ?></script>
+        <script type="application/json" id="sgd-form-esquema-inicial" nonce="<?= CspNonceService::value() ?>"><?= $esquemaJson ?></script>
+        <script type="application/json" id="sgd-form-page-meta" nonce="<?= CspNonceService::value() ?>"><?= $pageMetaJson ?></script>
+        <script type="application/json" id="sgd-form-arquetipos-catalog" nonce="<?= CspNonceService::value() ?>"><?= $arquetiposSemillaJson ?></script>
         <script src="/js/sgd-bloque-config.js?v=<?= (int)$sgdBloqueCfgJsV ?>"></script>
         <script src="/js/sgd-checklist-config.js?v=<?= (int)$sgdChecklistJsV ?>"></script>
         <script src="/js/sgd-formularios.js?v=<?= (int)$sgdFormJsV ?>"></script>

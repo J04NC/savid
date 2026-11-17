@@ -315,7 +315,7 @@ $anioLabel = isset($config['ccd_anio']) && $config['ccd_anio'] !== '' ? (string)
             </section>
         </div>
 
-        <script type="application/json" id="sgd-ccd-catalogos"><?= $catalogosJson ?></script>
+        <script type="application/json" id="sgd-ccd-catalogos" nonce="<?= CspNonceService::value() ?>"><?= $catalogosJson ?></script>
         <script src="/js/sgd-catalog.js?v=<?= (int)$sgdCatalogJsV ?>"></script>
         <script src="/js/sgd-ccd.js?v=<?= (int)$sgdCcdJsV ?>"></script>
     <?php endif; ?>

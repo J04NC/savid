@@ -1,4 +1,4 @@
-<script>
+<script nonce="<?= CspNonceService::value() ?>">
 document.addEventListener("DOMContentLoaded", function () {
     const modal = document.querySelector(".modal-content");
     if (modal) modal.classList.add("modal-lg");
@@ -114,7 +114,7 @@ $esSuperAdmin = !empty($esSuperAdmin);
     </div>
 </form>
 
-<script>
+<script nonce="<?= CspNonceService::value() ?>">
 (function(){
 const form = document.getElementById("formUsuarioEmpresaSede");
 if (!form) return;

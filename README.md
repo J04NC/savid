@@ -532,6 +532,20 @@ El chequeo anterior solo mira el *diff* de un commit — no ve SQL que ya exist�
 
 Se salta automáticamente en CLI (`scripts/`, cron, migraciones — ahí el acceso cruzado entre empresas suele ser intencional y no hay contexto de tenant en sesión) y en cualquier bloque envuelto en `TenantIsolationGuard::allowCrossTenant(fn)`, para los casos legítimos de consulta cruzada (reportes de superadmin). Sigue sin ser RLS real — es una revisión de texto en la capa de aplicación, no una política del motor — pero a diferencia del hook, corre sobre cada consulta real sin importar cuándo se escribió ese código.
 
+### Content-Security-Policy (CSP)
+
+`public/index.php` emite una cabecera `Content-Security-Policy` en cada respuesta (vía `CspNonceService::header()`, `app/services/CspNonceService.php`). `script-src` **no** tiene `'unsafe-inline'`: cada `<script>` inline necesita el nonce de esa misma petición para que el navegador lo ejecute.
+
+**Regla para cualquier `<script>` inline nuevo** (sin `src=`), en una vista o en un modal: agrégale siempre
+
+```php
+<script nonce="<?= CspNonceService::value() ?>">
+```
+
+Un `<script src="...">` que apunte a un dominio ya permitido (`https://cdn.jsdelivr.net`, `https://challenges.cloudflare.com`) no necesita nonce — el nonce solo hace falta para que se ejecute un bloque inline. El chequeo 4 de `.githooks/pre-commit` bloquea el commit si agregas un `<script>` inline sin nonce (sin escape: si lo ves, es porque de verdad falta el atributo).
+
+Si algún día necesitas cargar un script de un dominio nuevo (otro CDN, otro widget), agrégalo a `script-src` en `CspNonceService::header()` — nunca agregues `'unsafe-inline'` de vuelta para "solucionarlo" rápido, eso anula la protección completa. `style-src` sí mantiene `'unsafe-inline'` a propósito (SAVID usa mucho `style="..."` inline en las vistas; migrar todo eso a clases CSS es un refactor aparte, no justificado por ahora — la inyección de CSS es un riesgo mucho menor que la de JS).
+
 ---
 
 ## Auditoría y archivo histórico

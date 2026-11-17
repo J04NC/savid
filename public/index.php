@@ -74,6 +74,12 @@ spl_autoload_register(function ($class) {
     }
 });
 
+// CSP: nonce único por request para los <script> inline (ver README.md,
+// sección CSP). Después del autoload porque CspNonceService se resuelve ahí.
+if (!headers_sent()) {
+    header(CspNonceService::header());
+}
+
 // ✅ EJECUTAR ROUTER
 $router = new Router();
 $router->run();

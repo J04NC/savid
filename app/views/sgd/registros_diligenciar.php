@@ -61,9 +61,9 @@ $sgdChecklistJsV = is_readable($sgdChecklistJs) ? (int)filemtime($sgdChecklistJs
             </p>
         </header>
 
-        <script type="application/json" id="sgd-reg-esquema-inicial"><?= $esquemaJson ?></script>
-        <script type="application/json" id="sgd-reg-datos-inicial"><?= $datosJson ?></script>
-        <script type="application/json" id="sgd-reg-page-meta"><?= json_encode([
+        <script type="application/json" id="sgd-reg-esquema-inicial" nonce="<?= CspNonceService::value() ?>"><?= $esquemaJson ?></script>
+        <script type="application/json" id="sgd-reg-datos-inicial" nonce="<?= CspNonceService::value() ?>"><?= $datosJson ?></script>
+        <script type="application/json" id="sgd-reg-page-meta" nonce="<?= CspNonceService::value() ?>"><?= json_encode([
             'editable' => $editable && $canGuardar,
             'registroId' => $registroId,
             'empresaId' => $empresaId,

@@ -110,7 +110,7 @@ $renderSedeOptions = static function (?int $empresaId, array $sedesPorEmpresa, $
     </div>
 </form>
 
-<script>
+<script nonce="<?= CspNonceService::value() ?>">
 (function(){
 const SEDES_POR_EMPRESA = <?= json_encode($sedesPorEmpresa ?? [], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_UNESCAPED_UNICODE) ?>;
 const PUEDE_GLOBAL = <?= !empty($puedeRolGlobal) ? 'true' : 'false' ?>;

@@ -212,7 +212,7 @@ $tarifaProcJsV = is_readable($assetTarifaProc) ? (int)filemtime($assetTarifaProc
 
 <script src="/js/sihos-tarifa-procedimiento.js?v=<?= (int)$tarifaProcJsV ?>"></script>
 
-<script>
+<script nonce="<?= CspNonceService::value() ?>">
 document.addEventListener('DOMContentLoaded', function () {
     var form = document.getElementById('sihosTarifaProcForm');
     if (form && typeof savidMostrarCargando === 'function') {

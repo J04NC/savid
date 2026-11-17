@@ -159,7 +159,7 @@ autocomplete="off"
 </div>
 </div>
 
-<script>
+<script nonce="<?= CspNonceService::value() ?>">
 <?php
 $promptContextModal = isset($_SESSION['user_id'])
     && !ContextGateService::hasOperationalContext();
@@ -175,11 +175,11 @@ document.addEventListener("DOMContentLoaded", function(){
 });
 </script>
 
-<script>
+<script nonce="<?= CspNonceService::value() ?>">
 window.CSRF_TOKEN = "<?= CsrfService::token() ?>";
 </script>
 
-<script>
+<script nonce="<?= CspNonceService::value() ?>">
 
 const systemRoutes = [
 

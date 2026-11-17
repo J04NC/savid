@@ -412,7 +412,7 @@ $headingTags = ['h2', 'h3', 'h4', 'h5', 'h6'];
             </div>
         </form>
 
-        <script type="application/json" id="sgd-elab-ref-docs"><?= $refDocsJson ?: '[]' ?></script>
+        <script type="application/json" id="sgd-elab-ref-docs" nonce="<?= CspNonceService::value() ?>"><?= $refDocsJson ?: '[]' ?></script>
         <div id="sgd-word-import-modal" class="sgd-word-import-modal" hidden aria-hidden="true">
             <div class="sgd-word-import-backdrop" data-word-import-close></div>
             <div class="sgd-word-import-dialog" role="dialog" aria-labelledby="sgd-word-import-title" aria-modal="true">
@@ -465,7 +465,7 @@ $headingTags = ['h2', 'h3', 'h4', 'h5', 'h6'];
             </div>
         </div>
 
-        <script type="application/json" id="sgd-elab-config"><?= json_encode([
+        <script type="application/json" id="sgd-elab-config" nonce="<?= CspNonceService::value() ?>"><?= json_encode([
             'canEdit' => $canGuardar,
             'documentoId' => (int)$documentoId,
             'uploadMediaUrl' => $canGuardar && $documentoId > 0

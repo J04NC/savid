@@ -1086,7 +1086,7 @@ $sihosReclasificarCuentaVigenciaActualMasivoJsV = is_readable($assetSihosReclasi
 
 </div>
 
-<script>
+<script nonce="<?= CspNonceService::value() ?>">
 document.addEventListener('DOMContentLoaded', function () {
     // La vista se inserta en main.php (línea 124) ANTES de cargar app.js
     // (línea 194): sin esperar a DOMContentLoaded, savidMostrarCargando aún

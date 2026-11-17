@@ -76,7 +76,7 @@ $checkLabels = [
 
 </div>
 
-<script>
+<script nonce="<?= CspNonceService::value() ?>">
 (function () {
     const btn = document.getElementById('btnGenerarBackup');
     const status = document.getElementById('estadoBackupStatus');

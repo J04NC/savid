@@ -326,7 +326,7 @@ $sihosCorreccionJsV = is_readable($assetSihosCorreccion) ? (int)filemtime($asset
 
 <script src="/js/sihos-nomina-correccion.js?v=<?= (int)$sihosCorreccionJsV ?>"></script>
 
-<script>
+<script nonce="<?= CspNonceService::value() ?>">
 document.addEventListener('DOMContentLoaded', function () {
     // Formulario de navegación completa (submit normal, no fetch): cruza el
     // CSV contra SIHOS empleado por empleado — puede tardar varios segundos

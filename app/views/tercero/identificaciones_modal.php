@@ -108,7 +108,7 @@ $nitTipoId = 9;
     </footer>
 </div>
 
-<script>
+<script nonce="<?= CspNonceService::value() ?>">
 (function () {
     const root = document.querySelector(".tercero-ident-modal");
     if (!root) return;

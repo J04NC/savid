@@ -138,7 +138,7 @@
 </div>
 </form>
 
-<script>
+<script nonce="<?= CspNonceService::value() ?>">
 (function(){
 const USUARIO_ID = <?= (int)$usuario['id'] ?>;
 const ES_SUPER_ADMIN = <?= !empty($esSuperAdmin) ? 'true' : 'false' ?>;

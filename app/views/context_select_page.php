@@ -21,7 +21,7 @@
 
 <script src="/js/login.js?v=<?= (int)@filemtime(BASE_PATH . '/public/js/login.js') ?>"></script>
 
-<script>
+<script nonce="<?= CspNonceService::value() ?>">
 (function () {
     const form = document.getElementById("contextForm");
     if (!form) return;

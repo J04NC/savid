@@ -66,7 +66,7 @@ if (!function_exists('acadH')) {
     </section>
 </div>
 
-<script>
+<script nonce="<?= CspNonceService::value() ?>">
 document.addEventListener("DOMContentLoaded", function () {
     document.querySelectorAll(".acad-grade-form").forEach(function (form) {
         form.addEventListener("submit", function (ev) {
