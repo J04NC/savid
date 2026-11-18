@@ -105,6 +105,12 @@ class AuthService
     {
         $userId = (int)$user['id'];
 
+        // Fijación de sesión: un atacante no puede forzar antes del login un
+        // session ID que luego quede autenticado, porque el ID de aquí en
+        // adelante es uno nuevo generado tras verificar credenciales (y 2FA,
+        // si aplica) — $_SESSION sigue en memoria, solo cambia el ID/cookie.
+        SessionManager::regenerate();
+
         unset($_SESSION['tfa_pending_user_id']);
 
         $this->clearStaleContextKeys();
