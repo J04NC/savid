@@ -42,9 +42,10 @@ class SihosFacturacionService
 
     /**
      * @param string[] $tipos
+     * @param ?callable(string,int):void $progreso aviso de fase y filas leídas (lo usa el trabajo en segundo plano)
      * @return array{ok:bool,error?:string,facturas?:list<array<string,mixed>>,notas?:list<array<string,mixed>>}
      */
-    public function buildReporte(int $empresaId, string $desde, string $hasta, array $tipos, string $nit): array
+    public function buildReporte(int $empresaId, string $desde, string $hasta, array $tipos, string $nit, ?callable $progreso = null): array
     {
         $fecha = '/^\d{4}-\d{2}-\d{2}$/';
         if (!preg_match($fecha, $desde) || !preg_match($fecha, $hasta) || $desde > $hasta) {
@@ -69,8 +70,13 @@ class SihosFacturacionService
             }
 
             $repo = new SihosFacturacionRepository($externo->connect(), $conexion['codiInst']);
+            $avisar = $progreso ?? static function (string $fase, int $filas): void {
+            };
+            $avisar('Consultando facturas', 0);
             $facturas = $repo->fetchFacturas($codigosFactura, $prefijos, $desde, $hasta, $tipos, $nit);
+            $avisar('Consultando notas', count($facturas));
             $notas = $repo->fetchNotas($codigosNota, $codigosFactura, $prefijos, $desde, $hasta, $tipos, $nit);
+            $avisar('Consultando el envío electrónico de las notas', count($facturas) + count($notas));
             $envios = $notas === [] ? [] : $repo->fetchEnviosNotas($codigosNota, (string)((int)substr($desde, 0, 4) - 1));
         } catch (PDOException $e) {
             error_log('SihosFacturacionService: ' . $e->getMessage());

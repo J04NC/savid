@@ -70,32 +70,36 @@ class SihosFacturacionTabla
     }
 
     /**
-     * CSV completo de una tabla, igual que el "por CUPS" de Liquidación: sin BOM
-     * y con la línea "sep=;" primero (Excel ignora el BOM cuando está esa
-     * línea), cifras con coma decimal (SihosLiquidacionService::num), textos
-     * que empiezan por = + @ protegidos de fórmulas, y todo en Windows-1252
-     * (Excel es-CO muestra bien tildes y ñ).
+     * Escribe el CSV completo de una tabla en $fh, igual que el "por CUPS" de
+     * Liquidación: sin BOM y con la línea "sep=;" primero (Excel ignora el BOM
+     * cuando está esa línea), cifras con coma decimal
+     * (SihosLiquidacionService::num), textos que empiezan por = + @ protegidos
+     * de fórmulas y cada línea convertida a Windows-1252 (Excel es-CO muestra
+     * bien tildes y ñ). Línea a línea: un rango grande no se duplica en memoria.
      *
+     * @param resource $fh
      * @param list<array<string, mixed>> $filas
      */
-    public static function csv(string $tabla, array $filas): string
+    public static function escribirCsv($fh, string $tabla, array $filas): void
     {
         $claves = array_keys(self::COLUMNAS[$tabla] ?? []);
-        $fh = fopen('php://temp', 'w+');
+        $linea = static function (array $celdas) use ($fh): void {
+            $m = fopen('php://memory', 'w+');
+            SihosLiquidacionService::escribirFila($m, $celdas);
+            rewind($m);
+            fwrite($fh, (string)iconv('UTF-8', 'Windows-1252//TRANSLIT//IGNORE', (string)stream_get_contents($m)));
+            fclose($m);
+        };
+
         fwrite($fh, "sep=;\r\n");
-        SihosLiquidacionService::escribirFila($fh, array_values(self::COLUMNAS[$tabla] ?? []));
+        $linea(array_values(self::COLUMNAS[$tabla] ?? []));
         foreach ($filas as $fila) {
-            SihosLiquidacionService::escribirFila($fh, array_map(
+            $linea(array_map(
                 static fn (string $k) => in_array($k, self::MONEDA, true)
                     ? SihosLiquidacionService::num((float)$fila[$k])
                     : (string)($fila[$k] ?? ''),
                 $claves
             ));
         }
-        rewind($fh);
-        $utf8 = (string)stream_get_contents($fh);
-        fclose($fh);
-
-        return (string)iconv('UTF-8', 'Windows-1252//TRANSLIT//IGNORE', $utf8);
     }
 }
