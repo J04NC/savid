@@ -254,8 +254,8 @@ class Router
          */
         $sihosDeterioroAccionMethods = ['deterioroDatos', 'deterioroExportar'];
 
-        /* Misma razón: sihos/facturacionDatos (JSON server-side de las dos tablas) y sihos/facturacionExportar (CSV) — su pantalla es sihos/facturacion. */
-        $sihosFacturacionAccionMethods = ['facturacionDatos', 'facturacionExportar'];
+        /* Misma razón: sihos/facturacionEstado (avance JSON del trabajo en segundo plano), sihos/facturacionDatos (JSON server-side de las dos tablas) y sihos/facturacionExportar (CSV) — su pantalla es sihos/facturacion. */
+        $sihosFacturacionAccionMethods = ['facturacionEstado', 'facturacionDatos', 'facturacionExportar'];
 
         /* Misma razón: sihos/cartera2193Estado (avance JSON del cálculo en segundo plano) y sihos/cartera2193Detalle (modal de facturas de una celda) — su pantalla es sihos/cartera2193. */
         $sihosCartera2193AccionMethods = ['cartera2193Estado', 'cartera2193Detalle'];

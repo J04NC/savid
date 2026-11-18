@@ -6,8 +6,9 @@
 /** @var string[] $tiposElegidos */
 /** @var string $nit */
 /** @var array<string,string> $tiposUsuario CodiTipo => NombTipo */
-/** @var ?array $reporte */
-/** @var array<string,?string> $tokens token de cache por tabla */
+/** @var ?array $reporte Trabajo terminado (estado + totales) o error */
+/** @var ?array $trabajo Trabajo en segundo plano en curso: token, estado, fase, lineas, segundos */
+/** @var string $tokenJob */
 
 $moneda = ['ValorCartera', 'ValoTota', 'ValoEven', 'ValorFactura'];
 $secciones = [
@@ -70,7 +71,13 @@ $secciones = [
             </div>
         </form>
 
-        <?php if ($reporte === null): ?>
+        <?php if ($trabajo !== null): ?>
+            <div class="field-note" style="margin:16px 0;">
+                ⏳ Generando el reporte en segundo plano… <?= htmlspecialchars($trabajo['fase']) ?>
+                · <?= htmlspecialchars($trabajo['desde']) ?> a <?= htmlspecialchars($trabajo['hasta']) ?>.
+                Puede tardar varios minutos en rangos largos; esta página se actualiza sola al terminar.
+            </div>
+        <?php elseif ($reporte === null): ?>
             <p class="auditoria-subtitle">Elija el rango de fechas y presione Consultar.</p>
         <?php elseif (!$reporte['ok']): ?>
             <p class="modal-form-alert">⚠️ <?= htmlspecialchars($reporte['error']) ?></p>
@@ -78,15 +85,15 @@ $secciones = [
 
             <?php foreach ($secciones as $tabla => [$titulo, $unidad, $vacio]): ?>
                 <h3 class="auditoria-title" style="font-size:1.1em; margin-top:28px;"><?= htmlspecialchars($titulo) ?></h3>
-                <?php if (empty($tokens[$tabla])): ?>
+                <?php if (($reporte['total_' . $tabla] ?? 0) === 0): ?>
                     <p class="field-note"><?= htmlspecialchars($vacio) ?></p>
                 <?php else: ?>
                     <?php
                     $columnas = SihosFacturacionTabla::COLUMNAS[$tabla];
-                    $base = '?url=sihos/%s&empresa_id=' . (int)$empresaId . '&tabla=' . $tabla . '&token=' . rawurlencode($tokens[$tabla]);
+                    $base = '?url=sihos/%s&empresa_id=' . (int)$empresaId . '&tabla=' . $tabla . '&job=' . rawurlencode($tokenJob);
                     ?>
                     <p class="field-note">
-                        <?= (int)$reporte['total_' . $tabla] ?> <?= htmlspecialchars($unidad) ?> del <?= htmlspecialchars($desde) ?> al <?= htmlspecialchars($hasta) ?>.
+                        <?= (int)$reporte['total_' . $tabla] ?> <?= htmlspecialchars($unidad) ?> del <?= htmlspecialchars($reporte['desde']) ?> al <?= htmlspecialchars($reporte['hasta']) ?>.
                         <a href="<?= htmlspecialchars(sprintf($base, 'facturacionExportar')) ?>" class="auditoria-btn-primary" style="text-decoration:none; display:inline-block;">📥 Exportar CSV (todas las filas)</a>
                         — los botones Excel/CSV de la tabla solo exportan la página visible.
                     </p>
@@ -126,4 +133,56 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 });
+
+<?php if (!empty($trabajo)): ?>
+document.addEventListener('DOMContentLoaded', function () {
+    var url = '?url=sihos/facturacionEstado&empresa_id=<?= (int)$empresaId ?>&job=<?= htmlspecialchars($trabajo['token'], ENT_QUOTES) ?>';
+    var inicio = Date.now() - <?= (int)$trabajo['segundos'] ?> * 1000;
+    var fase = <?= json_encode($trabajo['fase'], JSON_UNESCAPED_UNICODE) ?>;
+    var lineas = <?= (int)$trabajo['lineas'] ?>;
+    var terminado = false;
+
+    function mmss(seg) {
+        var m = Math.floor(seg / 60), s = seg % 60;
+        return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+    }
+    function pintar() {
+        // app.js cierra el overlay en el "pageshow" de toda carga de página: si se cerró, se vuelve a abrir;
+        // el trabajo sigue en curso y la pantalla debe seguir bloqueada.
+        var overlay = document.getElementById('savidCargandoOverlay');
+        if (!overlay || !overlay.classList.contains('activo')) {
+            savidMostrarCargando('Generando facturación…', true);
+        }
+        var texto = document.querySelector('#savidCargandoOverlay .savid-cargando-texto');
+        if (texto) {
+            texto.textContent = 'Generando facturación… ' + mmss(Math.floor((Date.now() - inicio) / 1000))
+                + ' · ' + fase + (lineas > 0 ? ' · ' + lineas.toLocaleString('es-CO') + ' filas leídas' : '');
+        }
+    }
+    function consultar() {
+        fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.json(); })
+            .then(function (e) {
+                if (e.estado === 'pendiente' || e.estado === 'ejecutando') {
+                    fase = e.fase;
+                    lineas = e.lineas;
+                    inicio = Date.now() - e.segundos * 1000;
+                    setTimeout(consultar, 3000);
+                } else {
+                    terminado = true;
+                    window.location.reload();
+                }
+            })
+            .catch(function () { setTimeout(consultar, 5000); });
+    }
+
+    // Bloquea la pantalla (sin botón de cerrar) y cuenta los segundos en el navegador cada 1 s.
+    if (typeof savidMostrarCargando === 'function') {
+        pintar();
+        window.addEventListener('pageshow', function () { setTimeout(pintar, 0); });
+        setInterval(function () { if (!terminado) { pintar(); } }, 1000);
+    }
+    setTimeout(consultar, 2000);
+});
+<?php endif; ?>
 </script>

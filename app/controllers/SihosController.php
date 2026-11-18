@@ -17,6 +17,7 @@ class SihosController
     private SihosTarifaProcedimientoService $tarifaProcedimientoService;
     private SihosDeterioroService $deterioroService;
     private SihosFacturacionService $facturacionService;
+    private SihosFacturacionJobService $facturacionJobService;
     private SihosCartera2193Service $cartera2193Service;
     private SihosCartera2193JobService $cartera2193JobService;
     private SihosLiquidacionJobService $liquidacionJobService;
@@ -41,6 +42,7 @@ class SihosController
         $this->tarifaProcedimientoService = new SihosTarifaProcedimientoService();
         $this->deterioroService = new SihosDeterioroService();
         $this->facturacionService = new SihosFacturacionService();
+        $this->facturacionJobService = new SihosFacturacionJobService();
         $this->cartera2193Service = new SihosCartera2193Service();
         $this->cartera2193JobService = new SihosCartera2193JobService();
         $this->liquidacionJobService = new SihosLiquidacionJobService();
@@ -1500,9 +1502,11 @@ class SihosController
 
     /**
      * GET ?url=sihos/facturacion&empresa_id=N&desde=YYYY-MM-DD&hasta=YYYY-MM-DD[&tipos[]=..][&nit=..]
-     * Facturas y notas que las afectan (para cruzar contra la DIAN). Cada
-     * tabla se cachea y se pagina del lado del servidor vía facturacionDatos.
-     * La consulta a SIHOS solo corre con el botón "Consultar" (name="buscar").
+     * Facturas y notas que las afectan (para cruzar contra la DIAN). "Consultar"
+     * (name="buscar") solo crea un trabajo en segundo plano (Cloudflare corta a
+     * ~100 s) y redirige con &job=token; la pantalla sondea facturacionEstado
+     * y, al terminar, las tablas se paginan del lado del servidor vía
+     * facturacionDatos y los CSV se descargan con facturacionExportar.
      */
     public function facturacion(): void
     {
@@ -1517,25 +1521,35 @@ class SihosController
         $tiposUsuario = $empresaId !== null && $configurado ? $this->facturacionService->listarTiposUsuario($empresaId) : [];
 
         $reporte = null;
-        $tokens = [];
-        if ($empresaId !== null && $configurado && isset($_GET['buscar'])) {
-            SihosMemoryGuard::ejecutar(1024, function () use ($empresaId, $desde, $hasta, $tiposElegidos, $nit, &$reporte, &$tokens): void {
-                $reporte = $this->facturacionService->buildReporte($empresaId, $desde, $hasta, $tiposElegidos, $nit);
-                if (!$reporte['ok']) {
+        $trabajo = null;
+        $tokenJob = trim((string)($_GET['job'] ?? ''));
+        if ($empresaId !== null && $configurado) {
+            $userId = (int)($_SESSION['user_id'] ?? 0);
+
+            if (isset($_GET['buscar'])) {
+                $inicio = $this->facturacionJobService->iniciar($empresaId, $userId, $desde, $hasta, $tiposElegidos, $nit);
+                if (!$inicio['ok']) {
+                    $reporte = ['ok' => false, 'error' => $inicio['error']];
+                } else {
+                    $params = $_GET;
+                    unset($params['buscar']);
+                    $params['job'] = $inicio['token'];
+                    header('Location: ?' . http_build_query($params));
+
                     return;
                 }
-                foreach (['facturas', 'notas'] as $tabla) {
-                    $reporte['total_' . $tabla] = count($reporte[$tabla]);
-                    $tokens[$tabla] = $reporte[$tabla] === [] ? null : SihosAuditoriaGlosaCache::store(
-                        $empresaId,
-                        (int)($_SESSION['user_id'] ?? 0),
-                        $reporte[$tabla],
-                        ['desde' => $desde, 'hasta' => $hasta],
-                        'facturacion_' . $tabla
-                    );
-                    unset($reporte[$tabla]);
+            } elseif ($tokenJob !== '') {
+                $estado = $this->facturacionJobService->estado($empresaId, $userId, $tokenJob);
+                if ($estado === null) {
+                    $reporte = ['ok' => false, 'error' => 'El resultado de este reporte expiró o no existe. Vuelva a consultar.'];
+                } elseif ($estado['estado'] === 'error') {
+                    $reporte = ['ok' => false, 'error' => $estado['error'] ?? 'No se pudo generar el reporte.'];
+                } elseif ($estado['estado'] === 'listo') {
+                    $reporte = ['ok' => true] + $estado;
+                } else {
+                    $trabajo = ['token' => $tokenJob] + $estado;
                 }
-            });
+            }
         }
 
         $moduleService = new ModuleService();
@@ -1545,10 +1559,22 @@ class SihosController
         require BASE_PATH . '/app/views/layouts/main.php';
     }
 
+    /** GET ?url=sihos/facturacionEstado&empresa_id=N&job=token — avance JSON del trabajo (la pantalla lo consulta cada pocos segundos). */
+    public function facturacionEstado(): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+
+        $scope = $this->connectionService->buildScope($_GET);
+        $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : null;
+        $estado = $empresaId === null ? null : $this->facturacionJobService->estado($empresaId, (int)($_SESSION['user_id'] ?? 0), trim((string)($_GET['job'] ?? '')));
+
+        echo json_encode($estado ?? ['estado' => 'inexistente'], JSON_UNESCAPED_UNICODE);
+    }
+
     /**
-     * GET ?url=sihos/facturacionDatos&empresa_id=N&tabla=facturas|notas&token=... — JSON
-     * server-side de cada tabla sobre el resultado cacheado. Sin ítem de menú
-     * propio (ver Router::middleware()): exige el 'ver' de sihos/facturacion.
+     * GET ?url=sihos/facturacionDatos&empresa_id=N&tabla=facturas|notas&job=token — JSON
+     * server-side de cada tabla del trabajo terminado. Sin ítem de menú propio
+     * (ver Router::middleware()): exige el 'ver' de sihos/facturacion.
      */
     public function facturacionDatos(): void
     {
@@ -1557,19 +1583,18 @@ class SihosController
         $scope = $this->connectionService->buildScope($_GET);
         $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : null;
         $tabla = (string)($_GET['tabla'] ?? '');
-        $token = trim((string)($_GET['token'] ?? ''));
         $draw = (int)($_GET['draw'] ?? 0);
         $vacio = ['draw' => $draw, 'recordsTotal' => 0, 'recordsFiltered' => 0, 'data' => []];
 
-        if ($empresaId === null || $token === '' || !isset(SihosFacturacionTabla::COLUMNAS[$tabla])) {
+        if ($empresaId === null || !isset(SihosFacturacionTabla::COLUMNAS[$tabla])) {
             echo json_encode($vacio, JSON_UNESCAPED_UNICODE);
 
             return;
         }
 
-        SihosMemoryGuard::ejecutar(1024, function () use ($empresaId, $tabla, $token, $draw, $vacio): void {
-            $cache = SihosAuditoriaGlosaCache::load($token, $empresaId, (int)($_SESSION['user_id'] ?? 0), 'facturacion_' . $tabla);
-            if ($cache === null) {
+        SihosMemoryGuard::ejecutar(1024, function () use ($empresaId, $tabla, $draw, $vacio): void {
+            $filas = $this->facturacionJobService->filas($empresaId, (int)($_SESSION['user_id'] ?? 0), trim((string)($_GET['job'] ?? '')), $tabla);
+            if ($filas === null) {
                 echo json_encode($vacio + ['error' => 'El resultado de este reporte expiró o no existe. Vuelva a consultar.'], JSON_UNESCAPED_UNICODE);
 
                 return;
@@ -1583,7 +1608,7 @@ class SihosController
 
             $resultado = SihosFacturacionTabla::paginarParaDataTable(
                 $tabla,
-                $cache['filas'],
+                $filas,
                 max(0, (int)($_GET['start'] ?? 0)),
                 $length <= 0 || $length > 1000 ? 10 : $length,
                 (int)($_GET['order'][0]['column'] ?? 0),
@@ -1594,7 +1619,7 @@ class SihosController
 
             echo json_encode([
                 'draw' => $draw,
-                'recordsTotal' => (int)($cache['meta']['total'] ?? count($cache['filas'])),
+                'recordsTotal' => count($filas),
                 'recordsFiltered' => $resultado['recordsFiltered'],
                 'data' => $resultado['data'],
             ], JSON_UNESCAPED_UNICODE);
@@ -1602,34 +1627,28 @@ class SihosController
     }
 
     /**
-     * GET ?url=sihos/facturacionExportar&empresa_id=N&tabla=facturas|notas&token=... — CSV de
-     * TODA la tabla cacheada. Mismo permiso 'ver' de sihos/facturacion.
+     * GET ?url=sihos/facturacionExportar&empresa_id=N&tabla=facturas|notas&job=token — CSV
+     * (Windows-1252, "sep=;") ya generado por el trabajo. Mismo permiso 'ver' de sihos/facturacion.
      */
     public function facturacionExportar(): void
     {
         $scope = $this->connectionService->buildScope($_GET);
         $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : null;
+        $userId = (int)($_SESSION['user_id'] ?? 0);
+        $token = trim((string)($_GET['job'] ?? ''));
         $tabla = (string)($_GET['tabla'] ?? '');
-        $token = trim((string)($_GET['token'] ?? ''));
 
-        if ($empresaId === null || $token === '' || !isset(SihosFacturacionTabla::COLUMNAS[$tabla])) {
-            http_response_code(400);
-            exit('Falta empresa, tabla o token.');
+        $estado = $empresaId === null ? null : $this->facturacionJobService->estado($empresaId, $userId, $token);
+        $ruta = $estado === null ? null : $this->facturacionJobService->rutaArchivo($empresaId, $userId, $token, $tabla);
+        if ($ruta === null || !is_file($ruta)) {
+            http_response_code(410);
+            exit('El resultado de este reporte expiró o no existe. Vuelva a consultar.');
         }
 
-        SihosMemoryGuard::ejecutar(1024, function () use ($empresaId, $tabla, $token): void {
-            $cache = SihosAuditoriaGlosaCache::load($token, $empresaId, (int)($_SESSION['user_id'] ?? 0), 'facturacion_' . $tabla);
-            if ($cache === null) {
-                http_response_code(410);
-                exit('El resultado de este reporte expiró. Vuelva a consultar.');
-            }
-
-            $csv = SihosFacturacionTabla::csv($tabla, $cache['filas']);
-            header('Content-Type: text/csv; charset=windows-1252');
-            header('Content-Disposition: attachment; filename="facturacion_' . ($cache['meta']['desde'] ?? '') . '_' . ($cache['meta']['hasta'] ?? '') . '_' . $tabla . '.csv"');
-            header('Content-Length: ' . strlen($csv));
-            echo $csv;
-        });
+        header('Content-Type: text/csv; charset=windows-1252');
+        header('Content-Disposition: attachment; filename="facturacion_' . $estado['desde'] . '_' . $estado['hasta'] . '_' . $tabla . '.csv"');
+        header('Content-Length: ' . filesize($ruta));
+        readfile($ruta);
     }
 
     /**
