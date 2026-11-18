@@ -254,6 +254,9 @@ class Router
          */
         $sihosDeterioroAccionMethods = ['deterioroDatos', 'deterioroExportar'];
 
+        /* Misma razón: sihos/facturacionDatos (JSON server-side de las dos tablas) y sihos/facturacionExportar (CSV) — su pantalla es sihos/facturacion. */
+        $sihosFacturacionAccionMethods = ['facturacionDatos', 'facturacionExportar'];
+
         /* Misma razón: sihos/cartera2193Estado (avance JSON del cálculo en segundo plano) y sihos/cartera2193Detalle (modal de facturas de una celda) — su pantalla es sihos/cartera2193. */
         $sihosCartera2193AccionMethods = ['cartera2193Estado', 'cartera2193Detalle'];
 
@@ -365,6 +368,9 @@ class Router
             && !($controllerName === 'SihosController'
                 && in_array($method, $sihosDeterioroAccionMethods, true)
                 && PermisoService::can('sihos/deterioro', 'ver'))
+            && !($controllerName === 'SihosController'
+                && in_array($method, $sihosFacturacionAccionMethods, true)
+                && PermisoService::can('sihos/facturacion', 'ver'))
             && !($controllerName === 'SihosController'
                 && in_array($method, $sihosCartera2193AccionMethods, true)
                 && PermisoService::can('sihos/cartera2193', 'ver'))
