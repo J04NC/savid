@@ -12,7 +12,7 @@ class SihosFacturacionTabla
             'Documento' => 'Factura', 'FechDocu' => 'Fecha doc.', 'FechEnvi' => 'Fecha envío DIAN',
             'NombTipo' => 'Tipo usuario', 'NombTerc' => 'Tercero', 'Nit' => 'Documento tercero',
             'ValorCartera' => 'Valor cartera', 'ValoTota' => 'ValoTota', 'ValoEven' => 'ValoEven',
-            'Diferencia' => 'Cartera ≠ ValoTota', 'Estado' => 'Estado envío', 'CUFE' => 'CUFE',
+            'Diferencia' => 'Cartera distinta de ValoTota', 'Estado' => 'Estado envío', 'CUFE' => 'CUFE',
         ],
         'notas' => [
             'Documento' => 'Nota', 'FechDocu' => 'Fecha doc.', 'Electronico' => 'Consecutivo electrónico',
@@ -70,15 +70,32 @@ class SihosFacturacionTabla
     }
 
     /**
-     * Filas planas (sin HTML) para el CSV, en el orden de COLUMNAS.
+     * CSV completo de una tabla, igual que el "por CUPS" de Liquidación: sin BOM
+     * y con la línea "sep=;" primero (Excel ignora el BOM cuando está esa
+     * línea), cifras con coma decimal (SihosLiquidacionService::num), textos
+     * que empiezan por = + @ protegidos de fórmulas, y todo en Windows-1252
+     * (Excel es-CO muestra bien tildes y ñ).
      *
      * @param list<array<string, mixed>> $filas
-     * @return list<list<string|float>>
      */
-    public static function filasParaExportar(string $tabla, array $filas): array
+    public static function csv(string $tabla, array $filas): string
     {
         $claves = array_keys(self::COLUMNAS[$tabla] ?? []);
+        $fh = fopen('php://temp', 'w+');
+        fwrite($fh, "sep=;\r\n");
+        SihosLiquidacionService::escribirFila($fh, array_values(self::COLUMNAS[$tabla] ?? []));
+        foreach ($filas as $fila) {
+            SihosLiquidacionService::escribirFila($fh, array_map(
+                static fn (string $k) => in_array($k, self::MONEDA, true)
+                    ? SihosLiquidacionService::num((float)$fila[$k])
+                    : (string)($fila[$k] ?? ''),
+                $claves
+            ));
+        }
+        rewind($fh);
+        $utf8 = (string)stream_get_contents($fh);
+        fclose($fh);
 
-        return array_map(static fn (array $fila): array => array_map(static fn (string $k) => $fila[$k] ?? '', $claves), $filas);
+        return (string)iconv('UTF-8', 'Windows-1252//TRANSLIT//IGNORE', $utf8);
     }
 }

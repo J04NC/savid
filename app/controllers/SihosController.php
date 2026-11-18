@@ -1624,16 +1624,11 @@ class SihosController
                 exit('El resultado de este reporte expiró. Vuelva a consultar.');
             }
 
-            header('Content-Type: text/csv; charset=utf-8');
-            header('Content-Disposition: attachment; filename="facturacion_' . $tabla . '_' . date('Ymd_His') . '.csv"');
-
-            $out = fopen('php://output', 'w');
-            fwrite($out, "\xEF\xBB\xBF" . "sep=;\r\n");
-            fputcsv($out, array_values(SihosFacturacionTabla::COLUMNAS[$tabla]), ';');
-            foreach (SihosFacturacionTabla::filasParaExportar($tabla, $cache['filas']) as $fila) {
-                fputcsv($out, $fila, ';');
-            }
-            fclose($out);
+            $csv = SihosFacturacionTabla::csv($tabla, $cache['filas']);
+            header('Content-Type: text/csv; charset=windows-1252');
+            header('Content-Disposition: attachment; filename="facturacion_' . ($cache['meta']['desde'] ?? '') . '_' . ($cache['meta']['hasta'] ?? '') . '_' . $tabla . '.csv"');
+            header('Content-Length: ' . strlen($csv));
+            echo $csv;
         });
     }
 
