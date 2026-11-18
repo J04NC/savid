@@ -79,7 +79,7 @@ $estadosValidos = [
         <?php if ($canGuardar && $secciones !== []): ?>
             <button type="submit" form="sgd-tipo-secciones-form" class="sgd-doc-btn sgd-doc-btn-primary">💾 Guardar</button>
         <?php endif; ?>
-        <button type="button" class="btn-cancel" onclick="closeModalGod()">Cerrar</button>
+        <button type="button" class="btn-cancel">Cerrar</button>
     </footer>
 </div>
 

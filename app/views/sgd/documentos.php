@@ -532,7 +532,7 @@ $formatOption = static function (string $codigo, string $nombre): string {
                                                                 method="post"
                                                                 action="<?= htmlspecialchars($formAction, ENT_QUOTES, 'UTF-8') ?>"
                                                                 class="sgd-doc-ver-inline-form sgd-doc-ver-publish-form"
-                                                                onsubmit="return confirm('¿Publicar la versión <?= htmlspecialchars((string)$ver['numero'], ENT_QUOTES, 'UTF-8') ?>? Las demás quedarán obsoletas.');"
+                                                                data-confirm="¿Publicar la versión <?= htmlspecialchars((string)$ver['numero'], ENT_QUOTES, 'UTF-8') ?>? Las demás quedarán obsoletas."
                                                             >
                                                                 <input type="hidden" name="_action" value="version_publish">
                                                                 <input type="hidden" name="documento_id" value="<?= (int)$form['id'] ?>">
@@ -545,7 +545,7 @@ $formatOption = static function (string $codigo, string $nombre): string {
                                                                 method="post"
                                                                 action="<?= htmlspecialchars($formAction, ENT_QUOTES, 'UTF-8') ?>"
                                                                 class="sgd-doc-ver-inline-form"
-                                                                onsubmit="return confirm('Se eliminará permanentemente la versión <?= htmlspecialchars((string)$ver['numero'], ENT_QUOTES, 'UTF-8') ?> (<?= $esBorrador ? 'borrador' : 'obsoleta' ?>) y su archivo asociado.\n\n¿Desea continuar?');"
+                                                                data-confirm="Se eliminará permanentemente la versión <?= htmlspecialchars((string)$ver['numero'], ENT_QUOTES, 'UTF-8') ?> (<?= $esBorrador ? 'borrador' : 'obsoleta' ?>) y su archivo asociado.&#10;&#10;¿Desea continuar?"
                                                             >
                                                                 <input type="hidden" name="_action" value="version_delete">
                                                                 <input type="hidden" name="documento_id" value="<?= (int)$form['id'] ?>">
@@ -598,7 +598,7 @@ $formatOption = static function (string $codigo, string $nombre): string {
 
                                 <form method="post" action="<?= htmlspecialchars($formAction, ENT_QUOTES, 'UTF-8') ?>"
                                       class="sgd-doc-ver-obsolete-form"
-                                      onsubmit="return confirm('¿Marcar todo el documento como obsoleto?');">
+                                      data-confirm="¿Marcar todo el documento como obsoleto?">
                                     <input type="hidden" name="_action" value="version_obsolete">
                                     <input type="hidden" name="documento_id" value="<?= (int)$form['id'] ?>">
                                     <button type="submit" class="sgd-doc-btn sgd-doc-btn-danger">Marcar documento obsoleto</button>
@@ -651,7 +651,7 @@ $formatOption = static function (string $codigo, string $nombre): string {
 
                 <?php if ($canEliminar && !empty($form['id'])): ?>
                     <form id="sgd-doc-delete-form" method="post" action="<?= htmlspecialchars($formAction, ENT_QUOTES, 'UTF-8') ?>"
-                          onsubmit="return confirm('¿Eliminar este documento?');">
+                          data-confirm="¿Eliminar este documento?">
                         <input type="hidden" name="_action" value="delete">
                         <input type="hidden" name="id" value="<?= (int)$form['id'] ?>">
                     </form>

@@ -34,7 +34,7 @@ $esSuperAdmin = !empty($_SESSION['es_super_admin']) || (int)($_SESSION['rol_id']
     <p id="itemAccionesFeedback" class="item-acciones-feedback" aria-live="polite"></p>
 
     <footer class="item-acciones-footer">
-        <button type="button" class="btn-cancel" onclick="closeModalGod()">Cerrar</button>
+        <button type="button" class="btn-cancel">Cerrar</button>
     </footer>
 </div>
 

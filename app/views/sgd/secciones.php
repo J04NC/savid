@@ -34,8 +34,7 @@ $selectedId = (int)($form['id'] ?? 0);
                     <button type="submit" form="sgd-seccion-form" class="sgd-doc-btn sgd-doc-btn-primary">💾 Guardar</button>
                 <?php endif; ?>
                 <?php if ($canEliminar && $selectedId > 0): ?>
-                    <button type="submit" form="sgd-seccion-delete-form" class="sgd-doc-btn sgd-doc-btn-danger"
-                            onclick="return confirm('¿Eliminar esta sección?');">🗑 Eliminar</button>
+                    <button type="submit" form="sgd-seccion-delete-form" class="sgd-doc-btn sgd-doc-btn-danger">🗑 Eliminar</button>
                 <?php endif; ?>
             </div>
         </div>
@@ -63,7 +62,7 @@ $selectedId = (int)($form['id'] ?? 0);
                             <?php foreach ($secciones as $row): ?>
                                 <?php $rid = (int)$row['id']; ?>
                                 <tr class="sgd-doc-row<?= $rid === $selectedId ? ' is-active' : '' ?>"
-                                    onclick="window.location='<?= htmlspecialchars($listUrl . '&id=' . $rid, ENT_QUOTES, 'UTF-8') ?>'">
+                                    data-row-href="<?= htmlspecialchars($listUrl . '&id=' . $rid, ENT_QUOTES, 'UTF-8') ?>">
                                     <td><?= (int)$row['orden'] ?></td>
                                     <td><code><?= htmlspecialchars((string)$row['codigo'], ENT_QUOTES, 'UTF-8') ?></code></td>
                                     <td><?= htmlspecialchars((string)$row['nombre'], ENT_QUOTES, 'UTF-8') ?></td>
@@ -120,7 +119,8 @@ $selectedId = (int)($form['id'] ?? 0);
                     </fieldset>
                 </form>
                 <?php if ($canEliminar && $selectedId > 0): ?>
-                    <form id="sgd-seccion-delete-form" method="post" action="<?= htmlspecialchars($listUrl, ENT_QUOTES, 'UTF-8') ?>">
+                    <form id="sgd-seccion-delete-form" method="post" action="<?= htmlspecialchars($listUrl, ENT_QUOTES, 'UTF-8') ?>"
+                          data-confirm="¿Eliminar esta sección?">
                         <input type="hidden" name="_action" value="delete">
                         <input type="hidden" name="id" value="<?= $selectedId ?>">
                     </form>

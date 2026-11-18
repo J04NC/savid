@@ -12,6 +12,7 @@ document.addEventListener("DOMContentLoaded", function () {
     initSidebar();
     initModalSystem();
     initContextButton();
+    initGlobalFormHelpers();
     cleanupStaleOverlays();
 
 });
@@ -181,6 +182,12 @@ function initSidebar() {
             sidebar.classList.remove("is-compact-expanded");
         }
     };
+
+    // Antes era onclick="toggleUserPanel()" en el markup — la CSP (script-src
+    // sin 'unsafe-inline') bloquea atributos de evento inline, nonce o no.
+    if (header) {
+        header.addEventListener("click", window.toggleUserPanel);
+    }
 
     function collapseUserPanel() {
         const body = document.getElementById("userBody");
@@ -368,9 +375,61 @@ function initModalSystem() {
         }
     };
 
+    // Botones "Cancelar/Cerrar" (.btn-cancel) del contenido cargado dentro de
+    // este modal: antes cada vista traía onclick="closeModalGod()" — bloqueado
+    // por la CSP. Delegado y acotado a este modal (no al de auditoría, que
+    // tiene su propio cierre por id en auditoria.js).
+    document.addEventListener("click", function (e) {
+        const cancelBtn = e.target.closest(".btn-cancel");
+        if (cancelBtn && modal.contains(cancelBtn)) {
+            closeModalGod();
+        }
+    });
+
     document.addEventListener("keydown", function (e) {
         if (e.key === "Escape") {
             closeModalGod();
+        }
+    });
+
+}
+
+/* =====================================================
+HELPERS GENÉRICOS SIN HANDLERS INLINE
+===================================================== */
+/*
+ * La CSP (script-src sin 'unsafe-inline') bloquea onclick=/onchange=/
+ * onsubmit= en el markup — un nonce en un <script> no cubre atributos de
+ * evento, solo a elementos <script>. Estos tres listeners delegados
+ * reemplazan los patrones que antes se repetían como atributo inline en
+ * varias vistas (ver README.md, sección CSP).
+ */
+function initGlobalFormHelpers() {
+
+    // <form data-confirm="mensaje">: confirm() antes de enviar. Reemplaza
+    // onsubmit="return confirm(...)" y el onclick equivalente en un botón
+    // submit asociado por form="...".
+    document.addEventListener("submit", function (e) {
+        const msg = e.target.getAttribute && e.target.getAttribute("data-confirm");
+        if (msg && !window.confirm(msg)) {
+            e.preventDefault();
+        }
+    });
+
+    // <select data-autosubmit>: envía su form al cambiar. Reemplaza
+    // onchange="this.form.submit()".
+    document.addEventListener("change", function (e) {
+        if (e.target.matches && e.target.matches("[data-autosubmit]")) {
+            e.target.form?.submit();
+        }
+    });
+
+    // Fila con data-row-href="url": navega al hacer clic. Reemplaza
+    // onclick="window.location='...'" en filas de tabla sin enlaces propios.
+    document.addEventListener("click", function (e) {
+        const row = e.target.closest("[data-row-href]");
+        if (row) {
+            window.location = row.getAttribute("data-row-href");
         }
     });
 
@@ -393,6 +452,12 @@ function ejecutarScripts(container) {
         } else {
             s.textContent = oldScript.textContent;
         }
+
+        // El nonce del <script> recién llegado por fetch()+innerHTML es el de
+        // ESA respuesta (otra petición PHP, otro valor aleatorio) — nunca
+        // coincide con la CSP del documento donde en verdad se ejecuta este
+        // script nuevo. El que sirve es window.CSP_NONCE, el de esta página.
+        s.setAttribute("nonce", window.CSP_NONCE || "");
 
         document.body.appendChild(s);
         document.body.removeChild(s);

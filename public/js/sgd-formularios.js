@@ -28,6 +28,13 @@
     }
     var hiddenSave = document.getElementById('sgd_esquema_json');
     var btnAdd = document.getElementById('sgd-btn-add-campo');
+    // Antes era onsubmit="return false;" en el markup (bloqueado por la CSP):
+    // este form no se envía nunca, "Agregar" se maneja por click más abajo;
+    // esto solo evita que Enter en un input dispare una navegación normal.
+    var formAddCampo = document.getElementById('sgd-form-add-campo');
+    if (formAddCampo) {
+        formAddCampo.addEventListener('submit', function (e) { e.preventDefault(); });
+    }
     var btnCargarSemilla = document.getElementById('sgd-btn-cargar-arquetipo');
     var arquetipoSelect = document.getElementById('sgd_arquetipo_select');
     var canEdit = pageMeta.canEdit !== undefined ? !!pageMeta.canEdit : !!btnAdd;

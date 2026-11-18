@@ -104,7 +104,7 @@ $estadoLabels = [
                                         </a>
                                         <?php if ($canEliminar && $estado !== 'anulado' && $estado !== 'cerrado'): ?>
                                             <form method="post" action="<?= htmlspecialchars($listUrl, ENT_QUOTES, 'UTF-8') ?>" class="sgd-reg-inline-form"
-                                                  onsubmit="return confirm('¿Anular este registro?');">
+                                                  data-confirm="¿Anular este registro?">
                                                 <input type="hidden" name="_action" value="anular">
                                                 <input type="hidden" name="registro_id" value="<?= (int)$reg['id'] ?>">
                                                 <?php if ($documentoId > 0): ?>

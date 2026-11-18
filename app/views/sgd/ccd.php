@@ -307,7 +307,7 @@ $anioLabel = isset($config['ccd_anio']) && $config['ccd_anio'] !== '' ? (string)
 
                 <?php if ($canEliminar && !empty($form['id'])): ?>
                     <form id="sgd-ccd-delete-form" method="post" action="<?= htmlspecialchars($formAction, ENT_QUOTES, 'UTF-8') ?>"
-                          onsubmit="return confirm('¿Eliminar esta ubicación del cuadro de clasificación?');">
+                          data-confirm="¿Eliminar esta ubicación del cuadro de clasificación?">
                         <input type="hidden" name="_action" value="delete">
                         <input type="hidden" name="id" value="<?= (int)$form['id'] ?>">
                     </form>

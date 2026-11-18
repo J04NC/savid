@@ -6,7 +6,7 @@
 
 <p class="modal-form-alert"><?= htmlspecialchars((string)($preview['error'] ?? 'No se pudo cargar la información.'), ENT_QUOTES, 'UTF-8') ?></p>
 <div class="role-footer">
-    <button type="button" class="btn-cancel" onclick="closeModalGod()">Cerrar</button>
+    <button type="button" class="btn-cancel">Cerrar</button>
 </div>
 
 <?php else: ?>
@@ -26,7 +26,7 @@
 
 <div class="role-footer">
     <button type="button" id="btnConfirmarRenovacion" class="btn-save">Confirmar renovación</button>
-    <button type="button" class="btn-cancel" onclick="closeModalGod()">Cancelar</button>
+    <button type="button" class="btn-cancel">Cancelar</button>
 </div>
 
 <script nonce="<?= CspNonceService::value() ?>">

@@ -315,15 +315,15 @@ $patronesCarpetaSugeridos = [
 
         <?php if ($canConfigurar): ?>
             <div class="crud-toolbar" style="margin-top:20px; display:flex; flex-wrap:wrap; gap:10px;">
-                <form method="post" action="?url=sgd/cargarSeccionesPlantilla&empresa_id=<?= (int)$scope['empresaId'] ?>">
-                    <button type="submit" title="Importar catálogo de secciones y perfiles para tipos maestro"
-                            onclick="return confirm('¿Importar plantilla de secciones? Actualiza secciones existentes por código.');">
+                <form method="post" action="?url=sgd/cargarSeccionesPlantilla&empresa_id=<?= (int)$scope['empresaId'] ?>"
+                      data-confirm="¿Importar plantilla de secciones? Actualiza secciones existentes por código.">
+                    <button type="submit" title="Importar catálogo de secciones y perfiles para tipos maestro">
                         📑 Importar plantilla de secciones
                     </button>
                 </form>
-                <form method="post" action="?url=sgd/cargarBloquesOperativos&empresa_id=<?= (int)$scope['empresaId'] ?>">
-                    <button type="submit" title="Bloques operativos (acta, bitácora…) para formatos F/R"
-                            onclick="return confirm('¿Importar bloques operativos? Actualiza bloques existentes por código.');">
+                <form method="post" action="?url=sgd/cargarBloquesOperativos&empresa_id=<?= (int)$scope['empresaId'] ?>"
+                      data-confirm="¿Importar bloques operativos? Actualiza bloques existentes por código.">
+                    <button type="submit" title="Bloques operativos (acta, bitácora…) para formatos F/R">
                         📝 Importar bloques operativos
                     </button>
                 </form>

@@ -109,7 +109,7 @@ $esSuperAdmin = !empty($esSuperAdmin);
     <?php endif; ?>
 
     <div class="role-footer" style="margin-top:20px;">
-        <button type="button" class="btn-cancel" onclick="closeModalGod()">Cancelar</button>
+        <button type="button" class="btn-cancel">Cancelar</button>
         <button type="submit" class="btn-save">💾 Guardar</button>
     </div>
 </form>

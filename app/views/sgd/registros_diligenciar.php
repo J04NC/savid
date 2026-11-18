@@ -45,8 +45,7 @@ $sgdChecklistJsV = is_readable($sgdChecklistJs) ? (int)filemtime($sgdChecklistJs
                 <a href="<?= htmlspecialchars($backUrl, ENT_QUOTES, 'UTF-8') ?>" class="sgd-doc-btn">↩ Registros</a>
                 <?php if ($editable && $canGuardar): ?>
                     <button type="submit" form="sgd-reg-diligenciar-form" class="sgd-doc-btn sgd-doc-btn-primary" data-sgd-reg-action="guardar">💾 Guardar</button>
-                    <button type="submit" form="sgd-reg-cerrar-form" class="sgd-doc-btn" data-sgd-reg-action="cerrar"
-                            onclick="return confirm('¿Cerrar el registro? El contenido quedará congelado.');">✓ Cerrar registro</button>
+                    <button type="submit" form="sgd-reg-cerrar-form" class="sgd-doc-btn" data-sgd-reg-action="cerrar">✓ Cerrar registro</button>
                 <?php endif; ?>
             </div>
         </div>
@@ -79,7 +78,8 @@ $sgdChecklistJsV = is_readable($sgdChecklistJs) ? (int)filemtime($sgdChecklistJs
         </form>
 
         <?php if ($editable && $canGuardar): ?>
-            <form id="sgd-reg-cerrar-form" method="post" action="<?= htmlspecialchars($formAction, ENT_QUOTES, 'UTF-8') ?>" class="sgd-reg-hidden-form">
+            <form id="sgd-reg-cerrar-form" method="post" action="<?= htmlspecialchars($formAction, ENT_QUOTES, 'UTF-8') ?>" class="sgd-reg-hidden-form"
+                  data-confirm="¿Cerrar el registro? El contenido quedará congelado.">
                 <input type="hidden" name="_action" value="cerrar">
                 <input type="hidden" name="registro_id" value="<?= $registroId ?>">
                 <input type="hidden" name="datos_json" id="sgd_reg_datos_json_cerrar" value="">

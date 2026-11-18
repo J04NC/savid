@@ -155,7 +155,7 @@ $sgdChecklistJsV = is_readable($sgdChecklistJs) ? (int)filemtime($sgdChecklistJs
                 <h4 class="sgd-form-section-title">Plantilla del documento</h4>
 
                 <?php if ($canGuardar && $esBorrador): ?>
-                    <form id="sgd-form-add-campo" class="sgd-form-add-campo" onsubmit="return false;">
+                    <form id="sgd-form-add-campo" class="sgd-form-add-campo">
                         <div class="form-group">
                             <label for="sgd_campo_id">Identificador</label>
                             <input type="text" id="sgd_campo_id" class="form-input" maxlength="64" placeholder="ej. acta_numero" required>

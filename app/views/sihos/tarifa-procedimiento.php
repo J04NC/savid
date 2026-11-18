@@ -40,7 +40,7 @@ $tarifaProcJsV = is_readable($assetTarifaProc) ? (int)filemtime($assetTarifaProc
             <input type="hidden" name="empresa_id" value="<?= (int)$empresaId ?>">
             <div class="form-group">
                 <label for="tpCodiManu">Manual tarifario</label>
-                <select id="tpCodiManu" name="codi_manu" class="form-input" required onchange="this.form.submit()">
+                <select id="tpCodiManu" name="codi_manu" class="form-input" required data-autosubmit>
                     <option value="">— Seleccione —</option>
                     <?php foreach ($manuales as $codigo => $nombre): ?>
                         <?php $codigo = (string)$codigo; /* claves numéricas ("28") las castea PHP a int en el array */ ?>
@@ -52,7 +52,7 @@ $tarifaProcJsV = is_readable($assetTarifaProc) ? (int)filemtime($assetTarifaProc
             </div>
             <div class="form-group">
                 <label for="tpCodiPlan">Plan</label>
-                <select id="tpCodiPlan" name="codi_plan" class="form-input" onchange="this.form.submit()">
+                <select id="tpCodiPlan" name="codi_plan" class="form-input" data-autosubmit>
                     <?php foreach ($planes as $codigo => $nombre): ?>
                         <?php $codigo = (string)$codigo; ?>
                         <option value="<?= htmlspecialchars($codigo) ?>" <?= $codigo === $codiPlan ? 'selected' : '' ?>>

@@ -52,7 +52,7 @@ $esSuperAdmin = !empty($_SESSION['es_super_admin']) || (int)($_SESSION['rol_id']
     </section>
 
     <footer class="empresa-usuarios-footer">
-        <button type="button" class="btn-cancel" onclick="closeModalGod()">Cerrar</button>
+        <button type="button" class="btn-cancel">Cerrar</button>
     </footer>
 </div>
 

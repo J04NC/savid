@@ -134,7 +134,7 @@
 </div>
 
 <div class="role-footer">
-    <button type="button" class="btn-cancel" onclick="closeModalGod()">Cerrar</button>
+    <button type="button" class="btn-cancel">Cerrar</button>
 </div>
 </form>
 

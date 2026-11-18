@@ -117,7 +117,7 @@ $esSuperAdmin = !empty($_SESSION['es_super_admin'])
     </div>
 
     <footer class="empresa-sedes-footer">
-        <button type="button" class="btn-cancel" onclick="closeModalGod()">Cerrar</button>
+        <button type="button" class="btn-cancel">Cerrar</button>
     </footer>
 </div>
 

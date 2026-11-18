@@ -66,7 +66,7 @@ $padresSet = array_fill_keys($padresPermitidosIds, true);
         <?php if ($canGuardar): ?>
             <button type="submit" form="sgd-tipo-padres-form" class="sgd-doc-btn sgd-doc-btn-primary" id="sgdTipoPadresSave">💾 Guardar</button>
         <?php endif; ?>
-        <button type="button" class="btn-cancel" onclick="closeModalGod()">Cerrar</button>
+        <button type="button" class="btn-cancel">Cerrar</button>
     </footer>
 </div>
 

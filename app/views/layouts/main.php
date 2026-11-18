@@ -67,7 +67,7 @@ if ($sessionIdleMin < 0) {
 
 <div class="sidebar-floating">
 
-<div class="user-header" onclick="toggleUserPanel()">
+<div class="user-header">
 <span class="arrow">▶</span>
 <span class="username"><?php echo $_SESSION['nombre']; ?></span>
 </div>
@@ -177,6 +177,11 @@ document.addEventListener("DOMContentLoaded", function(){
 
 <script nonce="<?= CspNonceService::value() ?>">
 window.CSRF_TOKEN = "<?= CsrfService::token() ?>";
+// Nonce de ESTA página (no el de la respuesta fetch()eada): ejecutarScripts()
+// en app.js lo necesita para los scripts de contenido AJAX inyectado por
+// innerHTML — su propio atributo nonce es el de OTRA petición PHP y nunca
+// coincide con la CSP del documento donde en verdad se ejecutan.
+window.CSP_NONCE = "<?= CspNonceService::value() ?>";
 </script>
 
 <script nonce="<?= CspNonceService::value() ?>">

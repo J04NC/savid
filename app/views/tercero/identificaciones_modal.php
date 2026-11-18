@@ -104,7 +104,7 @@ $nitTipoId = 9;
     <p id="terceroIdentFeedback" class="tercero-ident-feedback" aria-live="polite"></p>
 
     <footer class="tercero-ident-footer">
-        <button type="button" class="btn-cancel" onclick="closeModalGod()">Cerrar</button>
+        <button type="button" class="btn-cancel">Cerrar</button>
     </footer>
 </div>
 

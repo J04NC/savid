@@ -37,7 +37,7 @@ $endpoint = '?url=empresa/subdominio/' . $empresaId;
     <?php endif; ?>
 
     <footer class="empresa-usuarios-footer">
-        <button type="button" class="btn-cancel" onclick="closeModalGod()">Cerrar</button>
+        <button type="button" class="btn-cancel">Cerrar</button>
         <?php if ($subdominioActual === null): ?>
             <button type="button" id="empresaSubdominioCrear" class="btn-save">🌐 Crear subdominio</button>
         <?php endif; ?>

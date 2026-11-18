@@ -47,7 +47,7 @@ $endpoint = '?url=empresa/items/' . $empresaId;
     </div>
 
     <footer class="empresa-usuarios-footer">
-        <button type="button" class="btn-cancel" onclick="closeModalGod()">Cancelar</button>
+        <button type="button" class="btn-cancel">Cancelar</button>
         <button type="button" id="empresaItemsGuardar" class="btn-save">💾 Guardar</button>
     </footer>
 </div>
