@@ -80,6 +80,8 @@ if (!headers_sent()) {
     header(CspNonceService::header());
 }
 
+SecurityHeadersService::apply();
+
 // ✅ EJECUTAR ROUTER
 $router = new Router();
 $router->run();
