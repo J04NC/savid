@@ -44,11 +44,7 @@ class SihosOrdenLiquidacionService
             return ['ok' => false, 'error' => 'Esta empresa no tiene conexión a SIHOS configurada (o falta el CodiInst).'];
         }
 
-        $pdo = (new SihosExternalRepository([
-            'host' => $cfg['host'], 'port' => (string)$cfg['puerto'], 'database' => $cfg['base_datos'],
-            'username' => $cfg['usuario'], 'codiInst' => $codiInst,
-            'password' => SihosCredentialCipher::decrypt($cfg['password_cifrado'] ?? null), 'charset' => $cfg['charset'],
-        ]))->connect();
+        $pdo = $this->conectar($cfg, $codiInst);
         $repo = new SihosOrdenLiquidacionRepository($pdo, $codiInst);
         $clasif = new SihosLiquidacionClasificador((new SihosLiquidacionRepository($pdo, $codiInst))->fetchTiposServicio());
         $procs = $repo->fetchProcedimientos();
@@ -130,6 +126,30 @@ class SihosOrdenLiquidacionService
         ksort($res['porEps']);
 
         return $res;
+    }
+
+    /** @return array<string,string> CodiAdmi => NombAdmi para el filtro de EPS (vacío si la empresa no tiene conexión SIHOS) */
+    public function administradoras(int $empresaId): array
+    {
+        $cfg = $this->configRepository->findByEmpresaId($empresaId);
+        $codiInst = trim((string)($cfg['codi_inst'] ?? ''));
+        if ($cfg === null || $codiInst === '' || $cfg['host'] === '' || $cfg['base_datos'] === '' || $cfg['usuario'] === '') {
+            return [];
+        }
+        $admins = (new SihosOrdenLiquidacionRepository($this->conectar($cfg, $codiInst), $codiInst))->fetchAdministradoras();
+        asort($admins);
+
+        return $admins;
+    }
+
+    /** @param array<string,mixed> $cfg */
+    private function conectar(array $cfg, string $codiInst): PDO
+    {
+        return (new SihosExternalRepository([
+            'host' => $cfg['host'], 'port' => (string)$cfg['puerto'], 'database' => $cfg['base_datos'],
+            'username' => $cfg['usuario'], 'codiInst' => $codiInst,
+            'password' => SihosCredentialCipher::decrypt($cfg['password_cifrado'] ?? null), 'charset' => $cfg['charset'],
+        ]))->connect();
     }
 
     private static function admisionValida(mixed $a): bool
