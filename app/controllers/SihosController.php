@@ -21,6 +21,7 @@ class SihosController
     private SihosCartera2193Service $cartera2193Service;
     private SihosCartera2193JobService $cartera2193JobService;
     private SihosLiquidacionJobService $liquidacionJobService;
+    private SihosOrdenLiquidacionJobService $ordenesJobService;
     private SihosLiquidacionDetalleService $liquidacionDetalleService;
     private SihosLiquidacionCorreccionService $liquidacionCorreccionService;
     private SihosLiquidacionAnulacionService $liquidacionAnulacionService;
@@ -46,6 +47,7 @@ class SihosController
         $this->cartera2193Service = new SihosCartera2193Service();
         $this->cartera2193JobService = new SihosCartera2193JobService();
         $this->liquidacionJobService = new SihosLiquidacionJobService();
+        $this->ordenesJobService = new SihosOrdenLiquidacionJobService();
         $this->liquidacionDetalleService = new SihosLiquidacionDetalleService($this->liquidacionJobService);
         $this->liquidacionCorreccionService = new SihosLiquidacionCorreccionService($this->liquidacionDetalleService);
         $this->liquidacionAnulacionService = new SihosLiquidacionAnulacionService($this->liquidacionDetalleService);
@@ -1802,6 +1804,95 @@ class SihosController
 
         $view = BASE_PATH . '/app/views/sihos/liquidacion.php';
         require BASE_PATH . '/app/views/layouts/main.php';
+    }
+
+    /**
+     * GET ?url=sihos/ordenesLiquidacion&empresa_id=N&desde=&hasta=&actividad[]=&eps[]=
+     * Órdenes médicas vs liquidación: qué se ordenó y se liquidó, qué quedó sin liquidar
+     * y qué se liquidó sin orden. Se calcula en segundo plano al presionar "Consultar" (name="buscar").
+     */
+    public function ordenesLiquidacion(): void
+    {
+        $scope = $this->connectionService->buildScope($_GET);
+        $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : null;
+        $configurado = $empresaId !== null && $this->connectionService->buildConfigView($empresaId)['configurado'];
+
+        $desde = trim((string)($_GET['desde'] ?? ''));
+        $hasta = trim((string)($_GET['hasta'] ?? ''));
+        $actividadesSel = array_values(array_filter((array)($_GET['actividad'] ?? []), 'is_string'));
+        $epsSel = array_values(array_filter((array)($_GET['eps'] ?? []), 'is_string'));
+        $reporte = null;
+        $trabajo = null;
+        $administradoras = [];
+        $tokenJob = trim((string)($_GET['job'] ?? ''));
+        if ($empresaId !== null && $configurado) {
+            $userId = (int)($_SESSION['user_id'] ?? 0);
+            $administradoras = (new SihosOrdenLiquidacionService())->administradoras($empresaId);
+
+            if (isset($_GET['buscar'])) {
+                $inicio = $this->ordenesJobService->iniciar($empresaId, $userId, $desde, $hasta, $actividadesSel, $epsSel);
+                if (!$inicio['ok']) {
+                    $reporte = ['ok' => false, 'error' => $inicio['error']];
+                } else {
+                    $params = $_GET;
+                    unset($params['buscar']);
+                    $params['job'] = $inicio['token'];
+                    header('Location: ?' . http_build_query($params));
+
+                    return;
+                }
+            } elseif ($tokenJob !== '') {
+                $estado = $this->ordenesJobService->estado($empresaId, $userId, $tokenJob);
+                if ($estado === null) {
+                    $reporte = ['ok' => false, 'error' => 'El resultado de este reporte expiró o no existe. Vuelva a consultar.'];
+                } elseif ($estado['estado'] === 'error') {
+                    $reporte = ['ok' => false, 'error' => $estado['error'] ?? 'No se pudo generar el reporte.'];
+                } elseif ($estado['estado'] === 'listo') {
+                    $reporte = $this->ordenesJobService->resultado($empresaId, $userId, $tokenJob)
+                        ?? ['ok' => false, 'error' => 'El resultado de este reporte expiró o no existe. Vuelva a consultar.'];
+                } else {
+                    $trabajo = ['token' => $tokenJob] + $estado;
+                }
+            }
+        }
+
+        $breadcrumb = (new ModuleService())->buildBreadcrumbForRuta('sihos/ordenesLiquidacion');
+
+        $view = BASE_PATH . '/app/views/sihos/ordenes-liquidacion.php';
+        require BASE_PATH . '/app/views/layouts/main.php';
+    }
+
+    /** Avance del cálculo en segundo plano de ordenesLiquidacion (la pantalla lo consulta cada pocos segundos). */
+    public function ordenesLiquidacionEstado(): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+
+        $scope = $this->connectionService->buildScope($_GET);
+        $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : null;
+        $estado = $empresaId === null ? null : $this->ordenesJobService->estado($empresaId, (int)($_SESSION['user_id'] ?? 0), trim((string)($_GET['job'] ?? '')));
+
+        echo json_encode($estado ?? ['estado' => 'inexistente'], JSON_UNESCAPED_UNICODE);
+    }
+
+    /** Descarga del CSV de detalle de un trabajo terminado de ordenesLiquidacion. */
+    public function ordenesLiquidacionDescargar(): void
+    {
+        $scope = $this->connectionService->buildScope($_GET);
+        $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : null;
+        $userId = (int)($_SESSION['user_id'] ?? 0);
+        $token = trim((string)($_GET['job'] ?? ''));
+
+        $estado = $empresaId === null ? null : $this->ordenesJobService->estado($empresaId, $userId, $token);
+        $ruta = $estado === null ? null : $this->ordenesJobService->rutaArchivo($empresaId, $userId, $token);
+        if ($ruta === null || !is_file($ruta)) {
+            http_response_code(410);
+            exit('El resultado de este reporte expiró o no existe. Vuelva a consultar.');
+        }
+
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="ordenes_vs_liquidacion_' . $estado['desde'] . '_' . $estado['hasta'] . '.csv"');
+        header('Content-Length: ' . filesize($ruta));
+        readfile($ruta);
     }
 
     /** Avance del cálculo en segundo plano de liquidacion (la pantalla lo consulta cada pocos segundos). */
