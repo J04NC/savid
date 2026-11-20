@@ -43,6 +43,8 @@ class SihosOrdenLiquidacionJobService
             return ['ok' => false, 'error' => $error];
         }
 
+        $this->purgarExpirados($empresaId);
+
         $token = bin2hex(random_bytes(16));
         $this->guardarEstado($empresaId, $token, [
             'estado' => 'pendiente', 'empresa_id' => $empresaId, 'user_id' => $userId, 'desde' => $desde, 'hasta' => $hasta,
@@ -192,5 +194,20 @@ class SihosOrdenLiquidacionJobService
     private function guardarEstado(int $empresaId, string $token, array $estado): void
     {
         $this->storage()->putContents($this->key($empresaId, $token, 'estado'), json_encode($estado, JSON_UNESCAPED_UNICODE) ?: '{}');
+    }
+
+    private function purgarExpirados(int $empresaId): void
+    {
+        $storage = $this->storage();
+        foreach ($storage->glob(StorageService::ZONE_SIHOS_REPORTES, self::PREFIJO . '_*_estado.json', $empresaId) as $key) {
+            $raw = $storage->get($key);
+            $estado = is_string($raw) ? json_decode($raw, true) : null;
+            $creado = is_array($estado) ? (int)($estado['creado'] ?? 0) : 0;
+            if ($creado > 0 && time() - $creado > self::TTL_SECONDS) {
+                $storage->delete($key);
+                $storage->delete(str_replace('_estado.json', '_resultado.json', $key));
+                $storage->delete(str_replace('_estado.json', '_detalle.csv', $key));
+            }
+        }
     }
 }
