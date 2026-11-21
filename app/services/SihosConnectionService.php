@@ -99,15 +99,7 @@ class SihosConnectionService
             return ['ok' => false, 'message' => 'No hay conexión configurada para esta empresa.'];
         }
 
-        $repository = new SihosExternalRepository([
-            'host' => $row['host'],
-            'port' => (string)$row['puerto'],
-            'database' => $row['base_datos'],
-            'username' => $row['usuario'],
-            'codiInst' => (string)($row['codi_inst'] ?? ''),
-            'password' => SihosCredentialCipher::decrypt($row['password_cifrado'] ?? null),
-            'charset' => $row['charset'],
-        ]);
+        $repository = SihosRepositoryFactory::buildRead($row, (string)($row['codi_inst'] ?? ''));
 
         try {
             $version = $repository->fetchServerVersion();

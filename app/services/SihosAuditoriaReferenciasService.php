@@ -24,15 +24,7 @@ class SihosAuditoriaReferenciasService
             return ['ok' => false, 'message' => 'Esta empresa no tiene conexión a SIHOS configurada.'];
         }
 
-        $repositorio = new SihosExternalRepository([
-            'host' => $configFila['host'],
-            'port' => (string)$configFila['puerto'],
-            'database' => $configFila['base_datos'],
-            'username' => $configFila['usuario'],
-            'codiInst' => trim((string)($configFila['codi_inst'] ?? '')),
-            'password' => SihosCredentialCipher::decrypt($configFila['password_cifrado'] ?? null),
-            'charset' => $configFila['charset'],
-        ]);
+        $repositorio = SihosRepositoryFactory::buildRead($configFila, trim((string)($configFila['codi_inst'] ?? '')));
 
         try {
             $encabezado = $repositorio->fetchEncabezadoDocumentoAuditoria($codiDocu, $numeDocu);

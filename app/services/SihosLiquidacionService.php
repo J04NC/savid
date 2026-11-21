@@ -187,11 +187,7 @@ class SihosLiquidacionService
     /** @param array<string,mixed> $cfg */
     private function conectar(array $cfg, string $codiInst): PDO
     {
-        return (new SihosExternalRepository([
-            'host' => $cfg['host'], 'port' => (string)$cfg['puerto'], 'database' => $cfg['base_datos'],
-            'username' => $cfg['usuario'], 'codiInst' => $codiInst,
-            'password' => SihosCredentialCipher::decrypt($cfg['password_cifrado'] ?? null), 'charset' => $cfg['charset'],
-        ]))->connect();
+        return SihosRepositoryFactory::buildRead($cfg, $codiInst)->connect();
     }
 
     /** @return list<array{0:string,1:string}> tramos mensuales [inicio, fin] que cubren el rango */

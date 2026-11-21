@@ -191,15 +191,7 @@ class SihosCartera2193Service
             return ['error' => 'Falta configurar el CodiInst de esta empresa en Conexión SIHOS.'];
         }
 
-        $externo = new SihosExternalRepository([
-            'host' => $configFila['host'],
-            'port' => (string)$configFila['puerto'],
-            'database' => $configFila['base_datos'],
-            'username' => $configFila['usuario'],
-            'codiInst' => $codiInst,
-            'password' => SihosCredentialCipher::decrypt($configFila['password_cifrado'] ?? null),
-            'charset' => $configFila['charset'],
-        ]);
+        $externo = SihosRepositoryFactory::buildRead($configFila, $codiInst);
 
         return ['repo' => new SihosCartera2193Repository($externo->connect(), $codiInst)];
     }

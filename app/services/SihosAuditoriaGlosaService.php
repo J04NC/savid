@@ -314,15 +314,7 @@ class SihosAuditoriaGlosaService
             return null;
         }
 
-        return new SihosExternalRepository([
-            'host' => $configFila['host'],
-            'port' => (string)$configFila['puerto'],
-            'database' => $configFila['base_datos'],
-            'username' => $configFila['usuario'],
-            'codiInst' => $codiInst,
-            'password' => SihosCredentialCipher::decrypt($configFila['password_cifrado'] ?? null),
-            'charset' => $configFila['charset'],
-        ]);
+        return SihosRepositoryFactory::buildRead($configFila, $codiInst);
     }
 
     /**

@@ -93,15 +93,7 @@ class SihosNominaPilaService
             return ['ok' => false, 'error' => 'Falta configurar el CodiInst de esta empresa en Conexión SIHOS.'];
         }
 
-        $repository = new SihosExternalRepository([
-            'host' => $configFila['host'],
-            'port' => (string)$configFila['puerto'],
-            'database' => $configFila['base_datos'],
-            'username' => $configFila['usuario'],
-            'codiInst' => $codiInst,
-            'password' => SihosCredentialCipher::decrypt($configFila['password_cifrado'] ?? null),
-            'charset' => $configFila['charset'],
-        ]);
+        $repository = SihosRepositoryFactory::buildRead($configFila, $codiInst);
 
         $municipio = $this->configRepository->municipioEmpresa($empresaId);
         $salarioMinimoMensual = $this->configRepository->salarioMinimoMensual($empresaId, (int)$codiAno);

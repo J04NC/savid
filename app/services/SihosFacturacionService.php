@@ -147,10 +147,6 @@ class SihosFacturacionService
             return ['error' => 'Falta configurar el CodiInst de esta empresa en Conexión SIHOS.'];
         }
 
-        return ['codiInst' => $codiInst, 'externo' => new SihosExternalRepository([
-            'host' => $fila['host'], 'port' => (string)$fila['puerto'], 'database' => $fila['base_datos'],
-            'username' => $fila['usuario'], 'codiInst' => $codiInst,
-            'password' => SihosCredentialCipher::decrypt($fila['password_cifrado'] ?? null), 'charset' => $fila['charset'],
-        ])];
+        return ['codiInst' => $codiInst, 'externo' => SihosRepositoryFactory::buildRead($fila, $codiInst)];
     }
 }
