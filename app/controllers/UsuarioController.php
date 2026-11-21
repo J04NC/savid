@@ -355,6 +355,16 @@ class UsuarioController
                 $esSuperAdmin
             );
 
+            // requireUsuarioGestionableEnSesion() de arriba solo valida que
+            // el usuario objetivo esté en el alcance de quien hace la
+            // petición, no que pueda EDITAR permisos — sin esto, 'ver' en el
+            // ítem usuario bastaba para auto-asignarse (o asignarle a otro
+            // usuario de su empresa) cualquier permiso vía esta pantalla.
+            if (!PermisoService::can('usuario', 'guardar')) {
+                echo json_encode(['success' => false, 'message' => 'No tiene permiso para guardar permisos de usuario.']);
+                exit;
+            }
+
             $resultado = $this->userAccessService->saveUsuarioPermisosBatch(
                 (int)$usuarioId,
                 $grantIds,
