@@ -76,15 +76,7 @@ class SihosTarifaProcedimientoService
 
     private function repositorioLectura(array $configFila): SihosExternalRepository
     {
-        return new SihosExternalRepository([
-            'host' => $configFila['host'],
-            'port' => (string)$configFila['puerto'],
-            'database' => $configFila['base_datos'],
-            'username' => $configFila['usuario'],
-            'codiInst' => trim((string)$configFila['codi_inst']),
-            'password' => SihosCredentialCipher::decrypt($configFila['password_cifrado'] ?? null),
-            'charset' => $configFila['charset'],
-        ]);
+        return SihosRepositoryFactory::buildRead($configFila, trim((string)$configFila['codi_inst']));
     }
 
     /**
@@ -444,15 +436,7 @@ class SihosTarifaProcedimientoService
         $repositorioLectura = $this->repositorioLectura($configFila);
         $usuaDigi = $this->usuaDigiResolver->resolver($userId, $repositorioLectura);
 
-        $repositorioEscritura = new SihosExternalWriteRepository([
-            'host' => $configFila['host'],
-            'port' => (string)$configFila['puerto'],
-            'database' => $configFila['base_datos'],
-            'username' => $usuarioEscritura,
-            'codiInst' => $codiInst,
-            'password' => SihosCredentialCipher::decrypt($configFila['password_escritura_cifrado']),
-            'charset' => $configFila['charset'],
-        ]);
+        $repositorioEscritura = SihosRepositoryFactory::buildWrite($configFila, $codiInst, $usuarioEscritura);
 
         try {
             $resultado = $repositorioEscritura->upsertTarifasProcedimiento($filas, $codiManu, $codiPlan, $modo, $usuaDigi);

@@ -51,15 +51,9 @@ class SihosLiquidacionCorreccionService
             return ['ok' => false, 'error' => 'Este reporte se generó antes de que existiera la corrección. Genérelo de nuevo.'];
         }
 
-        $lectura = new SihosExternalRepository([
-            'host' => $cfg['host'], 'port' => (string)$cfg['puerto'], 'database' => $cfg['base_datos'], 'username' => $cfg['usuario'],
-            'codiInst' => $codiInst, 'password' => SihosCredentialCipher::decrypt($cfg['password_cifrado'] ?? null), 'charset' => $cfg['charset'],
-        ]);
+        $lectura = SihosRepositoryFactory::buildRead($cfg, $codiInst);
         $usuaModi = (new SihosUsuaDigiResolver())->resolver($userId, $lectura);
-        $escritura = new SihosExternalWriteRepository([
-            'host' => $cfg['host'], 'port' => (string)$cfg['puerto'], 'database' => $cfg['base_datos'], 'username' => $usuarioEscritura,
-            'codiInst' => $codiInst, 'password' => SihosCredentialCipher::decrypt($cfg['password_escritura_cifrado']), 'charset' => $cfg['charset'],
-        ]);
+        $escritura = SihosRepositoryFactory::buildWrite($cfg, $codiInst, $usuarioEscritura);
 
         $resultados = [];
         $actualizadas = 0;

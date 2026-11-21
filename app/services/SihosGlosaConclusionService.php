@@ -48,15 +48,7 @@ class SihosGlosaConclusionService
             ];
         }
 
-        $repositorioLectura = new SihosExternalRepository([
-            'host' => $configFila['host'],
-            'port' => (string)$configFila['puerto'],
-            'database' => $configFila['base_datos'],
-            'username' => $configFila['usuario'],
-            'codiInst' => $codiInst,
-            'password' => SihosCredentialCipher::decrypt($configFila['password_cifrado'] ?? null),
-            'charset' => $configFila['charset'],
-        ]);
+        $repositorioLectura = SihosRepositoryFactory::buildRead($configFila, $codiInst);
 
         try {
             $estado = $repositorioLectura->fetchEstadoParaConcluirGlosaAceptacionEps($codiDocuGlosa, $numeGlosa);
@@ -134,15 +126,7 @@ class SihosGlosaConclusionService
             $fechaCorte
         );
 
-        $repositorioEscritura = new SihosExternalWriteRepository([
-            'host' => $configFila['host'],
-            'port' => (string)$configFila['puerto'],
-            'database' => $configFila['base_datos'],
-            'username' => $usuarioEscritura,
-            'codiInst' => $codiInst,
-            'password' => SihosCredentialCipher::decrypt($configFila['password_escritura_cifrado']),
-            'charset' => $configFila['charset'],
-        ]);
+        $repositorioEscritura = SihosRepositoryFactory::buildWrite($configFila, $codiInst, $usuarioEscritura);
 
         try {
             $resultado = $repositorioEscritura->concluirGlosaAceptacionEps(
