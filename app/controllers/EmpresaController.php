@@ -95,6 +95,14 @@ class EmpresaController
             return;
         }
 
+        // userCanManageEmpresa() de arriba solo valida pertenencia a la
+        // empresa, no permiso de edición — con solo 'ver' en el ítem empresa
+        // bastaba para vincular/activar usuarios de la empresa.
+        if (!PermisoService::can('empresa', 'guardar')) {
+            $this->jsonResponse(['success' => false, 'message' => 'No tiene permiso para gestionar usuarios de esta empresa.']);
+            return;
+        }
+
         if ($action === 'link') {
             $usuarioId = (int)($_POST['usuario_id'] ?? 0);
             $esSuperAdmin = $this->isSuperAdmin();
@@ -331,6 +339,13 @@ class EmpresaController
     private function handleSedesPost(int $empresaId): void
     {
         $action = (string)($_POST['_action'] ?? '');
+
+        // Mismo hueco que handleUsuariosPost(): userCanManageEmpresa() de
+        // arriba solo valida pertenencia a la empresa, no permiso de edición.
+        if (!PermisoService::can('empresa', 'guardar')) {
+            $this->jsonResponse(['success' => false, 'message' => 'No tiene permiso para gestionar las sedes de esta empresa.']);
+            return;
+        }
 
         if ($action === 'save') {
             $this->jsonResponse($this->sedeService->guardar($empresaId, $_POST));
