@@ -239,6 +239,15 @@ class UsuarioController
 
         $this->requireUsuarioGestionableEnSesion((int)$usuarioId);
 
+        // requireUsuarioGestionableEnSesion() solo valida alcance sobre el
+        // usuario objetivo, no permiso de edición — mismo hueco que ya se
+        // corrigió en permisos(): con solo 'ver' bastaba para reemplazar los
+        // roles de cualquier usuario gestionable de su empresa.
+        if (!PermisoService::can('usuario', 'guardar')) {
+            echo json_encode(['success' => false, 'message' => 'No tiene permiso para guardar los roles de usuario.']);
+            exit;
+        }
+
         $assignments = $_POST['assignments'] ?? [];
         if (!is_array($assignments)) {
             $assignments = [];
@@ -446,6 +455,12 @@ class UsuarioController
         }
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            // Mismo hueco que saveRoles()/permisos(): requireUsuarioGestionableEnSesion()
+            // de arriba solo valida alcance, no permiso de edición.
+            if (!PermisoService::can('usuario', 'guardar')) {
+                echo json_encode(['success' => false, 'message' => 'No tiene permiso para guardar empresas/sedes de usuario.']);
+                exit;
+            }
             $empresas = $_POST['empresas'] ?? [];
             $sedes = $_POST['sedes'] ?? [];
             echo json_encode($this->userScopeService->saveEmpresaSede((int)$usuarioId, $empresas, $sedes));
