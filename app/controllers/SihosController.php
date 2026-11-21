@@ -76,7 +76,10 @@ class SihosController
      */
     public function guardarConfig(): void
     {
-        $scope = $this->connectionService->buildScope($_GET);
+        // Escritura: usa buildWriteScope (fuerza empresa de sesión) para que un
+        // usuario con acceso de solo lectura a otra empresa no pueda sobrescribir
+        // sus credenciales de conexión SIHOS mandando empresa_id por request.
+        $scope = $this->connectionService->buildWriteScope($_GET);
         $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : 0;
 
         if ($empresaId <= 0 || !PermisoService::can('sihos', 'guardar')) {
@@ -97,7 +100,9 @@ class SihosController
     {
         header('Content-Type: application/json; charset=utf-8');
 
-        $scope = $this->connectionService->buildScope($_GET + $_POST);
+        // Mismo motivo que guardarConfig(): probar la conexión también usa
+        // credenciales reales, no debe poder apuntarse a la empresa de otro.
+        $scope = $this->connectionService->buildWriteScope($_GET + $_POST);
         $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : 0;
 
         if ($empresaId <= 0) {
