@@ -720,12 +720,20 @@ class SgdElaboracionService
             'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td',
         ];
 
+        // Cola, no snapshot fijo: un nodo no permitido se "desenvuelve"
+        // promoviendo a sus hijos como hijos directos de $node, pero esos
+        // hijos promovidos nunca pasaban por esta misma validación — un
+        // payload envuelto en una etiqueta no permitida (ej.
+        // <a><script type="text/php">...</script></a>) sobrevivía intacto.
+        // Encolándolos se revalidan las veces que haga falta hasta que no
+        // quede ninguna etiqueta no permitida por desenvolver.
         $children = [];
         foreach ($node->childNodes as $child) {
             $children[] = $child;
         }
 
-        foreach ($children as $child) {
+        while ($children) {
+            $child = array_shift($children);
             if ($child->nodeType === XML_TEXT_NODE || $child->nodeType === XML_CDATA_SECTION_NODE) {
                 continue;
             }
@@ -741,10 +749,14 @@ class SgdElaboracionService
             }
 
             if (!in_array($tag, $allowed, true)) {
+                $promoted = [];
                 while ($child->firstChild) {
-                    $node->insertBefore($child->firstChild, $child);
+                    $grandchild = $child->firstChild;
+                    $node->insertBefore($grandchild, $child);
+                    $promoted[] = $grandchild;
                 }
                 $node->removeChild($child);
+                array_unshift($children, ...$promoted);
                 continue;
             }
 
