@@ -1012,7 +1012,10 @@ class SgdPdfGenerationService
         $options = new Options();
         $options->set('isRemoteEnabled', false);
         $options->set('isHtml5ParserEnabled', true);
-        $options->set('isPhpEnabled', true);
+        // Ningún flujo de SAVID necesita <script type="text/php"> embebido en
+        // el HTML renderizado; dejarlo en true permite RCE si algún texto
+        // enriquecido (contenido/anexo) llega sin sanitizar al renderer.
+        $options->set('isPhpEnabled', false);
         $options->set('chroot', BASE_PATH . '/public');
         $options->set('defaultFont', trim((string)($formatoPdf['fuente_cuerpo'] ?? 'Arial')) ?: 'Arial');
 
