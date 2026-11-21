@@ -102,7 +102,10 @@ class Database
                 $pdoClass = class_exists('AuditingPDO') ? 'AuditingPDO' : 'PDO';
                 $this->pdo = new $pdoClass($dsn, $this->username, $this->password, $options);
             } catch (PDOException $e) {
-                die('Error de conexion a la base de datos: ' . $e->getMessage());
+                // El detalle (host/BD/usuario/SQLSTATE) solo al log: este
+                // die() es lo único que ve ?url=health, sin sesión.
+                error_log('Database::connect - fallo de conexion: ' . $e->getMessage());
+                die('Error de conexion a la base de datos.');
             }
 
             $this->aplicarWaitTimeout();

@@ -47,7 +47,9 @@ class SystemHealthService
 
             return ['ok' => true, 'message' => 'Conexión MySQL activa'];
         } catch (Throwable $e) {
-            return ['ok' => false, 'message' => 'MySQL: ' . $e->getMessage()];
+            error_log('SystemHealthService::checkDatabase - ' . $e->getMessage());
+
+            return ['ok' => false, 'message' => 'MySQL: error de conexión'];
         }
     }
 
@@ -70,7 +72,9 @@ class SystemHealthService
                 'driver' => $driver,
             ];
         } catch (Throwable $e) {
-            return ['ok' => false, 'message' => 'Storage: ' . $e->getMessage()];
+            error_log('SystemHealthService::checkStorage - ' . $e->getMessage());
+
+            return ['ok' => false, 'message' => 'Storage: error de escritura'];
         }
     }
 
@@ -119,7 +123,9 @@ class SystemHealthService
 
             return ['ok' => $pong !== false, 'message' => 'Redis responde'];
         } catch (Throwable $e) {
-            return ['ok' => false, 'message' => 'Redis: ' . $e->getMessage()];
+            error_log('SystemHealthService::checkRedis - ' . $e->getMessage());
+
+            return ['ok' => false, 'message' => 'Redis: error de conexión'];
         }
     }
 }
