@@ -358,30 +358,14 @@ class SihosInterlabProcesarService
      */
     private function registrarAuditoria(int $empresaId, string $codiInst, string $tabla, string $registroId, array $resultado, string $accionEnum = 'UPDATE'): void
     {
-        $database = new Database();
-        $pdo = $database->connect();
-
-        $stmt = $pdo->prepare('
-            INSERT INTO auditoria (
-                accion, tabla, registro_id,
-                datos_anteriores, datos_nuevos, campos_cambiados,
-                sql_resumen, usuario_id, empresa_id, sede_id,
-                ip, user_agent, request_url
-            ) VALUES (?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?, ?, ?, ?)
-        ');
-
-        $stmt->execute([
+        SihosAuditoriaManualService::registrar(
+            $empresaId,
             $accionEnum,
             'sihos.' . $tabla,
             "{$codiInst}-{$registroId}",
+            null,
             json_encode($resultado, JSON_UNESCAPED_UNICODE),
-            'Procesamiento de Interfaz Laboratorio (' . $tabla . ') para CodiInst ' . $codiInst,
-            $_SESSION['user_id'] ?? null,
-            $empresaId,
-            $_SESSION['sede_id'] ?? null,
-            $_SERVER['REMOTE_ADDR'] ?? null,
-            $_SERVER['HTTP_USER_AGENT'] ?? null,
-            $_SERVER['REQUEST_URI'] ?? null,
-        ]);
+            'Procesamiento de Interfaz Laboratorio (' . $tabla . ') para CodiInst ' . $codiInst
+        );
     }
 }

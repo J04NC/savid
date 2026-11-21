@@ -689,32 +689,15 @@ class SihosCancelacionCuentaService
         array $resultado,
         string $sqlResumen
     ): void {
-        $database = new Database();
-        $pdo = $database->connect();
-
-        $stmt = $pdo->prepare('
-            INSERT INTO auditoria (
-                accion, tabla, registro_id,
-                datos_anteriores, datos_nuevos, campos_cambiados,
-                sql_resumen, usuario_id, empresa_id, sede_id,
-                ip, user_agent, request_url
-            ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)
-        ');
-
-        $stmt->execute([
+        SihosAuditoriaManualService::registrar(
+            $empresaId,
             $accion,
             $tabla,
             $registroId,
             $accion === 'UPDATE' ? json_encode($resultado['lineasAntes'] ?? null, JSON_UNESCAPED_UNICODE) : null,
             json_encode($accion === 'UPDATE' ? ($resultado['lineasDespues'] ?? null) : $resultado, JSON_UNESCAPED_UNICODE),
-            $sqlResumen,
-            $_SESSION['user_id'] ?? null,
-            $empresaId,
-            $_SESSION['sede_id'] ?? null,
-            $_SERVER['REMOTE_ADDR'] ?? null,
-            $_SERVER['HTTP_USER_AGENT'] ?? null,
-            $_SERVER['REQUEST_URI'] ?? null,
-        ]);
+            $sqlResumen
+        );
     }
 
     /**
@@ -767,18 +750,6 @@ class SihosCancelacionCuentaService
      */
     private function registrarAuditoria(int $empresaId, string $codiInst, string $codiDocuFactura, string $numeDocuFactura, array $resultado): void
     {
-        $database = new Database();
-        $pdo = $database->connect();
-
-        $stmt = $pdo->prepare('
-            INSERT INTO auditoria (
-                accion, tabla, registro_id,
-                datos_anteriores, datos_nuevos, campos_cambiados,
-                sql_resumen, usuario_id, empresa_id, sede_id,
-                ip, user_agent, request_url
-            ) VALUES (?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?, ?, ?, ?)
-        ');
-
         // 'accion' es un ENUM('INSERT','UPDATE','DELETE') en SAVID (el mismo
         // que usa AuditingPDO para sus propias escrituras) — no texto libre.
         // La descripción específica de qué se hizo va en sql_resumen/tabla,
@@ -786,19 +757,15 @@ class SihosCancelacionCuentaService
         // ENUM lanza una excepción de truncamiento DESPUÉS de que SIHOS ya
         // había comprometido la escritura, cortando la respuesta al
         // navegador sin que el usuario supiera que sí se había creado.
-        $stmt->execute([
+        SihosAuditoriaManualService::registrar(
+            $empresaId,
             'INSERT',
             'sihos.EncaCont',
             "{$codiInst}-{$resultado['codiDocuNota']}-{$resultado['numeDocuNota']}",
+            null,
             json_encode($resultado, JSON_UNESCAPED_UNICODE),
             "Creación de Nota Contabilidad en SIHOS que cancela una cuenta fuera de lo esperado contra 4312, "
-                . "sobre la factura {$codiDocuFactura}-{$numeDocuFactura}",
-            $_SESSION['user_id'] ?? null,
-            $empresaId,
-            $_SESSION['sede_id'] ?? null,
-            $_SERVER['REMOTE_ADDR'] ?? null,
-            $_SERVER['HTTP_USER_AGENT'] ?? null,
-            $_SERVER['REQUEST_URI'] ?? null,
-        ]);
+                . "sobre la factura {$codiDocuFactura}-{$numeDocuFactura}"
+        );
     }
 }
