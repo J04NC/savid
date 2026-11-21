@@ -108,6 +108,15 @@ class RolController
         ==========================================
         */
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            // rolAllowedForEmpresa() de arriba solo valida que el rol sea de
+            // esta empresa, no que el usuario pueda EDITAR permisos — sin
+            // esto, 'ver' en el ítem rol bastaba para auto-asignarse
+            // cualquier permiso sobre cualquier módulo de su empresa.
+            if (!PermisoService::can('rol', 'guardar')) {
+                http_response_code(403);
+                echo json_encode(['success' => false, 'message' => 'No tiene permiso para guardar permisos de rol.']);
+                exit;
+            }
             $checks = $_POST['permisos'] ?? [];
             echo json_encode($this->rolePermissionService->saveRolePermissions($rolId, $empresaId, $sedeId, $checks));
             exit;
