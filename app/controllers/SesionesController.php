@@ -92,6 +92,16 @@ class SesionesController
             return;
         }
 
+        // reportService->close() reusa canView() ('ver', el mismo permiso de
+        // solo consulta del reporte) como único chequeo — bastaba con poder
+        // VER el reporte para forzar el cierre de la sesión de otro usuario.
+        if (!PermisoService::can('sesiones', 'guardar')) {
+            http_response_code(403);
+            echo json_encode(['ok' => false, 'error' => 'No tiene permiso para cerrar sesiones.'], JSON_UNESCAPED_UNICODE);
+
+            return;
+        }
+
         $result = $this->reportService->close((int)$sesionId);
 
         if (!$result['success']) {
