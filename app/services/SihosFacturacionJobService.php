@@ -48,14 +48,7 @@ class SihosFacturacionJobService
             'tipos' => array_values($tipos), 'nit' => $nit, 'creado' => time(), 'actualizado' => time(), 'fase' => 'En cola', 'lineas' => 0,
         ]);
 
-        $php = is_executable(PHP_BINDIR . '/php') ? PHP_BINDIR . '/php' : 'php';
-        exec(sprintf(
-            'nohup %s %s %d %s > /dev/null 2>&1 &',
-            escapeshellarg($php),
-            escapeshellarg(BASE_PATH . '/scripts/sihos_facturacion_job.php'),
-            $empresaId,
-            escapeshellarg($token)
-        ));
+        $this->store->lanzarWorker(BASE_PATH . '/scripts/sihos_facturacion_job.php', $empresaId, $token);
 
         return ['ok' => true, 'token' => $token];
     }
@@ -85,7 +78,7 @@ class SihosFacturacionJobService
                 }
             );
             if (!$reporte['ok']) {
-                $this->terminar($empresaId, $token, $estado, 'error', (string)$reporte['error']);
+                $this->store->terminar($empresaId, $token, $estado, 'error', (string)$reporte['error']);
 
                 return;
             }
@@ -105,10 +98,10 @@ class SihosFacturacionJobService
                 $estado['total_' . $tabla] = count($reporte[$tabla]);
                 unset($reporte[$tabla]);
             }
-            $this->terminar($empresaId, $token, $estado, 'listo');
+            $this->store->terminar($empresaId, $token, $estado, 'listo');
         } catch (Throwable $e) {
             error_log('SihosFacturacionJobService: ' . $e->getMessage());
-            $this->terminar($empresaId, $token, $estado, 'error', 'No se pudo generar el reporte. Intente de nuevo.');
+            $this->store->terminar($empresaId, $token, $estado, 'error', 'No se pudo generar el reporte. Intente de nuevo.');
         } finally {
             foreach ($tmp as $ruta) {
                 @unlink($ruta);
@@ -129,10 +122,7 @@ class SihosFacturacionJobService
             return null;
         }
 
-        if (in_array($estado['estado'], ['pendiente', 'ejecutando'], true) && time() - (int)$estado['actualizado'] > self::SIN_LATIDO_SEGUNDOS) {
-            $this->terminar($empresaId, $token, $estado, 'error', 'El proceso se interrumpió. Intente de nuevo.');
-            $estado = $this->store->leerEstado($empresaId, $token) ?? $estado;
-        }
+        $estado = $this->store->verificarLatido($empresaId, $token, $estado, self::SIN_LATIDO_SEGUNDOS);
 
         $salida = [
             'estado' => (string)$estado['estado'], 'fase' => (string)($estado['fase'] ?? ''), 'lineas' => (int)($estado['lineas'] ?? 0),
@@ -165,16 +155,5 @@ class SihosFacturacionJobService
         }
 
         return $this->store->rutaCsv($empresaId, $this->store->tokenSeguro($token), $tabla);
-    }
-
-    /** @param array<string,mixed> $estado */
-    private function terminar(int $empresaId, string $token, array $estado, string $final, ?string $error = null): void
-    {
-        $estado['estado'] = $final;
-        $estado['actualizado'] = time();
-        if ($error !== null) {
-            $estado['error'] = $error;
-        }
-        $this->store->guardarEstado($empresaId, $token, $estado);
     }
 }

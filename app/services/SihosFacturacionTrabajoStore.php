@@ -9,55 +9,66 @@ class SihosFacturacionTrabajoStore
 {
     public const TABLAS = ['facturas', 'notas'];
     private const PREFIJO = 'facturacion';
-    private const TTL_SECONDS = 21600;
+
+    private SihosTrabajoStore $store;
+
+    public function __construct()
+    {
+        $this->store = new SihosTrabajoStore(self::PREFIJO);
+    }
 
     public function storage(): StorageService
     {
-        return StorageService::instance();
+        return $this->store->storage();
     }
 
     public function tokenSeguro(string $token): string
     {
-        $safe = preg_replace('/[^a-f0-9]/', '', strtolower($token)) ?? '';
-
-        return strlen($safe) === 32 ? $safe : '';
+        return $this->store->tokenSeguro($token);
     }
 
     public function key(int $empresaId, string $token, string $parte, string $ext = 'json'): string
     {
-        return $this->storage()->key(StorageService::ZONE_SIHOS_REPORTES, self::PREFIJO . '_' . $token . '_' . $parte . '.' . $ext, $empresaId);
+        return $this->store->key($empresaId, $token, $parte, $ext);
     }
 
     /** @return array<string,mixed>|null */
     public function leerEstado(int $empresaId, string $token): ?array
     {
-        $raw = $this->storage()->get($this->key($empresaId, $token, 'estado'));
-        $estado = is_string($raw) ? json_decode($raw, true) : null;
-
-        return is_array($estado) && (int)($estado['empresa_id'] ?? 0) === $empresaId ? $estado : null;
+        return $this->store->leerEstado($empresaId, $token);
     }
 
     /** @param array<string,mixed> $estado */
     public function guardarEstado(int $empresaId, string $token, array $estado): void
     {
-        $this->storage()->putContents($this->key($empresaId, $token, 'estado'), json_encode($estado, JSON_UNESCAPED_UNICODE) ?: '{}');
+        $this->store->guardarEstado($empresaId, $token, $estado);
+    }
+
+    /** @param array<string,mixed> $estado */
+    public function terminar(int $empresaId, string $token, array $estado, string $final, ?string $error = null): void
+    {
+        $this->store->terminar($empresaId, $token, $estado, $final, $error);
+    }
+
+    /** @param array<string,mixed> $estado */
+    public function verificarLatido(int $empresaId, string $token, array $estado, int $sinLatidoSegundos): array
+    {
+        return $this->store->verificarLatido($empresaId, $token, $estado, $sinLatidoSegundos);
+    }
+
+    public function lanzarWorker(string $scriptPath, int $empresaId, string $token): void
+    {
+        $this->store->lanzarWorker($scriptPath, $empresaId, $token);
     }
 
     public function purgarExpirados(int $empresaId): void
     {
-        $storage = $this->storage();
-        foreach ($storage->glob(StorageService::ZONE_SIHOS_REPORTES, self::PREFIJO . '_*_estado.json', $empresaId) as $key) {
-            $raw = $storage->get($key);
-            $estado = is_string($raw) ? json_decode($raw, true) : null;
-            $creado = is_array($estado) ? (int)($estado['creado'] ?? 0) : 0;
-            if ($creado > 0 && time() - $creado > self::TTL_SECONDS) {
-                $storage->delete($key);
-                foreach (self::TABLAS as $tabla) {
-                    $storage->delete(str_replace('_estado.json', '_' . $tabla . '.json', $key));
-                    $storage->delete(str_replace('_estado.json', '_' . $tabla . '.csv', $key));
-                }
-            }
+        $sufijos = [];
+        foreach (self::TABLAS as $tabla) {
+            $sufijos[] = '_' . $tabla . '.json';
+            $sufijos[] = '_' . $tabla . '.csv';
         }
+        $this->store->purgarExpirados($empresaId, $sufijos);
     }
 
     /**
