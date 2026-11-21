@@ -87,17 +87,14 @@ class SihosLiquidacionAnulacionService
     /** @param array<string,mixed> $anterior */
     private function registrarAuditoria(int $empresaId, string $registroId, array $anterior): void
     {
-        $stmt = (new Database())->connect()->prepare(
-            'INSERT INTO auditoria (accion, tabla, registro_id, datos_anteriores, datos_nuevos, campos_cambiados, sql_resumen,
-                                    usuario_id, empresa_id, sede_id, ip, user_agent, request_url)
-             VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)'
+        SihosAuditoriaManualService::registrar(
+            $empresaId,
+            'UPDATE',
+            'sihos.EncaFact',
+            $registroId,
+            json_encode($anterior, JSON_UNESCAPED_UNICODE),
+            json_encode(['Anulado' => 1, 'CausAnul' => 2], JSON_UNESCAPED_UNICODE),
+            'Anulación de una liquidación cuyas facturas están anuladas por nota crédito, desde el reporte Liquidación'
         );
-        $stmt->execute([
-            'UPDATE', 'sihos.EncaFact', $registroId,
-            json_encode($anterior, JSON_UNESCAPED_UNICODE), json_encode(['Anulado' => 1, 'CausAnul' => 2], JSON_UNESCAPED_UNICODE),
-            'Anulación de una liquidación cuyas facturas están anuladas por nota crédito, desde el reporte Liquidación',
-            $_SESSION['user_id'] ?? null, $empresaId, $_SESSION['sede_id'] ?? null,
-            $_SERVER['REMOTE_ADDR'] ?? null, $_SERVER['HTTP_USER_AGENT'] ?? null, $_SERVER['REQUEST_URI'] ?? null,
-        ]);
     }
 }

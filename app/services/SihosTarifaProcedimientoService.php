@@ -481,25 +481,18 @@ class SihosTarifaProcedimientoService
      */
     private function registrarAuditoria(int $empresaId, string $codiInst, string $codiManu, string $codiPlan, string $modo, array $resultado): void
     {
-        $pdo = (new Database())->connect();
+        // 'accion' es ENUM('INSERT','UPDATE','DELETE') en SAVID — un lote
+        // en modo 'ambos' puede tener de las dos; se reporta la que
+        // predomine en cantidad de filas (el detalle completo, con el
+        // desglose real insertados/actualizados, queda en datos_nuevos).
+        $accion = $resultado['insertados'] >= $resultado['actualizados'] ? 'INSERT' : 'UPDATE';
 
-        $stmt = $pdo->prepare('
-            INSERT INTO auditoria (
-                accion, tabla, registro_id,
-                datos_anteriores, datos_nuevos, campos_cambiados,
-                sql_resumen, usuario_id, empresa_id, sede_id,
-                ip, user_agent, request_url
-            ) VALUES (?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?, ?, ?, ?)
-        ');
-
-        $stmt->execute([
-            // 'accion' es ENUM('INSERT','UPDATE','DELETE') en SAVID — un lote
-            // en modo 'ambos' puede tener de las dos; se reporta la que
-            // predomine en cantidad de filas (el detalle completo, con el
-            // desglose real insertados/actualizados, queda en datos_nuevos).
-            $resultado['insertados'] >= $resultado['actualizados'] ? 'INSERT' : 'UPDATE',
+        SihosAuditoriaManualService::registrar(
+            $empresaId,
+            $accion,
             'sihos.TariProc',
             "{$codiInst}-{$codiManu}-{$codiPlan}",
+            null,
             json_encode([
                 'insertados' => $resultado['insertados'],
                 'actualizados' => $resultado['actualizados'],
@@ -507,14 +500,8 @@ class SihosTarifaProcedimientoService
                 'detalle' => $resultado['detalle'],
             ], JSON_UNESCAPED_UNICODE),
             "Carga masiva de tarifas de procedimientos (SIHOS/PROCESOS/TARIFA PROCEDIMIENTOS), manual {$codiManu}, plan {$codiPlan}, modo {$modo}: "
-                . "{$resultado['insertados']} insertada(s), {$resultado['actualizados']} actualizada(s), " . count($resultado['rechazados']) . ' rechazada(s).',
-            $_SESSION['user_id'] ?? null,
-            $empresaId,
-            $_SESSION['sede_id'] ?? null,
-            $_SERVER['REMOTE_ADDR'] ?? null,
-            $_SERVER['HTTP_USER_AGENT'] ?? null,
-            $_SERVER['REQUEST_URI'] ?? null,
-        ]);
+                . "{$resultado['insertados']} insertada(s), {$resultado['actualizados']} actualizada(s), " . count($resultado['rechazados']) . ' rechazada(s).'
+        );
     }
 
     /**

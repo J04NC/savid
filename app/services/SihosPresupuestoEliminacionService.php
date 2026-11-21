@@ -459,31 +459,6 @@ class SihosPresupuestoEliminacionService
         ?string $datosNuevos,
         string $sqlResumen
     ): void {
-        $database = new Database();
-        $pdo = $database->connect();
-
-        $stmt = $pdo->prepare('
-            INSERT INTO auditoria (
-                accion, tabla, registro_id,
-                datos_anteriores, datos_nuevos, campos_cambiados,
-                sql_resumen, usuario_id, empresa_id, sede_id,
-                ip, user_agent, request_url
-            ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)
-        ');
-
-        $stmt->execute([
-            $accion,
-            $tabla,
-            $registroId,
-            $datosAnteriores,
-            $datosNuevos,
-            $sqlResumen,
-            $_SESSION['user_id'] ?? null,
-            $empresaId,
-            $_SESSION['sede_id'] ?? null,
-            $_SERVER['REMOTE_ADDR'] ?? null,
-            $_SERVER['HTTP_USER_AGENT'] ?? null,
-            $_SERVER['REQUEST_URI'] ?? null,
-        ]);
+        SihosAuditoriaManualService::registrar($empresaId, $accion, $tabla, $registroId, $datosAnteriores, $datosNuevos, $sqlResumen);
     }
 }

@@ -93,17 +93,14 @@ class SihosLiquidacionCorreccionService
     /** @param array<string,string> $linea */
     private function registrarAuditoria(int $empresaId, string $registroId, string $anterior, array $linea): void
     {
-        $stmt = (new Database())->connect()->prepare(
-            'INSERT INTO auditoria (accion, tabla, registro_id, datos_anteriores, datos_nuevos, campos_cambiados, sql_resumen,
-                                    usuario_id, empresa_id, sede_id, ip, user_agent, request_url)
-             VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)'
+        SihosAuditoriaManualService::registrar(
+            $empresaId,
+            'UPDATE',
+            'sihos.DetaFact',
+            $registroId,
+            json_encode(['CodiMedi' => $anterior], JSON_UNESCAPED_UNICODE),
+            json_encode(['CodiMedi' => $linea['login']], JSON_UNESCAPED_UNICODE),
+            'Corrección del profesional (CodiMedi) de una línea de liquidación con el profesional inferido (confianza ' . $linea['confianza'] . ') desde el reporte Liquidación'
         );
-        $stmt->execute([
-            'UPDATE', 'sihos.DetaFact', $registroId,
-            json_encode(['CodiMedi' => $anterior], JSON_UNESCAPED_UNICODE), json_encode(['CodiMedi' => $linea['login']], JSON_UNESCAPED_UNICODE),
-            'Corrección del profesional (CodiMedi) de una línea de liquidación con el profesional inferido (confianza ' . $linea['confianza'] . ') desde el reporte Liquidación',
-            $_SESSION['user_id'] ?? null, $empresaId, $_SESSION['sede_id'] ?? null,
-            $_SERVER['REMOTE_ADDR'] ?? null, $_SERVER['HTTP_USER_AGENT'] ?? null, $_SERVER['REQUEST_URI'] ?? null,
-        ]);
     }
 }
