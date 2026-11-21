@@ -22,6 +22,11 @@ class SihosConnectionService
         return $this->scope->buildScope($query);
     }
 
+    public function buildWriteScope(array $query = []): array
+    {
+        return $this->scope->buildWriteScope($query);
+    }
+
     public function canAccessEmpresa(int $empresaId, array $query = []): bool
     {
         return $this->scope->canAccessEmpresa($empresaId, $query);

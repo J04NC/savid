@@ -464,7 +464,7 @@ class SihosController
             return;
         }
 
-        $scope = $this->connectionService->buildScope($_POST);
+        $scope = $this->connectionService->buildWriteScope($_POST);
         $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : 0;
         $codiDocu = trim((string)($_POST['codi_docu'] ?? ''));
         $numeDocu = trim((string)($_POST['nume_docu'] ?? ''));
@@ -506,7 +506,7 @@ class SihosController
             return;
         }
 
-        $scope = $this->connectionService->buildScope($_POST);
+        $scope = $this->connectionService->buildWriteScope($_POST);
         $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : 0;
         $codiDocu = trim((string)($_POST['codi_docu'] ?? ''));
         $numeDocu = trim((string)($_POST['nume_docu'] ?? ''));
@@ -545,7 +545,7 @@ class SihosController
             return;
         }
 
-        $scope = $this->connectionService->buildScope($_POST);
+        $scope = $this->connectionService->buildWriteScope($_POST);
         $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : 0;
         $codiDocuNota = trim((string)($_POST['codi_docu'] ?? ''));
         $numeDocuNota = trim((string)($_POST['nume_docu'] ?? ''));
@@ -592,7 +592,7 @@ class SihosController
             return;
         }
 
-        $scope = $this->connectionService->buildScope($_POST);
+        $scope = $this->connectionService->buildWriteScope($_POST);
         $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : 0;
         $codiDocu = trim((string)($_POST['codi_docu'] ?? ''));
         $numeDocu = trim((string)($_POST['nume_docu'] ?? ''));
@@ -631,7 +631,7 @@ class SihosController
             return;
         }
 
-        $scope = $this->connectionService->buildScope($_POST);
+        $scope = $this->connectionService->buildWriteScope($_POST);
         $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : 0;
         $codiDocu = trim((string)($_POST['codi_docu'] ?? ''));
         $numeDocu = trim((string)($_POST['nume_docu'] ?? ''));
@@ -672,7 +672,7 @@ class SihosController
             return;
         }
 
-        $scope = $this->connectionService->buildScope($_POST);
+        $scope = $this->connectionService->buildWriteScope($_POST);
         $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : 0;
         $codiDocu = trim((string)($_POST['codi_docu'] ?? ''));
         $numeDocu = trim((string)($_POST['nume_docu'] ?? ''));
@@ -713,7 +713,7 @@ class SihosController
             return;
         }
 
-        $scope = $this->connectionService->buildScope($_POST);
+        $scope = $this->connectionService->buildWriteScope($_POST);
         $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : 0;
         $codiDocu = trim((string)($_POST['codi_docu'] ?? ''));
         $numeDocu = trim((string)($_POST['nume_docu'] ?? ''));
@@ -900,7 +900,7 @@ class SihosController
             return;
         }
 
-        $scope = $this->connectionService->buildScope($_POST);
+        $scope = $this->connectionService->buildWriteScope($_POST);
         $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : 0;
         $codiAno = trim((string)($_POST['codi_ano'] ?? ''));
         $codiMes = trim((string)($_POST['codi_mes'] ?? ''));
@@ -991,7 +991,7 @@ class SihosController
             return;
         }
 
-        $scope = $this->connectionService->buildScope($_POST);
+        $scope = $this->connectionService->buildWriteScope($_POST);
         $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : 0;
         $codiAno = trim((string)($_POST['codi_ano'] ?? ''));
         $codiMes = trim((string)($_POST['codi_mes'] ?? ''));
@@ -1074,7 +1074,7 @@ class SihosController
             return;
         }
 
-        $scope = $this->connectionService->buildScope($_POST);
+        $scope = $this->connectionService->buildWriteScope($_POST);
         $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : 0;
         $id = (int)($_POST['id'] ?? 0);
 
@@ -1109,7 +1109,7 @@ class SihosController
             return;
         }
 
-        $scope = $this->connectionService->buildScope($_POST);
+        $scope = $this->connectionService->buildWriteScope($_POST);
         $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : 0;
 
         $candidata = [
@@ -1163,7 +1163,7 @@ class SihosController
             return;
         }
 
-        $scope = $this->connectionService->buildScope($_POST);
+        $scope = $this->connectionService->buildWriteScope($_POST);
         $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : 0;
 
         $codiCups = trim((string)($_POST['codi_cups'] ?? ''));
@@ -1207,7 +1207,7 @@ class SihosController
             return;
         }
 
-        $scope = $this->connectionService->buildScope($_POST);
+        $scope = $this->connectionService->buildWriteScope($_POST);
         $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : 0;
 
         $codiCups = trim((string)($_POST['codi_cups'] ?? ''));
@@ -1326,7 +1326,7 @@ class SihosController
             return;
         }
 
-        $scope = $this->connectionService->buildScope($_POST);
+        $scope = $this->connectionService->buildWriteScope($_POST);
         $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : 0;
         $token = trim((string)($_POST['token'] ?? ''));
 
@@ -1942,7 +1942,7 @@ class SihosController
 
             return;
         }
-        $scope = $this->connectionService->buildScope($_POST);
+        $scope = $this->connectionService->buildWriteScope($_POST);
         $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : 0;
         $filtros = $this->liquidacionDetalleService->normalizarFiltros(is_array($_POST['f'] ?? null) ? $_POST['f'] : []);
         $claves = is_array($_POST['claves'] ?? null) ? array_values($_POST['claves']) : [];
@@ -1972,7 +1972,7 @@ class SihosController
 
             return;
         }
-        $scope = $this->connectionService->buildScope($_POST);
+        $scope = $this->connectionService->buildWriteScope($_POST);
         $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : 0;
         $filtros = $this->liquidacionDetalleService->normalizarFiltros(is_array($_POST['f'] ?? null) ? $_POST['f'] : []);
         $claves = is_array($_POST['claves'] ?? null) ? array_values($_POST['claves']) : [];
