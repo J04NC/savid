@@ -41,15 +41,7 @@ class SihosPresupuestoEliminacionService
             ];
         }
 
-        $repositorioLectura = new SihosExternalRepository([
-            'host' => $configFila['host'],
-            'port' => (string)$configFila['puerto'],
-            'database' => $configFila['base_datos'],
-            'username' => $configFila['usuario'],
-            'codiInst' => $codiInst,
-            'password' => SihosCredentialCipher::decrypt($configFila['password_cifrado'] ?? null),
-            'charset' => $configFila['charset'],
-        ]);
+        $repositorioLectura = SihosRepositoryFactory::buildRead($configFila, $codiInst);
 
         try {
             $estado = $repositorioLectura->fetchEstadoParaEliminacionDetaPlan($codiDocu, $numeDocu);
@@ -99,15 +91,7 @@ class SihosPresupuestoEliminacionService
             return ['ok' => false, 'message' => 'No se pudo verificar el cierre del período en SIHOS: ' . $e->getMessage()];
         }
 
-        $repositorioEscritura = new SihosExternalWriteRepository([
-            'host' => $configFila['host'],
-            'port' => (string)$configFila['puerto'],
-            'database' => $configFila['base_datos'],
-            'username' => $usuarioEscritura,
-            'codiInst' => $codiInst,
-            'password' => SihosCredentialCipher::decrypt($configFila['password_escritura_cifrado']),
-            'charset' => $configFila['charset'],
-        ]);
+        $repositorioEscritura = SihosRepositoryFactory::buildWrite($configFila, $codiInst, $usuarioEscritura);
 
         try {
             $filasBorradas = $repositorioEscritura->eliminarDetaPlan($codiDocu, $numeDocu);
@@ -173,15 +157,7 @@ class SihosPresupuestoEliminacionService
             ];
         }
 
-        $repositorioLectura = new SihosExternalRepository([
-            'host' => $configFila['host'],
-            'port' => (string)$configFila['puerto'],
-            'database' => $configFila['base_datos'],
-            'username' => $configFila['usuario'],
-            'codiInst' => $codiInst,
-            'password' => SihosCredentialCipher::decrypt($configFila['password_cifrado'] ?? null),
-            'charset' => $configFila['charset'],
-        ]);
+        $repositorioLectura = SihosRepositoryFactory::buildRead($configFila, $codiInst);
 
         try {
             $prefijosCartera = $repositorioLectura->resolvePrefijosCuentaCarteraPorTipoUsuario();
@@ -249,15 +225,7 @@ class SihosPresupuestoEliminacionService
             return ['ok' => false, 'message' => 'No se pudo verificar el cierre del período en SIHOS: ' . $e->getMessage()];
         }
 
-        $repositorioEscritura = new SihosExternalWriteRepository([
-            'host' => $configFila['host'],
-            'port' => (string)$configFila['puerto'],
-            'database' => $configFila['base_datos'],
-            'username' => $usuarioEscritura,
-            'codiInst' => $codiInst,
-            'password' => SihosCredentialCipher::decrypt($configFila['password_escritura_cifrado']),
-            'charset' => $configFila['charset'],
-        ]);
+        $repositorioEscritura = SihosRepositoryFactory::buildWrite($configFila, $codiInst, $usuarioEscritura);
 
         try {
             $filaAntes = $repositorioEscritura->eliminarPortionDetaPlan(
@@ -324,15 +292,7 @@ class SihosPresupuestoEliminacionService
             ];
         }
 
-        $repositorioLectura = new SihosExternalRepository([
-            'host' => $configFila['host'],
-            'port' => (string)$configFila['puerto'],
-            'database' => $configFila['base_datos'],
-            'username' => $configFila['usuario'],
-            'codiInst' => $codiInst,
-            'password' => SihosCredentialCipher::decrypt($configFila['password_cifrado'] ?? null),
-            'charset' => $configFila['charset'],
-        ]);
+        $repositorioLectura = SihosRepositoryFactory::buildRead($configFila, $codiInst);
 
         try {
             $estado = $repositorioLectura->fetchEstadoParaConstruirDetaPlan($codiDocu, $numeDocu);
@@ -387,15 +347,7 @@ class SihosPresupuestoEliminacionService
             return ['ok' => false, 'message' => 'No se pudo verificar el cierre del período en SIHOS: ' . $e->getMessage()];
         }
 
-        $repositorioEscritura = new SihosExternalWriteRepository([
-            'host' => $configFila['host'],
-            'port' => (string)$configFila['puerto'],
-            'database' => $configFila['base_datos'],
-            'username' => $usuarioEscritura,
-            'codiInst' => $codiInst,
-            'password' => SihosCredentialCipher::decrypt($configFila['password_escritura_cifrado']),
-            'charset' => $configFila['charset'],
-        ]);
+        $repositorioEscritura = SihosRepositoryFactory::buildWrite($configFila, $codiInst, $usuarioEscritura);
 
         $valor = (float)$estado['ValoTota'];
 

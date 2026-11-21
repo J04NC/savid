@@ -40,15 +40,7 @@ class SihosCancelacionCuentaService
             ];
         }
 
-        $repositorioLectura = new SihosExternalRepository([
-            'host' => $configFila['host'],
-            'port' => (string)$configFila['puerto'],
-            'database' => $configFila['base_datos'],
-            'username' => $configFila['usuario'],
-            'codiInst' => $codiInst,
-            'password' => SihosCredentialCipher::decrypt($configFila['password_cifrado'] ?? null),
-            'charset' => $configFila['charset'],
-        ]);
+        $repositorioLectura = SihosRepositoryFactory::buildRead($configFila, $codiInst);
 
         try {
             $estado = $repositorioLectura->fetchEstadoParaReversionCuentaInesperada($codiDocuFactura, $numeDocuFactura, $consDeta);
@@ -148,15 +140,7 @@ class SihosCancelacionCuentaService
             ];
         }
 
-        $repositorioEscritura = new SihosExternalWriteRepository([
-            'host' => $configFila['host'],
-            'port' => (string)$configFila['puerto'],
-            'database' => $configFila['base_datos'],
-            'username' => $usuarioEscritura,
-            'codiInst' => $codiInst,
-            'password' => SihosCredentialCipher::decrypt($configFila['password_escritura_cifrado']),
-            'charset' => $configFila['charset'],
-        ]);
+        $repositorioEscritura = SihosRepositoryFactory::buildWrite($configFila, $codiInst, $usuarioEscritura);
 
         try {
             $resultado = $repositorioEscritura->crearNotaCancelacionCuentaInesperada(
@@ -222,15 +206,7 @@ class SihosCancelacionCuentaService
             ];
         }
 
-        $repositorioLectura = new SihosExternalRepository([
-            'host' => $configFila['host'],
-            'port' => (string)$configFila['puerto'],
-            'database' => $configFila['base_datos'],
-            'username' => $configFila['usuario'],
-            'codiInst' => $codiInst,
-            'password' => SihosCredentialCipher::decrypt($configFila['password_cifrado'] ?? null),
-            'charset' => $configFila['charset'],
-        ]);
+        $repositorioLectura = SihosRepositoryFactory::buildRead($configFila, $codiInst);
 
         try {
             $cuentasInstitucion = $repositorioLectura->fetchCuentasInstitucion();
@@ -338,15 +314,7 @@ class SihosCancelacionCuentaService
             return ['ok' => false, 'message' => 'No se pudo verificar el cierre del período en SIHOS: ' . $e->getMessage()];
         }
 
-        $repositorioEscritura = new SihosExternalWriteRepository([
-            'host' => $configFila['host'],
-            'port' => (string)$configFila['puerto'],
-            'database' => $configFila['base_datos'],
-            'username' => $usuarioEscritura,
-            'codiInst' => $codiInst,
-            'password' => SihosCredentialCipher::decrypt($configFila['password_escritura_cifrado']),
-            'charset' => $configFila['charset'],
-        ]);
+        $repositorioEscritura = SihosRepositoryFactory::buildWrite($configFila, $codiInst, $usuarioEscritura);
 
         if (!$cerrado) {
             try {
@@ -479,15 +447,7 @@ class SihosCancelacionCuentaService
             ];
         }
 
-        $repositorioLectura = new SihosExternalRepository([
-            'host' => $configFila['host'],
-            'port' => (string)$configFila['puerto'],
-            'database' => $configFila['base_datos'],
-            'username' => $configFila['usuario'],
-            'codiInst' => $codiInst,
-            'password' => SihosCredentialCipher::decrypt($configFila['password_cifrado'] ?? null),
-            'charset' => $configFila['charset'],
-        ]);
+        $repositorioLectura = SihosRepositoryFactory::buildRead($configFila, $codiInst);
 
         try {
             $estado = $repositorioLectura->fetchEstadoParaReclasificacionVigenciaActual($codiDocuNota, $numeDocuNota);
@@ -563,15 +523,7 @@ class SihosCancelacionCuentaService
             return ['ok' => false, 'message' => 'No se pudo verificar el cierre del período en SIHOS: ' . $e->getMessage()];
         }
 
-        $repositorioEscritura = new SihosExternalWriteRepository([
-            'host' => $configFila['host'],
-            'port' => (string)$configFila['puerto'],
-            'database' => $configFila['base_datos'],
-            'username' => $usuarioEscritura,
-            'codiInst' => $codiInst,
-            'password' => SihosCredentialCipher::decrypt($configFila['password_escritura_cifrado']),
-            'charset' => $configFila['charset'],
-        ]);
+        $repositorioEscritura = SihosRepositoryFactory::buildWrite($configFila, $codiInst, $usuarioEscritura);
 
         if (!$cerrado) {
             try {
