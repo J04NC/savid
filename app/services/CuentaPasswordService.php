@@ -53,7 +53,7 @@ class CuentaPasswordService
             return ['success' => false, 'error' => $mensaje];
         }
 
-        $this->userRepository->updatePassword($usuarioId, password_hash($newPassword, PASSWORD_DEFAULT));
+        $this->userRepository->updatePassword($usuarioId, password_hash($newPassword, PASSWORD_ARGON2ID));
 
         $this->sendConfirmationEmail($user);
 

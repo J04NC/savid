@@ -1241,7 +1241,7 @@ class CrudService
                                 continue;
                             }
 
-                            $value = password_hash($value, PASSWORD_DEFAULT);
+                            $value = password_hash($value, PASSWORD_ARGON2ID);
 
                         } else {
 
@@ -1255,7 +1255,7 @@ class CrudService
 
                             } else {
 
-                                $value = password_hash($value, PASSWORD_DEFAULT);
+                                $value = password_hash($value, PASSWORD_ARGON2ID);
 
                             }
                         }

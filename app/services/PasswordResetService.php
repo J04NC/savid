@@ -120,7 +120,7 @@ class PasswordResetService
             return ['success' => false, 'error' => $mensaje];
         }
 
-        $this->userRepository->updatePassword((int)$row['usuario_id'], password_hash($newPassword, PASSWORD_DEFAULT));
+        $this->userRepository->updatePassword((int)$row['usuario_id'], password_hash($newPassword, PASSWORD_ARGON2ID));
         $this->resetRepository->markUsed((int)$row['id']);
         $this->resetRepository->invalidateAllForUser((int)$row['usuario_id']);
 
