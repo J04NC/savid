@@ -15,7 +15,7 @@ class SihosOrdenLiquidacionService
         'Estado', 'Fecha', 'Admisión', 'Orden', 'Ítem', 'Cód. administradora', 'Administradora',
         'CUPS', 'Procedimiento', 'Tipo servicio (CUPS)', 'Actividad',
         'Cant. ordenada', 'Cant. realizada', 'Cant. facturada', 'Fecha suspensión',
-        'Liquidación', 'Fecha liquidación', 'Cant. liquidada', 'Valor EAPB', 'Valor usuario', 'Valor total',
+        'Liquidación', 'Fecha liquidación', 'Cant. liquidada', 'Valor EAPB', 'Valor usuario', 'Valor total', 'Criterio de cruce',
     ];
 
     private SihosEmpresaConfigRepository $configRepository;
@@ -67,6 +67,13 @@ class SihosOrdenLiquidacionService
             unset($lineasMes);
             $ordenes = $repo->fetchOrdenesAdmisiones($admisiones);
             $lineas = [...$repo->fetchLineasAdmisiones($admisiones), ...$sinAdmision];
+            foreach ($ordenes as &$o) {
+                $o['Cups'] = $this->cups($procs, $o['CodiProc']);
+            }
+            foreach ($lineas as &$l) {
+                $l['Cups'] = $this->cups($procs, $l['CodiProc']);
+            }
+            unset($o, $l);
             $cruce = SihosOrdenLiquidacionCruce::cruzar($ordenes, $lineas);
 
             $emitir = function (string $estado, array $fila) use (&$res, $detalle, $filtroAct, $filtroEps, $progreso): void {
@@ -100,7 +107,7 @@ class SihosOrdenLiquidacionService
                     $c['estado'], $o['Fecha'], $o['ConsAdmi'], $o['ConsOrde'], $o['Item'], $codiAdmi, $nombAdmi,
                     $p['CodiCups'] ?? $o['CodiProc'], $p['NombProc'] ?? '', $clasif->nombreTipoServicio($tipo), $actividad,
                     $o['CantSumi'], $o['CantReal'], $o['CantFact'], $suspendida,
-                    ...self::columnasLinea($l),
+                    ...self::columnasLinea($l), $c['criterio'],
                 ]]);
             }
             foreach ($cruce['lineasSinOrden'] as $i) {
@@ -117,7 +124,7 @@ class SihosOrdenLiquidacionService
                     SihosOrdenLiquidacionCruce::SIN_ORDEN, '', $l['ConsAdmi'], '', '', $codiAdmi, $nombAdmi,
                     $p['CodiCups'] ?? $l['CodiProc'], $p['NombProc'] ?? '', $clasif->nombreTipoServicio($tipo), $actividad,
                     '', '', '', '',
-                    ...self::columnasLinea($l),
+                    ...self::columnasLinea($l), '',
                 ]]);
             }
         }
@@ -146,6 +153,14 @@ class SihosOrdenLiquidacionService
     private function conectar(array $cfg, string $codiInst): PDO
     {
         return SihosRepositoryFactory::buildRead($cfg, $codiInst)->connect();
+    }
+
+    /** CUPS del procedimiento (CodiProc.CodiCups); si no tiene, su propio código. */
+    private function cups(array $procs, string $codiProc): string
+    {
+        $cups = $procs[$codiProc]['CodiCups'] ?? '';
+
+        return $cups !== '' ? $cups : $codiProc;
     }
 
     private static function admisionValida(mixed $a): bool
