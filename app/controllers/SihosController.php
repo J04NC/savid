@@ -23,6 +23,7 @@ class SihosController
     private SihosLiquidacionJobService $liquidacionJobService;
     private SihosOrdenLiquidacionJobService $ordenesJobService;
     private SihosDocumentosContablesJobService $documentosContablesJobService;
+    private SihosAuxiliarJobService $auxiliarJobService;
     private SihosLiquidacionDetalleService $liquidacionDetalleService;
     private SihosLiquidacionCorreccionService $liquidacionCorreccionService;
     private SihosLiquidacionAnulacionService $liquidacionAnulacionService;
@@ -50,6 +51,7 @@ class SihosController
         $this->liquidacionJobService = new SihosLiquidacionJobService();
         $this->ordenesJobService = new SihosOrdenLiquidacionJobService();
         $this->documentosContablesJobService = new SihosDocumentosContablesJobService();
+        $this->auxiliarJobService = new SihosAuxiliarJobService();
         $this->liquidacionDetalleService = new SihosLiquidacionDetalleService($this->liquidacionJobService);
         $this->liquidacionCorreccionService = new SihosLiquidacionCorreccionService($this->liquidacionDetalleService);
         $this->liquidacionAnulacionService = new SihosLiquidacionAnulacionService($this->liquidacionDetalleService);
@@ -1992,6 +1994,96 @@ class SihosController
 
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment; filename="' . SihosDocumentosContablesJobService::nombreArchivo($estado['filtros']) . '"');
+        header('Content-Length: ' . filesize($ruta));
+        readfile($ruta);
+    }
+
+    /**
+     * GET ?url=sihos/auxiliar&empresa_id=N&contabilidad=&desde=&hasta=&<filtro>_modo=&<filtro>_valores=&<filtro>_hasta=&info=&diseno=&...
+     * Informe auxiliar (réplica de SIHOS): resumen por cuenta en pantalla y Excel completo.
+     * Se genera en segundo plano al presionar "Generar" (name="buscar").
+     */
+    public function auxiliar(): void
+    {
+        $scope = $this->connectionService->buildScope($_GET);
+        $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : null;
+        $configurado = $empresaId !== null && $this->connectionService->buildConfigView($empresaId)['configurado'];
+
+        $error = null;
+        $trabajo = null;
+        $reporte = null;
+        $catalogos = [];
+        $tokenJob = trim((string)($_GET['job'] ?? ''));
+        if ($empresaId !== null && $configurado) {
+            $userId = (int)($_SESSION['user_id'] ?? 0);
+            $catalogos = (new SihosAuxiliarService())->catalogos($empresaId);
+
+            if (isset($_GET['buscar'])) {
+                $inicio = $this->auxiliarJobService->iniciar($empresaId, $userId, $_GET);
+                if (!$inicio['ok']) {
+                    $error = $inicio['error'];
+                } else {
+                    $params = $_GET;
+                    unset($params['buscar']);
+                    $params['job'] = $inicio['token'];
+                    header('Location: ?' . http_build_query($params));
+
+                    return;
+                }
+            } elseif ($tokenJob !== '') {
+                $estado = $this->auxiliarJobService->estado($empresaId, $userId, $tokenJob);
+                if ($estado === null) {
+                    $error = 'El resultado de este reporte expiró o no existe. Vuelva a generarlo.';
+                } elseif ($estado['estado'] === 'error') {
+                    $error = $estado['error'] ?? 'No se pudo generar el reporte.';
+                } elseif ($estado['estado'] === 'listo') {
+                    $reporte = $this->auxiliarJobService->resultado($empresaId, $userId, $tokenJob);
+                    $error = $reporte === null ? 'El resultado de este reporte expiró o no existe. Vuelva a generarlo.' : null;
+                } else {
+                    $trabajo = ['token' => $tokenJob] + $estado;
+                }
+            }
+        }
+        $form = $_GET;
+
+        $breadcrumb = (new ModuleService())->buildBreadcrumbForRuta('sihos/auxiliar');
+
+        $view = BASE_PATH . '/app/views/sihos/auxiliar.php';
+        require BASE_PATH . '/app/views/layouts/main.php';
+    }
+
+    /** Avance de la generación en segundo plano de auxiliar (la pantalla lo consulta cada pocos segundos). */
+    public function auxiliarEstado(): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+
+        $scope = $this->connectionService->buildScope($_GET);
+        $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : null;
+        $estado = $empresaId === null ? null : $this->auxiliarJobService->estado($empresaId, (int)($_SESSION['user_id'] ?? 0), trim((string)($_GET['job'] ?? '')));
+        if ($estado !== null) {
+            unset($estado['filtros']);
+        }
+
+        echo json_encode($estado ?? ['estado' => 'inexistente'], JSON_UNESCAPED_UNICODE);
+    }
+
+    /** Descarga del .xlsx de un trabajo terminado de auxiliar. */
+    public function auxiliarDescargar(): void
+    {
+        $scope = $this->connectionService->buildScope($_GET);
+        $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : null;
+        $userId = (int)($_SESSION['user_id'] ?? 0);
+        $token = trim((string)($_GET['job'] ?? ''));
+
+        $estado = $empresaId === null ? null : $this->auxiliarJobService->estado($empresaId, $userId, $token);
+        $ruta = $estado === null ? null : $this->auxiliarJobService->rutaArchivo($empresaId, $userId, $token);
+        if ($ruta === null || !is_file($ruta)) {
+            http_response_code(410);
+            exit('El resultado de este reporte expiró o no existe. Vuelva a generarlo.');
+        }
+
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="' . SihosAuxiliarJobService::nombreArchivo($estado['filtros']) . '"');
         header('Content-Length: ' . filesize($ruta));
         readfile($ruta);
     }

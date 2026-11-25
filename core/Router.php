@@ -269,6 +269,9 @@ class Router
         /* Misma razón: sihos/documentosContablesEstado (avance JSON) y sihos/documentosContablesDescargar (.xlsx) — su pantalla es sihos/documentosContables. */
         $sihosDocumentosContablesAccionMethods = ['documentosContablesEstado', 'documentosContablesDescargar'];
 
+        /* Misma razón: sihos/auxiliarEstado (avance JSON) y sihos/auxiliarDescargar (.xlsx) — su pantalla es sihos/auxiliar. */
+        $sihosAuxiliarAccionMethods = ['auxiliarEstado', 'auxiliarDescargar'];
+
         /*
          * Misma razón: sihos/auditoriaGlosaBuscarAdministradora (autocompletado
          * AJAX del filtro de administradora) no tiene ítem de menú propio — su
@@ -389,6 +392,9 @@ class Router
             && !($controllerName === 'SihosController'
                 && in_array($method, $sihosDocumentosContablesAccionMethods, true)
                 && PermisoService::can('sihos/documentosContables', 'ver'))
+            && !($controllerName === 'SihosController'
+                && in_array($method, $sihosAuxiliarAccionMethods, true)
+                && PermisoService::can('sihos/auxiliar', 'ver'))
             && !($controllerName === 'SihosController'
                 && in_array($method, $sihosAuditoriaGlosaAccionMethods, true)
                 && PermisoService::can('sihos/auditoriaGlosa', 'ver'))
