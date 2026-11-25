@@ -3,7 +3,7 @@
         'name' => 'savid/sgd',
         'pretty_version' => 'dev-main',
         'version' => 'dev-main',
-        'reference' => 'a6e2e3ffeef38384811bac2c17a07d0645afb291',
+        'reference' => 'b200b663c80ce503344fa3774bd3e482e67288da',
         'type' => 'library',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
@@ -109,6 +109,15 @@
             'aliases' => array(),
             'dev_requirement' => false,
         ),
+        'openspout/openspout' => array(
+            'pretty_version' => 'v4.28.5',
+            'version' => '4.28.5.0',
+            'reference' => 'ab05a09fe6fce57c90338f83280648a9786ce36b',
+            'type' => 'library',
+            'install_path' => __DIR__ . '/../openspout/openspout',
+            'aliases' => array(),
+            'dev_requirement' => false,
+        ),
         'phpmailer/phpmailer' => array(
             'pretty_version' => 'v6.12.0',
             'version' => '6.12.0.0',
@@ -211,7 +220,7 @@
         'savid/sgd' => array(
             'pretty_version' => 'dev-main',
             'version' => 'dev-main',
-            'reference' => 'a6e2e3ffeef38384811bac2c17a07d0645afb291',
+            'reference' => 'b200b663c80ce503344fa3774bd3e482e67288da',
             'type' => 'library',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),

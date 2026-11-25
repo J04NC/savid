@@ -18,6 +18,7 @@ return array(
     'PhpOffice\\WMF\\' => array($vendorDir . '/phpoffice/wmf/src/WMF'),
     'PhpOffice\\PhpSpreadsheet\\' => array($vendorDir . '/phpoffice/phpspreadsheet/src/PhpSpreadsheet'),
     'PHPMailer\\PHPMailer\\' => array($vendorDir . '/phpmailer/phpmailer/src'),
+    'OpenSpout\\' => array($vendorDir . '/openspout/openspout/src'),
     'Matrix\\' => array($vendorDir . '/markbaker/matrix/classes/src'),
     'Masterminds\\' => array($vendorDir . '/masterminds/html5/src'),
     'GuzzleHttp\\Psr7\\' => array($vendorDir . '/guzzlehttp/psr7/src'),
