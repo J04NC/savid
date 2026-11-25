@@ -136,7 +136,7 @@ class SihosAuxiliarService
         ];
     }
 
-    /** @return array<string,string> catálogos para las listas de ayuda del formulario (vacío si no hay conexión) */
+    /** @return array<string,mixed> catálogos para las listas de ayuda del formulario (vacío si no hay conexión) */
     public function catalogos(int $empresaId): array
     {
         $pdo = $this->conectar($empresaId, $codiInst);
@@ -147,7 +147,7 @@ class SihosAuxiliarService
         $docs = array_map(static fn (array $d): string => $d['nombre'], $cat->documentos());
         ksort($docs);
 
-        return ['sede' => $cat->sedes(), 'centro' => $cat->centrosCosto(), 'recurso' => $cat->recursos(), 'documento' => $docs];
+        return ['sede' => $cat->sedes(), 'centro' => $cat->centrosCosto(), 'recurso' => $cat->recursos(), 'documento' => $docs, 'sedePrincipal' => $cat->sedePrincipal()];
     }
 
     /**

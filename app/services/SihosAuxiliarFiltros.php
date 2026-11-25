@@ -61,7 +61,7 @@ class SihosAuxiliarFiltros
             $crudo = $e[$clave] ?? null;
             [$modo, $valores] = is_array($crudo)
                 ? [(string)($crudo['modo'] ?? 'todos'), (array)($crudo['valores'] ?? [])]
-                : [trim((string)($e[$clave . '_modo'] ?? 'todos')), self::partir((string)($e[$clave . '_valores'] ?? ''), (string)($e[$clave . '_hasta'] ?? ''))];
+                : [trim((string)($e[$clave . '_modo'] ?? 'todos')), self::partir((string)($e[$clave . '_valores'] ?? ''), trim((string)($e[$clave . '_modo'] ?? '')) === 'entre' ? (string)($e[$clave . '_hasta'] ?? '') : '')];
             if (!in_array($modo, $modos, true)) {
                 return ['ok' => false, 'error' => "Condición no válida en el filtro $etiqueta."];
             }
