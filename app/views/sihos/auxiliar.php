@@ -35,7 +35,7 @@ $listas = ['sede', 'centro', 'recurso', 'documento'];
         <p class="modal-form-alert">⚠️ Esta empresa no tiene conexión a SIHOS configurada. Ve a <a href="?url=sihos&empresa_id=<?= (int)$empresaId ?>">Conexión SIHOS</a>.</p>
     <?php else: ?>
 
-        <form method="get" id="sihosAuxForm" class="crud-form" style="margin-bottom:20px;">
+        <form method="get" id="sihosAuxForm" class="sihos-aux-form">
             <input type="hidden" name="url" value="sihos/auxiliar">
             <input type="hidden" name="empresa_id" value="<?= (int)$empresaId ?>">
 
@@ -119,9 +119,16 @@ $listas = ['sede', 'centro', 'recurso', 'documento'];
 </div>
 
 <style nonce="<?= CspNonceService::value() ?>">
-.sihos-aux-grupo{border:1px solid #d6dbe4;border-radius:6px;padding:8px 12px;margin:0 0 10px;display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center}
+/* Formulario en bloque (no .crud-form, que lo vuelve grilla de columnas y monta un recuadro sobre otro). */
+.sihos-aux-form{display:block;max-width:1100px;margin-bottom:20px}
+/* min-width:0: un fieldset por defecto no se encoge por debajo de su contenido y se desborda sobre el vecino. */
+.sihos-aux-grupo{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;width:100%;min-width:0;box-sizing:border-box;border:1px solid #d6dbe4;border-radius:6px;padding:8px 12px;margin:0 0 12px}
 .sihos-aux-grupo legend{font-weight:600;padding:0 4px}
-.sihos-aux-filtro{display:grid;grid-template-columns:200px 140px minmax(160px,1fr) 140px;gap:6px;align-items:center;width:100%}
+.sihos-aux-grupo label{display:inline-flex;align-items:center;gap:6px;margin:0}
+.sihos-aux-grupo input[type=date]{width:auto}
+.sihos-aux-filtro{display:grid;grid-template-columns:minmax(140px,220px) 150px minmax(160px,1fr) minmax(120px,180px);gap:6px 10px;align-items:center;width:100%;min-width:0}
+.sihos-aux-filtro > *{min-width:0}
+.sihos-aux-filtro label{display:block}
 .sihos-aux-sep{margin-left:12px;font-weight:600}
 @media (max-width:720px){.sihos-aux-filtro{grid-template-columns:1fr 1fr}}
 </style>
