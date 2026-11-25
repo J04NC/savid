@@ -25,8 +25,6 @@ class SihosDocumentosContablesService
 
     /** Filas de datos por hoja: Excel admite 1.048.576 contando el encabezado. */
     private const FILAS_POR_HOJA = 1048575;
-    /** Límite de caracteres de una celda de Excel. */
-    private const MAX_CELDA = 32767;
 
     private SihosEmpresaConfigRepository $configRepository;
 
@@ -158,12 +156,12 @@ class SihosDocumentosContablesService
                     $writer->addRow(Row::fromValuesWithStyles([
                         $fecha ?: '',
                         $codiDocu,
-                        self::texto($documentos[$codiDocu] ?? ''),
+                        SihosExcelTexto::limpiar($documentos[$codiDocu] ?? ''),
                         (int)$f['NumeDocu'],
-                        self::texto((string)$f['Concepto']),
+                        SihosExcelTexto::limpiar((string)$f['Concepto']),
                         (string)$f['Cuenta'],
                         (float)$f['Valor'],
-                        self::texto($usuarios[$login] ?? $login),
+                        SihosExcelTexto::limpiar($usuarios[$login] ?? $login),
                     ], null, $estilos));
                     $enHoja++;
                     $escritas++;
@@ -177,20 +175,5 @@ class SihosDocumentosContablesService
         }
 
         return ['ok' => true, 'lineas' => $lineas, 'hojas' => $hojas];
-    }
-
-    /**
-     * Texto apto para una celda: UTF-8 válido, sin saltos de línea ni
-     * caracteres de control (rompían el CSV y XML no los admite), en una sola
-     * línea y dentro del límite de Excel.
-     */
-    private static function texto(string $s): string
-    {
-        if (!mb_check_encoding($s, 'UTF-8')) {
-            $s = mb_convert_encoding($s, 'UTF-8', 'Windows-1252');
-        }
-        $s = trim(preg_replace('/[\x00-\x20\x7F]+/u', ' ', $s) ?? '');
-
-        return mb_strlen($s) > self::MAX_CELDA ? mb_substr($s, 0, self::MAX_CELDA) : $s;
     }
 }
