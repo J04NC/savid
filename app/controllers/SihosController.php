@@ -22,6 +22,7 @@ class SihosController
     private SihosCartera2193JobService $cartera2193JobService;
     private SihosLiquidacionJobService $liquidacionJobService;
     private SihosOrdenLiquidacionJobService $ordenesJobService;
+    private SihosDocumentosContablesJobService $documentosContablesJobService;
     private SihosLiquidacionDetalleService $liquidacionDetalleService;
     private SihosLiquidacionCorreccionService $liquidacionCorreccionService;
     private SihosLiquidacionAnulacionService $liquidacionAnulacionService;
@@ -48,6 +49,7 @@ class SihosController
         $this->cartera2193JobService = new SihosCartera2193JobService();
         $this->liquidacionJobService = new SihosLiquidacionJobService();
         $this->ordenesJobService = new SihosOrdenLiquidacionJobService();
+        $this->documentosContablesJobService = new SihosDocumentosContablesJobService();
         $this->liquidacionDetalleService = new SihosLiquidacionDetalleService($this->liquidacionJobService);
         $this->liquidacionCorreccionService = new SihosLiquidacionCorreccionService($this->liquidacionDetalleService);
         $this->liquidacionAnulacionService = new SihosLiquidacionAnulacionService($this->liquidacionDetalleService);
@@ -1896,6 +1898,100 @@ class SihosController
 
         header('Content-Type: text/csv; charset=utf-8');
         header('Content-Disposition: attachment; filename="ordenes_vs_liquidacion_' . $estado['desde'] . '_' . $estado['hasta'] . '.csv"');
+        header('Content-Length: ' . filesize($ruta));
+        readfile($ruta);
+    }
+
+    /**
+     * GET ?url=sihos/documentosContables&empresa_id=N&contabilidad=colgaap|niif&desde=&hasta=&modo_cuenta=&cuenta=&cuenta_hasta=
+     * Documentos contables del rango (sumados por documento y cuenta) en Excel. Se genera en
+     * segundo plano al presionar "Generar" (name="buscar"); al terminar se ofrece la descarga.
+     */
+    public function documentosContables(): void
+    {
+        $scope = $this->connectionService->buildScope($_GET);
+        $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : null;
+        $configurado = $empresaId !== null && $this->connectionService->buildConfigView($empresaId)['configurado'];
+
+        $filtros = [
+            'contabilidad' => trim((string)($_GET['contabilidad'] ?? '')),
+            'desde' => trim((string)($_GET['desde'] ?? '')),
+            'hasta' => trim((string)($_GET['hasta'] ?? '')),
+            'modo_cuenta' => trim((string)($_GET['modo_cuenta'] ?? 'todas')),
+            'cuenta' => trim((string)($_GET['cuenta'] ?? '')),
+            'cuenta_hasta' => trim((string)($_GET['cuenta_hasta'] ?? '')),
+        ];
+        $error = null;
+        $trabajo = null;
+        $listo = null;
+        $tokenJob = trim((string)($_GET['job'] ?? ''));
+        if ($empresaId !== null && $configurado) {
+            $userId = (int)($_SESSION['user_id'] ?? 0);
+
+            if (isset($_GET['buscar'])) {
+                $inicio = $this->documentosContablesJobService->iniciar($empresaId, $userId, $filtros);
+                if (!$inicio['ok']) {
+                    $error = $inicio['error'];
+                } else {
+                    $params = $_GET;
+                    unset($params['buscar']);
+                    $params['job'] = $inicio['token'];
+                    header('Location: ?' . http_build_query($params));
+
+                    return;
+                }
+            } elseif ($tokenJob !== '') {
+                $estado = $this->documentosContablesJobService->estado($empresaId, $userId, $tokenJob);
+                if ($estado === null) {
+                    $error = 'El resultado de este reporte expiró o no existe. Vuelva a generarlo.';
+                } elseif ($estado['estado'] === 'error') {
+                    $error = $estado['error'] ?? 'No se pudo generar el reporte.';
+                } elseif ($estado['estado'] === 'listo') {
+                    $listo = $estado;
+                } else {
+                    $trabajo = ['token' => $tokenJob] + $estado;
+                }
+            }
+        }
+
+        $breadcrumb = (new ModuleService())->buildBreadcrumbForRuta('sihos/documentosContables');
+
+        $view = BASE_PATH . '/app/views/sihos/documentos-contables.php';
+        require BASE_PATH . '/app/views/layouts/main.php';
+    }
+
+    /** Avance de la generación en segundo plano de documentosContables (la pantalla lo consulta cada pocos segundos). */
+    public function documentosContablesEstado(): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+
+        $scope = $this->connectionService->buildScope($_GET);
+        $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : null;
+        $estado = $empresaId === null ? null : $this->documentosContablesJobService->estado($empresaId, (int)($_SESSION['user_id'] ?? 0), trim((string)($_GET['job'] ?? '')));
+        if ($estado !== null) {
+            unset($estado['filtros']);
+        }
+
+        echo json_encode($estado ?? ['estado' => 'inexistente'], JSON_UNESCAPED_UNICODE);
+    }
+
+    /** Descarga del .xlsx de un trabajo terminado de documentosContables. */
+    public function documentosContablesDescargar(): void
+    {
+        $scope = $this->connectionService->buildScope($_GET);
+        $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : null;
+        $userId = (int)($_SESSION['user_id'] ?? 0);
+        $token = trim((string)($_GET['job'] ?? ''));
+
+        $estado = $empresaId === null ? null : $this->documentosContablesJobService->estado($empresaId, $userId, $token);
+        $ruta = $estado === null ? null : $this->documentosContablesJobService->rutaArchivo($empresaId, $userId, $token);
+        if ($ruta === null || !is_file($ruta)) {
+            http_response_code(410);
+            exit('El resultado de este reporte expiró o no existe. Vuelva a generarlo.');
+        }
+
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="' . SihosDocumentosContablesJobService::nombreArchivo($estado['filtros']) . '"');
         header('Content-Length: ' . filesize($ruta));
         readfile($ruta);
     }
