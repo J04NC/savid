@@ -56,6 +56,16 @@ class SihosAuxiliarCatalogoRepository
         return $this->pares("SELECT CodiCent, ConfSede FROM CodiInst WHERE CodiCent <> '' ORDER BY CodiCent");
     }
 
+    /** @return array{nombre:string,nit:string} nombre y NIT de la institución para el encabezado (como headreport.php de SIHOS) */
+    public function institucion(): array
+    {
+        $stmt = $this->pdo->prepare('SELECT NombInst, NitInsti FROM CodiInst WHERE CodiInst = ?');
+        $stmt->execute([$this->codiInst]);
+        $f = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        return ['nombre' => trim((string)($f['NombInst'] ?? '')), 'nit' => trim((string)($f['NitInsti'] ?? ''))];
+    }
+
     /** Sede (CodiCent) de la institución configurada: SIHOS la deja preseleccionada en el filtro de Sede. */
     public function sedePrincipal(): string
     {

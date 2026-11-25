@@ -87,7 +87,7 @@ $listas = ['sede', 'centro', 'recurso', 'documento'];
                 <a class="auditoria-btn-secondary" href="?url=sihos/auxiliar&empresa_id=<?= (int)$empresaId ?>">Restablecer</a>
             </div>
         </form>
-        <p class="auditoria-hint">Igual/Diferente admiten varios códigos separados por coma. «Entre» de cuenta incluye las subcuentas del código final (entre 5 y 8 = clases 5, 6, 7 y 8). El saldo anterior es el total de la cuenta (no aplica los demás filtros), como en SIHOS, e incluye los movimientos del 1 del mes hasta el día anterior a la fecha inicial. «Resumen» y «Saldo x cuenta» muestran solo totales por cuenta; «Solo terceros» (vertical) omite el detalle de documentos.</p>
+        <p class="auditoria-hint">Igual/Diferente admiten varios códigos separados por coma. «Entre» de cuenta incluye las subcuentas del código final (entre 5 y 8 = clases 5, 6, 7 y 8). El saldo anterior es el total de la cuenta (no aplica los demás filtros), como en SIHOS, e incluye los movimientos del 1 del mes hasta el día anterior a la fecha inicial. «Resumen» muestra solo totales por cuenta; «Saldo x cuenta» resume solo en ColGAAP (en NIIF, igual que SIHOS, no cambia el informe); «Solo terceros» (vertical) omite el detalle de documentos.</p>
 
         <?php if ($trabajo !== null): ?>
             <div class="field-note" style="margin:16px 0;">⏳ <?= $h($trabajo['fase']) ?>… Esta página se actualiza sola al terminar.</div>

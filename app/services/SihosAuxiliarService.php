@@ -47,7 +47,9 @@ class SihosAuxiliarService
 
         $avisar('Calculando débitos y créditos');
         $cuentas = $this->agrupar($movs->agregarMovimientos($f, $terceroEncabezado));
-        $nivel = ($f['info'] === 'resumen' || $f['saldo_cuenta']) ? 'cuenta' : ($f['solo_terceros'] ? 'tercero' : 'detalle');
+        // Como SIHOS: "Saldo x cuenta" solo resume en ColGAAP; en NIIF SIHOS lo ignora y saca el detalle.
+        $saldoCuenta = $f['saldo_cuenta'] && $f['contabilidad'] === 'colgaap';
+        $nivel = ($f['info'] === 'resumen' || $saldoCuenta) ? 'cuenta' : ($f['solo_terceros'] ? 'tercero' : 'detalle');
         $conTerceros = $f['diseno'] === 'vertical' && $nivel !== 'cuenta';
 
         $saldos = ['cuentas' => [], 'terceros' => []];
@@ -65,11 +67,12 @@ class SihosAuxiliarService
         ] : [];
 
         $nombreContab = SihosAuxiliarFiltros::CONTABILIDADES[$f['contabilidad']];
-        $fmt = static fn (string $d): string => (new DateTimeImmutable($d))->format('d/m/Y');
-        $excel = new SihosAuxiliarExcel(
-            $rutaXlsx, $f, 'INFORME AUXILIAR — ' . $nombreContab,
-            'Desde ' . $fmt($f['desde']) . ' hasta ' . $fmt($f['hasta']) . ' · ' . SihosAuxiliarFiltros::describir($f)
-        );
+        $inst = $cat->institucion();
+        $excel = new SihosAuxiliarExcel($rutaXlsx, $f, [
+            SihosExcelTexto::limpiar($inst['nombre']), 'NIT: ' . $inst['nit'], 'INFORME AUXILIAR',
+            'Desde: ' . self::fechaLarga($f['desde']) . ' - Hasta: ' . self::fechaLarga($f['hasta']),
+            $nombreContab . ' · ' . SihosAuxiliarFiltros::describir($f),
+        ]);
 
         $resumen = [];
         $tot = [0.0, 0.0, 0.0, 0.0];
@@ -79,7 +82,7 @@ class SihosAuxiliarService
             $cr = $cuentas[$c]['cr'];
             $salNue = $salAnt + $db - $cr;
             $excel->cuenta($c, $nombresCuenta[$c] ?? '', $salAnt, $db, $cr, $salNue);
-            $resumen[] = [$c, $nombresCuenta[$c] ?? '', $salAnt, round($db, 2), round($cr, 2), round($salNue, 2)];
+            $resumen[] = [$c, SihosExcelTexto::limpiar($nombresCuenta[$c] ?? ''), $salAnt, round($db, 2), round($cr, 2), round($salNue, 2)];
             $tot = [$tot[0] + $salAnt, $tot[1] + $db, $tot[2] + $cr, $tot[3] + $salNue];
         };
         $escribirTercero = function (string $c, string $tiDo, string $nuDo) use ($cuentas, $saldos, $terceros, $f, $excel): void {
@@ -184,7 +187,16 @@ class SihosAuxiliarService
         return array_map('strval', array_keys($n));
     }
 
-    private function conectar(int $empresaId, ?string &$codiInst): ?PDO
+    /** "25/Noviembre/2026", como el rango del encabezado de SIHOS. */
+    private static function fechaLarga(string $fecha): string
+    {
+        $meses = ['', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+        [$a, $m, $d] = explode('-', $fecha);
+
+        return $d . '/' . $meses[(int)$m] . '/' . $a;
+    }
+
+        private function conectar(int $empresaId, ?string &$codiInst): ?PDO
     {
         $cfg = $this->configRepository->findByEmpresaId($empresaId);
         $codiInst = trim((string)($cfg['codi_inst'] ?? ''));
