@@ -2067,6 +2067,33 @@ class SihosController
         echo json_encode($estado ?? ['estado' => 'inexistente'], JSON_UNESCAPED_UNICODE);
     }
 
+    /** JSON server-side (DataTables) de la tabla en pantalla de auxiliar (solo diseño horizontal). */
+    public function auxiliarDatos(): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+        $draw = (int)($_GET['draw'] ?? 0);
+
+        $scope = $this->connectionService->buildScope($_GET);
+        $empresaId = $scope['empresaId'] !== null ? (int)$scope['empresaId'] : null;
+        $ruta = $empresaId === null ? null : $this->auxiliarJobService->rutaFilas($empresaId, (int)($_SESSION['user_id'] ?? 0), trim((string)($_GET['job'] ?? '')));
+        if ($ruta === null) {
+            echo json_encode(['draw' => $draw, 'recordsTotal' => 0, 'recordsFiltered' => 0, 'data' => [], 'error' => 'El resultado de este reporte expiró o no existe. Vuelva a generarlo.'], JSON_UNESCAPED_UNICODE);
+
+            return;
+        }
+        $porColumna = [];
+        foreach ((array)($_GET['columns'] ?? []) as $idx => $col) {
+            $porColumna[(int)$idx] = (string)($col['search']['value'] ?? '');
+        }
+        $length = (int)($_GET['length'] ?? 50);
+        $pagina = SihosAuxiliarTabla::pagina(
+            $ruta, max(0, (int)($_GET['start'] ?? 0)), $length <= 0 || $length > 1000 ? 50 : $length,
+            (string)($_GET['search']['value'] ?? ''), $porColumna
+        );
+
+        echo json_encode(['draw' => $draw] + $pagina, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+    }
+
     /** Descarga del .xlsx de un trabajo terminado de auxiliar. */
     public function auxiliarDescargar(): void
     {

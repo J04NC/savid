@@ -269,8 +269,8 @@ class Router
         /* Misma razón: sihos/documentosContablesEstado (avance JSON) y sihos/documentosContablesDescargar (.xlsx) — su pantalla es sihos/documentosContables. */
         $sihosDocumentosContablesAccionMethods = ['documentosContablesEstado', 'documentosContablesDescargar'];
 
-        /* Misma razón: sihos/auxiliarEstado (avance JSON) y sihos/auxiliarDescargar (.xlsx) — su pantalla es sihos/auxiliar. */
-        $sihosAuxiliarAccionMethods = ['auxiliarEstado', 'auxiliarDescargar'];
+        /* Misma razón: sihos/auxiliarEstado (avance JSON), sihos/auxiliarDatos (tabla JSON server-side) y sihos/auxiliarDescargar (.xlsx) — su pantalla es sihos/auxiliar. */
+        $sihosAuxiliarAccionMethods = ['auxiliarEstado', 'auxiliarDescargar', 'auxiliarDatos'];
 
         /*
          * Misma razón: sihos/auditoriaGlosaBuscarAdministradora (autocompletado
