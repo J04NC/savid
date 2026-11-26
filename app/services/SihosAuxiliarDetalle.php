@@ -4,10 +4,10 @@
  * Filas de detalle del reporte SIHOS "Auxiliar", con el mismo contenido y
  * textos que imprauxiliar.php de SIHOS: en vertical, fecha + descripción en
  * varias líneas (documento, "C.Costo:", "Doc.Ref:", "Chequ No:", "Doc.Ext.:",
- * "Concepto:" recortado a 50 caracteres y, en documentos de nómina,
- * "Empleado:"); en horizontal, cada dato en su columna (nombre del tercero
- * recortado a 30 y concepto a 50, como SIHOS). Los nombres llegan precargados
- * en $ctx (sin consultas por fila).
+ * "Concepto:" y, en documentos de nómina, "Empleado:"); en horizontal, cada
+ * dato en su columna. A diferencia de SIHOS, concepto y nombre del tercero van
+ * completos (pedido del usuario); la pantalla los corta con "…". Los nombres
+ * llegan precargados en $ctx (sin consultas por fila).
  */
 class SihosAuxiliarDetalle
 {
@@ -48,7 +48,7 @@ class SihosAuxiliarDetalle
         if (($doc[$exte]['nombre'] ?? '') !== '') {
             $lineas[] = 'Doc.Ext.: ' . $doc[$exte]['nombre'] . ' No. ' . trim((string)$d['NumeExte']);
         }
-        $lineas[] = 'Concepto: ' . SihosExcelTexto::recorteSihos(SihosExcelTexto::limpiar((string)$d['Concepto']), 50);
+        $lineas[] = 'Concepto: ' . SihosExcelTexto::limpiar((string)$d['Concepto']);
         $tipo = trim((string)$d['TipoDocu']);
         $nume = trim((string)$d['NumePers']);
         if ($tipo !== '' && $nume !== '' && in_array($doc[$codiDocu]['docuApli'] ?? 0, self::DOCU_APLI_NOMINA, true)) {
@@ -69,11 +69,11 @@ class SihosAuxiliarDetalle
 
         return [
             $cuenta, SihosExcelTexto::limpiar($nombreCuenta), trim((string)$d['CodiDocu']), (int)$d['NumeDocu'], self::fecha($fecha),
-            $nuDo !== '' ? $tiDo . ' - ' . $nuDo : '', SihosExcelTexto::recorteSihos($nombreTercero, 30),
+            $nuDo !== '' ? $tiDo . ' - ' . $nuDo : '', $nombreTercero,
             $cc !== '' ? $cc . ' - ' . SihosExcelTexto::limpiar($ctx['centros'][$cc] ?? '') : '',
             trim((string)$d['TiDoRefe']), $d['NuDoRefe'] !== null && (string)$d['NuDoRefe'] !== '' ? (int)$d['NuDoRefe'] : '',
             $exte !== '' || $numeExte !== '' ? $exte . ' - ' . $numeExte : '', SihosExcelTexto::limpiar((string)$d['NumeCheq']),
-            SihosExcelTexto::recorteSihos(SihosExcelTexto::limpiar((string)$d['Concepto']), 50),
+            SihosExcelTexto::limpiar((string)$d['Concepto']),
         ];
     }
 

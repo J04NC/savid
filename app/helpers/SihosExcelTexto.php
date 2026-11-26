@@ -42,10 +42,4 @@ class SihosExcelTexto
     {
         return mb_strlen($s) > self::MAX_CELDA ? mb_substr($s, 0, self::MAX_CELDA) : $s;
     }
-
-    /** Recorte de SIHOS (Recorte($texto, $n, 1)): primeros $n caracteres + "..." si es más largo. */
-    public static function recorteSihos(string $s, int $n): string
-    {
-        return mb_strlen($s) > $n ? mb_substr($s, 0, $n) . '...' : $s;
-    }
 }
