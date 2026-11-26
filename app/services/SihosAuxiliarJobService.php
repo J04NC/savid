@@ -31,7 +31,7 @@ class SihosAuxiliarJobService
             return ['ok' => false, 'error' => $v['error']];
         }
 
-        $this->store->purgarExpirados($empresaId, ['_resultado.json', '_libro.xlsx']);
+        $this->store->purgarExpirados($empresaId, ['_resultado.json', '_libro.xlsx', '_filas.jsonl.gz']);
 
         $token = bin2hex(random_bytes(16));
         $this->store->guardarEstado($empresaId, $token, [
@@ -55,6 +55,7 @@ class SihosAuxiliarJobService
         $this->store->guardarEstado($empresaId, $token, $estado);
 
         $tmp = tempnam(sys_get_temp_dir(), 'aux');
+        $tmpFilas = tempnam(sys_get_temp_dir(), 'auf');
         try {
             $ultimo = 0;
             $reporte = (new SihosAuxiliarService())->generar(
@@ -68,7 +69,8 @@ class SihosAuxiliarJobService
                         $estado['actualizado'] = $ultimo;
                         $this->store->guardarEstado($empresaId, $token, $estado);
                     }
-                }
+                },
+                $tmpFilas
             );
             if (!$reporte['ok']) {
                 $this->store->terminar($empresaId, $token, $estado, 'error', (string)$reporte['error']);
@@ -78,6 +80,10 @@ class SihosAuxiliarJobService
             if ($this->store->storage()->putLocalFile(StorageService::ZONE_SIHOS_REPORTES, self::PREFIJO . '_' . $token . '_libro.xlsx', $tmp, true, $empresaId) === null) {
                 throw new RuntimeException('No se pudo guardar el archivo Excel.');
             }
+            if ($reporte['diseno'] === 'horizontal'
+                && $this->store->storage()->putLocalFile(StorageService::ZONE_SIHOS_REPORTES, self::PREFIJO . '_' . $token . '_filas.jsonl.gz', $tmpFilas, true, $empresaId) === null) {
+                throw new RuntimeException('No se pudo guardar la tabla del reporte.');
+            }
             $this->store->storage()->putContents($this->store->key($empresaId, $token, 'resultado'), json_encode($reporte, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE) ?: '{}');
             $estado['lineas'] = (int)$reporte['lineas'];
             $this->store->terminar($empresaId, $token, $estado, 'listo');
@@ -86,6 +92,7 @@ class SihosAuxiliarJobService
             $this->store->terminar($empresaId, $token, $estado, 'error', 'No se pudo generar el reporte. Intente de nuevo.');
         } finally {
             @unlink($tmp);
+            @unlink($tmpFilas);
         }
     }
 
@@ -136,6 +143,18 @@ class SihosAuxiliarJobService
         }
 
         return $this->store->storage()->localPath($this->store->key($empresaId, $this->store->tokenSeguro($token), 'libro', 'xlsx'));
+    }
+
+    /** Ruta local de las filas de la tabla en pantalla (solo diseño horizontal) si el trabajo es del usuario y terminó. */
+    public function rutaFilas(int $empresaId, int $userId, string $token): ?string
+    {
+        $estado = $this->estado($empresaId, $userId, $token);
+        if ($estado === null || $estado['estado'] !== 'listo') {
+            return null;
+        }
+        $ruta = $this->store->storage()->localPath($this->store->key($empresaId, $this->store->tokenSeguro($token), 'filas', 'jsonl.gz'));
+
+        return $ruta !== null && is_file($ruta) ? $ruta : null;
     }
 
     /** p. ej. auxiliar_niif_2026-01-01_2026-09-30.xlsx */

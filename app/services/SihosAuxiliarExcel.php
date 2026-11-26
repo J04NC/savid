@@ -36,13 +36,17 @@ class SihosAuxiliarExcel
     /** @var array<string,?Style> estilo de fila para cada tipo */
     private array $estiloFila = [];
     private Style $negrita;
+    /** @var (callable(string,list<mixed>):void)|null recibe cada fila de cuenta/detalle (copia para la tabla en pantalla) */
+    private $alEscribir;
 
     /**
      * @param array<string,mixed> $f filtros validados
      * @param list<string> $titulos líneas del encabezado (institución, NIT, título, rango…)
+     * @param (callable(string,list<mixed>):void)|null $alEscribir
      */
-    public function __construct(string $ruta, array $f, array $titulos)
+    public function __construct(string $ruta, array $f, array $titulos, ?callable $alEscribir = null)
     {
+        $this->alEscribir = $alEscribir;
         $this->vertical = $f['diseno'] === 'vertical';
         $this->conSaldos = !$f['solo_movimientos'];
         $this->negrita = (new Style())->setFontBold();
@@ -168,6 +172,9 @@ class SihosAuxiliarExcel
             $this->filasHoja = 1;
         }
         $this->writer->addRow(Row::fromValuesWithStyles($valores, $this->estiloFila[$tipo], $this->estilos[$tipo]));
+        if ($this->alEscribir !== null && $tipo !== 'total' && $tipo !== 'tercero') {
+            ($this->alEscribir)($tipo, $valores);
+        }
         $this->filasHoja++;
     }
 }

@@ -21,9 +21,10 @@ class SihosAuxiliarService
     /**
      * @param array<string,mixed> $entrada filtros (ver SihosAuxiliarFiltros::validar)
      * @param callable(string,int):void|null $progreso fase y filas escritas
+     * @param string|null $rutaFilas en diseño horizontal, copia de las filas para la tabla en pantalla (SihosAuxiliarTabla)
      * @return array<string,mixed>
      */
-    public function generar(int $empresaId, array $entrada, string $rutaXlsx, ?callable $progreso = null): array
+    public function generar(int $empresaId, array $entrada, string $rutaXlsx, ?callable $progreso = null, ?string $rutaFilas = null): array
     {
         $v = SihosAuxiliarFiltros::validar($entrada);
         if (!$v['ok']) {
@@ -68,11 +69,15 @@ class SihosAuxiliarService
 
         $nombreContab = SihosAuxiliarFiltros::CONTABILIDADES[$f['contabilidad']];
         $inst = $cat->institucion();
+        $fhFilas = $rutaFilas !== null && $f['diseno'] === 'horizontal' ? gzopen($rutaFilas, 'wb6') : null;
+        $espejo = $fhFilas ? static function (string $tipo, array $valores) use ($fhFilas): void {
+            gzwrite($fhFilas, SihosAuxiliarTabla::linea($tipo, $valores));
+        } : null;
         $excel = new SihosAuxiliarExcel($rutaXlsx, $f, [
             SihosExcelTexto::limpiar($inst['nombre']), 'NIT: ' . $inst['nit'], 'INFORME AUXILIAR',
             'Desde: ' . self::fechaLarga($f['desde']) . ' - Hasta: ' . self::fechaLarga($f['hasta']),
             $nombreContab . ' · ' . SihosAuxiliarFiltros::describir($f),
-        ]);
+        ], $espejo);
 
         $resumen = [];
         $tot = [0.0, 0.0, 0.0, 0.0];
@@ -131,10 +136,13 @@ class SihosAuxiliarService
         }
         $excel->total($tot[0], $tot[1], $tot[2], $tot[3]);
         $hojas = $excel->cerrar();
+        if ($fhFilas) {
+            gzclose($fhFilas);
+        }
 
         return [
             'ok' => true, 'contabilidad' => $nombreContab, 'desde' => $f['desde'], 'hasta' => $f['hasta'],
-            'filtros' => SihosAuxiliarFiltros::describir($f), 'conSaldos' => !$f['solo_movimientos'],
+            'filtros' => SihosAuxiliarFiltros::describir($f), 'conSaldos' => !$f['solo_movimientos'], 'diseno' => $f['diseno'],
             'cuentas' => $resumen, 'totales' => array_map(static fn (float $x): float => round($x, 2), $tot), 'lineas' => $lineas, 'hojas' => $hojas,
         ];
     }
