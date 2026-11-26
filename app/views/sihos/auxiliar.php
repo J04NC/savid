@@ -99,19 +99,27 @@ $listas = ['sede', 'centro', 'recurso', 'documento'];
                 <strong><?= count($reporte['cuentas']) ?></strong> cuenta(s)<?= $reporte['lineas'] > 0 ? ', ' . number_format((int)$reporte['lineas'], 0, ',', '.') . ' movimiento(s) en el detalle' : '' ?><?= $reporte['hojas'] > 1 ? ' (el Excel trae ' . (int)$reporte['hojas'] . ' hojas)' : '' ?>.
                 <a class="auditoria-btn-primary" href="?url=sihos/auxiliarDescargar&empresa_id=<?= (int)$empresaId ?>&job=<?= rawurlencode($tokenJob) ?>">⬇ Descargar Excel</a>
             </p>
-            <?php if ($reporte['cuentas'] !== []): ?>
-                <table class="seguridad-table" data-dt-page-length="50" data-dt-scroll-wrap-class="sihos-auditoria-glosa-scroll" data-dt-order="[[0,&quot;asc&quot;]]">
-                    <thead><tr><th>Código</th><th>Nombre</th><?php if ($conSaldos): ?><th>Saldo anterior</th><?php endif; ?><th>Débito</th><th>Crédito</th><?php if ($conSaldos): ?><th>Nuevo saldo</th><?php endif; ?></tr></thead>
-                    <tbody>
-                        <?php foreach ($reporte['cuentas'] as [$cod, $nombre, $ant, $db, $cr, $nue]): ?>
-                            <tr><td><?= $h($cod) ?></td><td><?= $h($nombre) ?></td>
-                                <?php foreach ($conSaldos ? [$ant, $db, $cr, $nue] : [$db, $cr] as $v): ?><td style="text-align:right;" data-order="<?= $h($v) ?>"><?= $mon((float)$v) ?></td><?php endforeach; ?></tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                    <tfoot><tr><th></th><th>TOTAL</th><?php foreach ($conSaldos ? $t : [$t[1], $t[2]] as $v): ?><th style="text-align:right;"><?= $mon((float)$v) ?></th><?php endforeach; ?></tr></tfoot>
+            <?php $etiquetas = $conSaldos ? ['Saldo anterior', 'Débito', 'Crédito', 'Nuevo saldo'] : ['Débito', 'Crédito']; $valoresTot = $conSaldos ? $t : [$t[1], $t[2]]; ?>
+            <p class="sihos-aux-totales"><strong>Totales:</strong>
+                <?php foreach ($etiquetas as $i => $et): ?><span><?= $h($et) ?> <strong>$<?= $mon((float)$valoresTot[$i]) ?></strong></span><?php endforeach; ?>
+            </p>
+            <?php if ($reporte['cuentas'] === []): ?>
+                <p class="field-note">No hay movimientos con esos filtros.</p>
+            <?php elseif (($reporte['diseno'] ?? 'vertical') === 'horizontal'): $cols = SihosAuxiliarTabla::encabezado($conSaldos); ?>
+                <p class="auditoria-hint">Misma tabla del Excel horizontal, en el orden del informe. Nombre, tercero y concepto se cortan con «…» (pase el mouse para ver el texto); el Excel los trae completos. Filtro de columna: «contiene», o «=valor» para exacto.</p>
+                <table class="seguridad-table savid-dt-fit" id="sihosAuxTabla"
+                       data-dt-server="1"
+                       data-dt-server-url="?url=sihos/auxiliarDatos&empresa_id=<?= (int)$empresaId ?>&job=<?= $h(rawurlencode($tokenJob)) ?>"
+                       data-dt-column-search="1"
+                       data-dt-page-length="50"
+                       data-dt-buttons="false"
+                       data-dt-order="[]"
+                       data-dt-scroll-wrap-class="sihos-auditoria-glosa-scroll">
+                    <thead><tr><?php foreach ($cols as $c): ?><th class="no-dt-order"><?= $h($c) ?></th><?php endforeach; ?></tr></thead>
+                    <tbody></tbody>
                 </table>
             <?php else: ?>
-                <p class="field-note">No hay movimientos con esos filtros.</p>
+                <p class="auditoria-hint">El diseño vertical (cuenta, tercero y detalle de cada documento) se consulta en el Excel. Para verlo como tabla en pantalla, genere el informe en diseño horizontal.</p>
             <?php endif; ?>
         <?php endif; ?>
 
@@ -130,6 +138,11 @@ $listas = ['sede', 'centro', 'recurso', 'documento'];
 .sihos-aux-filtro > *{min-width:0}
 .sihos-aux-filtro label{display:block}
 .sihos-aux-sep{margin-left:12px;font-weight:600}
+.sihos-aux-totales{display:flex;flex-wrap:wrap;gap:6px 22px;margin:8px 0 14px}
+/* Texto largo cortado con "…" en una línea; el completo va en el title (como td.savid-dt-fit-text). */
+.sihos-aux-corto{display:inline-block;max-width:20rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
+.sihos-aux-num{display:block;text-align:right;white-space:nowrap}
+.sihos-aux-anulado{color:#c0392b;font-weight:600}
 @media (max-width:720px){.sihos-aux-filtro{grid-template-columns:1fr 1fr}}
 </style>
 
